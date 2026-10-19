@@ -5,6 +5,8 @@
   "description": "Browser poker with bot opponents: Hold'em, Omaha, Draw, Stud and more.",
   "type": "module",
   "scripts": {
+    "start": "node scripts/build.mjs --open",
+    "prestart": "npm install --no-audit --no-fund --loglevel=error",
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --serve",
     "typecheck": "tsc --noEmit",

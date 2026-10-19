@@ -1,8 +1,9 @@
 // Builds the browser game into dist/ (dist/index.html is fully self-contained),
-// serves it for development with --serve, or runs the test suite with --test.
+// opens the built game in the default browser with --open, serves it for development
+// with --serve, or runs the test suite with --test.
 import * as esbuild from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,4 +61,15 @@ if (args.includes('--test')) {
   console.log(`Dev server on http://localhost:${port}`);
 } else {
   await buildOnce();
+  if (args.includes('--open')) openInBrowser(join(dist, 'index.html'));
+}
+
+function openInBrowser(file) {
+  const [cmd, cmdArgs] = process.platform === 'darwin' ? ['open', [file]]
+    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', file]]
+      : ['xdg-open', [file]];
+  const child = spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore' });
+  child.on('error', () => console.log(`Open ${file} in your browser to play.`));
+  child.unref();
+  console.log('Opening Back Room Poker in your browser…');
 }
