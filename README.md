@@ -10,7 +10,9 @@ Short Deck, Five Card Draw, Seven Card Stud, Stud Hi-Lo and Razz.
 
 ## Play
 
-**In your browser, nothing to install:** https://claude.ai/artifact/YZLtoQAHrSgdDmg59Noiox
+**In your browser, nothing to install:** https://frigiduss.github.io/backroom-poker/
+(also at https://claude.ai/artifact/YZLtoQAHrSgdDmg59Noiox). Every push to `main` redeploys the
+GitHub Pages site.
 
 **From this folder:** double-click `play.bat` (Windows) or `play.command` (Mac/Linux),
 or run `npm start`. It installs what it needs the first time, builds the game and opens it
