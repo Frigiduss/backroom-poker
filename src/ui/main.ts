@@ -1,11 +1,11 @@
 import { Bot, STYLE_NAMES } from '../bots/bot';
 import { simulateEquity, specFromView } from '../bots/equity';
 import { buildView } from '../bots/view';
-import { createRng, shuffle } from '../engine/cards';
+import { createRng, makeCard, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
-import { cardHtml, esc, fmt, save, store } from './dom';
+import { cardHtml, chipsHtml, esc, fmt, save, store } from './dom';
 
 // ---------- settings ----------
 
@@ -71,72 +71,84 @@ function renderSetup() {
       .map(([val, label]) => `<button type="button" data-${name}="${val}" aria-pressed="${val === current}" ${disabled(val) ? 'disabled' : ''}>${label}</button>`)
       .join('')}</div>`;
 
+  const familyName = { flop: 'Community cards', draw: 'Draw', stud: 'Stud' } as const;
+  const minis = (n: number) => Array.from({ length: n }, (_, i) => `<span style="--k:${i - (n - 1) / 2}"></span>`).join('');
+  const heroCards = [makeCard(14, 3), makeCard(13, 2), makeCard(12, 0), makeCard(11, 1), makeCard(10, 3)];
+  const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
+
   app.innerHTML = `
-  <main class="setup">
-    <header class="brand">
-      <h1>Back Room Poker <span class="pip">♥</span></h1>
-      <p>Pick a game, choose your opponents, and take a seat. Bots range from first-timers to sharks that read your betting.</p>
+  <main class="lobby">
+    <header class="hero">
+      <div class="hero-text">
+        <span class="eyebrow">Card room · open all night</span>
+        <h1>Back Room <em>Poker</em></h1>
+        <p>Pick a game, choose your opponents, and take a seat. Bots range from first-timers to sharks that read your betting.</p>
+      </div>
+      <div class="hero-fan" aria-hidden="true">${heroCards.map((c, i) => cardHtml(c, '').replace('class="card', `style="--k:${i - 2}" class="card`)).join('')}</div>
     </header>
-    <section>
-      <h2 class="section-label">Game</h2>
+
+    <section class="panel">
+      <h2 class="step"><span>1</span>Choose a game</h2>
       <div class="games">
         ${VARIANT_ORDER.map((id) => {
           const g = VARIANTS[id];
           return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${id === setup.variant}">
+            <span class="minis" aria-hidden="true">${minis(g.holeCards)}</span>
             <span class="name">${g.name}</span>
             <span class="blurb">${g.blurb}</span>
-            <span class="meta">${g.structures.map((s) => STRUCTURE_NAMES[s]).join(' · ')} · up to ${g.maxPlayers} players</span>
+            <span class="meta"><span>${familyName[g.family]}</span><span>${g.structures.map((st) => st).join(' · ')}</span><span>${g.maxPlayers} max</span></span>
           </button>`;
         }).join('')}
       </div>
     </section>
-    <section class="options">
-      <div class="field">
-        <span class="flabel">Betting</span>
-        ${seg('structure', (['NL', 'PL', 'FL'] as Structure[]).map((s) => [s, STRUCTURE_NAMES[s]]), struct, (s) => !v.structures.includes(s))}
-      </div>
-      <div class="field">
-        <span class="flabel">Format</span>
-        ${seg('format', (Object.keys(FORMAT_NAMES) as Format[]).map((f) => [f, FORMAT_NAMES[f]]), setup.format)}
-        <span class="hint">${
-          setup.format === 'cash'
-            ? 'Blinds stay put. Bots who go broke buy back in, and so can you.'
-            : setup.format === 'sng'
-              ? 'Everyone starts equal, blinds rise, last player with chips wins.'
-              : 'One opponent, rising blinds, play until someone has every chip.'
-        }</span>
-      </div>
-      <div class="field">
-        <label for="opp">Opponents</label>
-        <div class="range-row">
-          <input id="opp" type="range" min="1" max="${maxOpp}" value="${setup.opponents}" ${setup.format === 'headsup' ? 'disabled' : ''}>
-          <output id="opp-out">${setup.opponents}</output>
+
+    <section class="panel">
+      <h2 class="step"><span>2</span>Set the table</h2>
+      <div class="options">
+        <div class="field">
+          <span class="flabel">Format</span>
+          ${seg('format', (Object.keys(FORMAT_NAMES) as Format[]).map((f) => [f, FORMAT_NAMES[f].replace(' tournament', '')]), setup.format)}
+          <span class="hint">${
+            setup.format === 'cash'
+              ? 'Blinds stay put. Bots who go broke buy back in, and so can you.'
+              : setup.format === 'sng'
+                ? 'Everyone starts equal, blinds rise, last player with chips wins.'
+                : 'One opponent, rising blinds, play until someone has every chip.'
+          }</span>
+        </div>
+        <div class="field">
+          <span class="flabel">Bot difficulty</span>
+          ${seg('difficulty', [...DIFFICULTIES.map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty)}
+          <span class="hint">${difficultyHint(setup.difficulty)}</span>
+        </div>
+        <div class="field">
+          <label for="opp">Opponents <output id="opp-out">${setup.opponents}</output></label>
+          <input id="opp" class="slider" type="range" min="1" max="${maxOpp}" value="${setup.opponents}" ${setup.format === 'headsup' ? 'disabled' : ''}>
+          <span class="hint">${setup.format === 'headsup' ? 'Heads-up is always one on one.' : `${v.name} seats up to ${v.maxPlayers}.`}</span>
+        </div>
+        <div class="field">
+          <span class="flabel">Betting</span>
+          ${seg('structure', (['NL', 'PL', 'FL'] as Structure[]).map((st) => [st, STRUCTURE_NAMES[st]]), struct, (st) => !v.structures.includes(st))}
+        </div>
+        <div class="field">
+          <span class="flabel">Starting stack</span>
+          ${seg('stack', [['50', '50 BB'], ['100', '100 BB'], ['200', '200 BB']], String(setup.stackBB) as '50' | '100' | '200')}
+        </div>
+        <div class="field">
+          <span class="flabel">Blind levels</span>
+          ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed, () => setup.format === 'cash')}
+          <span class="hint">${setup.format === 'cash' ? 'Only used in tournaments.' : `Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.`}</span>
+        </div>
+        <div class="field">
+          <label for="pname">Your name</label>
+          <input id="pname" class="text-input" maxlength="14" value="${esc(setup.name)}" autocomplete="off">
         </div>
       </div>
-      <div class="field">
-        <span class="flabel">Bot difficulty</span>
-        ${seg('difficulty', [...DIFFICULTIES.map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty)}
-        <span class="hint">${difficultyHint(setup.difficulty)}</span>
-      </div>
-      <div class="field">
-        <span class="flabel">Starting stack</span>
-        ${seg('stack', [['50', '50 big blinds'], ['100', '100 big blinds'], ['200', '200 big blinds']], String(setup.stackBB) as '50' | '100' | '200')}
-      </div>
-      <div class="field">
-        <span class="flabel">Blind levels</span>
-        ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed, () => setup.format === 'cash')}
-        <span class="hint">${setup.format === 'cash' ? 'Only used in tournaments.' : `Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.`}</span>
-      </div>
-      <div class="field">
-        <label for="pname">Your name</label>
-        <input id="pname" class="text-input" maxlength="14" value="${esc(setup.name)}" autocomplete="off">
-      </div>
     </section>
-    <div class="cta-row">
-      <button type="button" class="btn btn-primary" id="deal">Deal me in</button>
-      <span class="summary-line">${STRUCTURE_NAMES[struct]} ${v.name}, ${FORMAT_NAMES[setup.format].toLowerCase()}, you against ${setup.opponents} ${
-        setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase()
-      } bot${setup.opponents > 1 ? 's' : ''}.</span>
+
+    <div class="cta-bar">
+      <div class="summary-line"><b>${STRUCTURE_NAMES[struct]} ${v.name}</b><span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span></div>
+      <button type="button" class="btn btn-primary btn-lg" id="deal">Deal me in</button>
     </div>
   </main>`;
 
@@ -199,7 +211,7 @@ class Game {
   private seenCards = new Set<string>();
   private modal: 'none' | 'settings' | 'leave' | 'busted' | 'over' = 'none';
   private spectating = false;
-  private logOpen = false;
+  private logOpen = window.matchMedia('(min-width: 1280px)').matches;
   private oddsKey = '';
   private oddsValue: number | null = null;
   private stopped = false;
@@ -350,20 +362,24 @@ class Game {
       return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 30;
     })();
 
+    const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
     app.innerHTML = `
-    <div class="game ${prefs.fourColor ? 'four-color' : ''}">
+    <div class="game ${prefs.fourColor ? 'four-color' : ''} ${this.logOpen ? 'log-open' : ''}">
       <header class="topbar">
-        <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
-        <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}</span>
-        <span class="spacer"></span>
-        <button type="button" class="icon-btn log-toggle" id="log-toggle">${this.logOpen ? 'Hide log' : 'Hand log'}</button>
-        <button type="button" class="icon-btn" id="open-settings">Settings</button>
-        <button type="button" class="icon-btn" id="leave">Leave table</button>
+        <div class="tb-game">
+          <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
+          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}</span>
+        </div>
+        <div class="tb-actions">
+          <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
+          <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
+          <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
+        </div>
       </header>
       <div class="table-wrap">${this.tableHtml()}</div>
       <div class="actionbar">${this.actionsHtml()}</div>
-      <aside class="log ${this.logOpen ? '' : 'collapsed'}">
-        <h2>Hand log</h2>
+      <aside class="log" aria-label="Hand log">
+        <h2>Hand log <button type="button" class="icon-btn close-log" id="log-close" aria-label="Close log">✕</button></h2>
         <ol>${this.log.map((l) => `<li class="k-${l.kind}${l.me ? ' me' : ''}">${esc(l.text)}</li>`).join('')}</ol>
       </aside>
     </div>
@@ -376,12 +392,13 @@ class Game {
 
   private seatLayout(): { x: number; y: number }[] {
     const n = this.table.seats.length;
-    const narrow = window.matchMedia('(max-width: 640px)').matches;
-    const rx = narrow ? 40 : 43;
-    const ry = narrow ? 43 : 41;
+    const narrow = window.matchMedia('(max-width: 720px)').matches;
+    const rx = narrow ? 40 : 44;
+    const ry = narrow ? 40 : 37;
     return this.table.seats.map((_, i) => {
       const a = Math.PI / 2 + (i * 2 * Math.PI) / n;
-      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) };
+      // The player's own seat sits a little higher so their bigger cards stay on the table.
+      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) - (i === 0 ? 6 : 0) };
     });
   }
 
@@ -411,6 +428,7 @@ class Game {
       if (hi >= 0 && hand.toAct === hi && !hand.isComplete) classes.push('acting');
       if (res && hi >= 0 && winners.has(hi)) classes.push('winner');
       if (hp && hp.cards.length > 4) classes.push('many');
+      if (hp && !isMe && hp.status !== 'folded' && (hp.shown || prefs.reveal)) classes.push('showing');
 
       let cards = '';
       if (hp && (hp.status !== 'folded' || isMe)) {
@@ -429,7 +447,7 @@ class Game {
             if (pickable) cls.push('pickable');
             if (pickable && this.selected.has(k)) cls.push('selected');
             const attr = pickable ? ` data-pick="${k}" role="button" tabindex="0"` : '';
-            return cardHtml(visible ? c : null, cls.join(' ')).replace('<div ', `<div${attr} `);
+            return cardHtml(visible ? c : null, cls.join(' ')).replace('<div ', `<div style="--k:${k - (hp.cards.length - 1) / 2}"${attr} `);
           })
           .join('');
       }
@@ -437,24 +455,28 @@ class Game {
       const stack = hp ? hp.stack : seat.stack;
       let bubble = '';
       if (!hp) bubble = `<span class="bubble">${t.isTournament ? (seat.place ? `Out · ${ordinal(seat.place)}` : 'Out') : 'Broke'}</span>`;
+      else if (res && winners.has(hi)) bubble = `<span class="bubble won">+${fmt(res.won[hi])}</span>`;
       else if (res?.showdown && res.handNames[hi]) bubble = `<span class="bubble handname">${esc(res.handNames[hi]!)}</span>`;
       else if (hp.status === 'allin') bubble = `<span class="bubble allin">All-in</span>`;
-      else if (hp.lastAction) bubble = `<span class="bubble">${esc(hp.lastAction)}</span>`;
-      const won = res && hi >= 0 && winners.has(hi) ? `<span class="bubble" style="color:var(--good)">+${fmt(res.won[hi])}</span>` : '';
+      else if (hp.lastAction) bubble = `<span class="bubble a-${hp.lastAction.split(' ')[0].toLowerCase()}">${esc(hp.lastAction)}</span>`;
+      const handName = res && winners.has(hi) && res.showdown && res.handNames[hi] ? `<span class="bubble handname">${esc(res.handNames[hi]!)}</span>` : '';
+      const level = isMe ? 'human' : seat.difficulty!;
 
       parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
         <div class="cards">${cards}</div>
-        <div class="plate">
-          <span class="avatar" style="background:${AVATAR[isMe ? 'human' : seat.difficulty!]}">${esc(seat.name.slice(0, 2).toUpperCase())}</span>
-          <span class="who"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span><span class="tag">${tag}</span></span>
+        <div class="pod" title="${esc(seat.name)} · ${tag}">
+          <span class="avatar lv-${level}">${esc(seat.name.slice(0, 1).toUpperCase())}</span>
+          <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
+          ${isMe ? '' : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>
-        ${bubble}${won}
+        <div class="bubbles">${handName}${bubble}</div>
       </div>`);
 
       if (hp && hp.streetBet > 0 && !hand.isComplete && hand.phase !== 'draw') {
-        const bx = cx + (p.x - cx) * 0.55;
-        const by = cy + (p.y - cy) * 0.52;
-        parts.push(`<div class="bet" style="left:${bx}%;top:${by}%"><span class="chip"></span>${fmt(hp.streetBet)}</div>`);
+        // The player's chips go beside their cards rather than on top of them.
+        const bx = isMe ? p.x + 13 : cx + (p.x - cx) * 0.55;
+        const by = isMe ? p.y - 6 : cy + (p.y - cy) * 0.52;
+        parts.push(`<div class="bet" style="left:${bx}%;top:${by}%">${chipsHtml(hp.streetBet)}<span>${fmt(hp.streetBet)}</span></div>`);
       }
       if (hi === hand.button && hand.variant.family !== 'stud') {
         const ang = Math.atan2(p.y - cy, p.x - cx) + 0.32;
@@ -474,20 +496,12 @@ class Game {
     }).join('');
     if (this.seenCards.size > 4000) this.seenCards.clear();
 
-    const potLabel = hand.isComplete ? '' : `<div class="pot">Pot <b>${fmt(hand.pot)}</b></div>`;
-    let result = '';
-    if (res && this.modal === 'none') {
-      const auto = prefs.autoDeal || this.spectating;
-      result = `<div class="result" role="status">
-        <div class="lines">${res.summary.map((l) => `<div>${esc(this.speak(l))}</div>`).join('')}</div>
-        <div class="actions">${auto ? '<span class="chip-info">Next hand coming up</span>' : '<button type="button" class="btn btn-primary" id="next-hand">Next hand <kbd>Space</kbd></button>'}</div>
-      </div>`;
-    }
+    const potLabel = hand.isComplete || hand.pot === 0 ? '<div class="pot empty"></div>' : `<div class="pot">${chipsHtml(hand.pot, 7)}<span>Pot <b>${fmt(hand.pot)}</b></span></div>`;
+    const result = res ? `<div class="result" role="status">${esc(this.speak(res.summary[0] ?? ''))}</div>` : '';
     return `<div class="table">
-      <div class="felt"><span class="felt-mark">${esc(hand.variant.name)}</span></div>
-      <div class="center"><div class="board">${board}</div>${potLabel}</div>
+      <div class="rail"><div class="felt"></div></div>
+      <div class="center"><div class="board">${board}</div>${result || potLabel}</div>
       ${parts.join('')}
-      ${result}
     </div>`;
   }
 
@@ -510,7 +524,8 @@ class Game {
         this.oddsValue = simulateEquity(specFromView(view, opts), { iterations: 1500, rng: createRng(), timeBudgetMs: 60 });
       }
       if (this.oddsValue !== null) {
-        odds = `<span class="odds">Pot share vs. random hands: <b>${Math.round(this.oddsValue * 100)}%</b> against ${live - 1}</span>`;
+        const pct = Math.round(this.oddsValue * 100);
+        odds = `<span class="odds" title="Your share of the pot against random hands"><span class="meter"><i style="width:${pct}%"></i></span><span>Pot share <b>${pct}%</b> vs ${live - 1} random hand${live > 2 ? 's' : ''}</span></span>`;
       }
     }
     return `<div class="myhand"><span class="hn">${esc(name || ' ')}</span>${odds}</div>`;
@@ -520,7 +535,14 @@ class Game {
     const hand = this.hand!;
     const hi = this.humanIndex;
     const mine = this.myHandHtml();
-    if (hand.isComplete) return `${mine}<span class="status">${this.spectating ? 'Watching the bots finish the tournament.' : 'Hand over.'}</span>`;
+    if (hand.isComplete) {
+      const res = hand.result;
+      const auto = prefs.autoDeal || this.spectating;
+      const lines = (res?.summary ?? []).slice(1).map((l) => `<div>${esc(this.speak(l))}</div>`).join('');
+      const note = this.spectating ? 'Watching the bots finish the tournament.' : auto ? 'Next hand coming up…' : '';
+      return `${mine}<span class="status">${lines}${note ? `<div>${note}</div>` : ''}</span>${
+        auto || this.modal !== 'none' ? '' : '<div class="acts"><button type="button" class="act raise" id="next-hand">Next hand<kbd>Space</kbd></button></div>'}`;
+    }
     if (hi < 0 || hand.toAct !== hi) {
       const who = hand.toAct >= 0 ? hand.players[hand.toAct].name : '';
       const folded = hi >= 0 && hand.players[hi].status === 'folded';
@@ -643,10 +665,12 @@ class Game {
     };
     on('open-settings', () => this.openModal('settings'));
     on('leave', () => this.openModal('leave'));
-    on('log-toggle', () => {
+    const toggleLog = () => {
       this.logOpen = !this.logOpen;
       this.render();
-    });
+    };
+    on('log-toggle', toggleLog);
+    on('log-close', toggleLog);
     on('close-modal', () => this.closeModal());
     on('confirm-leave', () => renderSetup());
     on('again', () => {

@@ -10,7 +10,14 @@ Short Deck, Five Card Draw, Seven Card Stud, Stud Hi-Lo and Razz.
 
 ## Play
 
-Open `dist/index.html` in any browser. It is a single self-contained file, no server needed.
+**In your browser, nothing to install:** https://claude.ai/artifact/YZLtoQAHrSgdDmg59Noiox
+
+**From this folder:** double-click `play.bat` (Windows) or `play.command` (Mac/Linux),
+or run `npm start`. It installs what it needs the first time, builds the game and opens it
+in your browser. Needs [Node.js](https://nodejs.org).
+
+The built game is a single file, `dist/index.html`. Copy it anywhere and double-click it to
+play offline.
 
 Keys: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
 
@@ -19,6 +26,7 @@ Keys: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
 ```
 npm install
 npm run dev        # http://localhost:8000, rebuilds on save (restart to pick up CSS changes)
+npm start          # build and open the game in your browser
 npm run build      # writes dist/index.html
 npm test           # rules tests + thousands of bot-vs-bot hands in every game
 npm run typecheck

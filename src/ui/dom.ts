@@ -11,7 +11,28 @@ export function cardHtml(c: Card | null, cls = ''): string {
   const sym = SUIT_SYMBOLS[s];
   const red = s === 1 || s === 2 ? ' red' : '';
   const names = ['clubs', 'diamonds', 'hearts', 'spades'];
-  return `<div class="card ${SUIT_CHARS[s]}${red} ${cls}" aria-label="${rank} of ${names[s]}"><span class="r">${rank}</span><span class="s1">${sym}</span><span class="s2">${sym}</span></div>`;
+  const face = 'JQK'.includes(r) ? ' face' : '';
+  const corner = `<span class="rank">${rank}</span><span class="suit">${sym}</span>`;
+  return `<div class="card ${SUIT_CHARS[s]}${red}${face} ${cls}" aria-label="${rank} of ${names[s]}">`
+    + `<span class="corner tl">${corner}</span><span class="pip">${face ? r : sym}</span><span class="corner br">${corner}</span></div>`;
+}
+
+const CHIP_VALUES = [5000, 1000, 500, 100, 25, 5, 1];
+
+/** A small stack of casino chips whose colours follow the amount's denominations. */
+export function chipsHtml(amount: number, max = 5): string {
+  const chips: number[] = [];
+  let left = amount;
+  for (const v of CHIP_VALUES) {
+    while (left >= v && chips.length < max) {
+      chips.push(v);
+      left -= v;
+    }
+  }
+  if (!chips.length) chips.push(1);
+  return `<span class="chips" aria-hidden="true">${chips
+    .map((v, i) => `<span class="chip v${v}" style="--i:${i}"></span>`)
+    .join('')}</span>`;
 }
 
 export const fmt = (n: number): string => n.toLocaleString('en-US');
