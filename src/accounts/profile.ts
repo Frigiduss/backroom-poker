@@ -1,0 +1,264 @@
+// Player profiles: a name, a chip bank that carries between games, lifetime stats and saved
+// settings. Everything here is plain data and pure bookkeeping, so the same rules work with
+// browser storage today and an online backend later.
+
+export const STARTING_BANK = 10_000;
+/** A player whose bank (with nothing at a table) drops below this can refill it. */
+export const REFILL_BELOW = 1_000;
+/** Entry fee for Sit & Go and heads-up tournaments. Every seat pays it into the prize pool. */
+export const TOURNAMENT_FEE = 500;
+export const NAME_MAX = 14;
+
+export const PROFILE_COLORS = ['#e6b85c', '#7fd39b', '#6fb7ea', '#ef8f52', '#e95a78', '#b59cf0', '#5fd3c8', '#d9c46a'];
+
+export interface ProfileStats {
+  hands: number;
+  handsWon: number;
+  showdownsWon: number;
+  /** Largest single pot collected, in chips. */
+  biggestPot: number;
+  /** Chips won or lost across all cash games (cash-outs minus buy-ins). */
+  cashNet: number;
+  cashSessions: number;
+  tournaments: number;
+  tournamentWins: number;
+  /** Tournaments finished in a paid place. */
+  tournamentCashes: number;
+  bestFinish: number | null;
+  peakBank: number;
+  refills: number;
+  /** Hands played per variant id. */
+  byVariant: Record<string, number>;
+}
+
+/** Chips currently committed to a table. Kept on the profile so a closed tab never loses them. */
+export interface TableSession {
+  kind: 'cash' | 'tournament';
+  /** Total paid in: cash buy-ins and rebuys, or the tournament fee. */
+  paidIn: number;
+  /** Cash games: the player's stack after the last finished hand. */
+  stack: number;
+}
+
+export interface Profile {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: number;
+  updatedAt: number;
+  bank: number;
+  table: TableSession | null;
+  stats: ProfileStats;
+  /** UI settings (lobby choices, table preferences). Opaque to the account layer. */
+  settings: Record<string, unknown>;
+}
+
+export const emptyProfileStats = (bank = STARTING_BANK): ProfileStats => ({
+  hands: 0, handsWon: 0, showdownsWon: 0, biggestPot: 0, cashNet: 0, cashSessions: 0,
+  tournaments: 0, tournamentWins: 0, tournamentCashes: 0, bestFinish: null, peakBank: bank, refills: 0, byVariant: {},
+});
+
+export function cleanName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
+}
+
+export function newId(): string {
+  const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `pr_${rand}`;
+}
+
+export function createProfile(name: string, opts: { color?: string; settings?: Record<string, unknown>; now?: number } = {}): Profile {
+  const now = opts.now ?? Date.now();
+  return {
+    id: newId(),
+    name: cleanName(name) || 'Player',
+    color: opts.color ?? PROFILE_COLORS[Math.floor(Math.random() * PROFILE_COLORS.length)],
+    createdAt: now,
+    updatedAt: now,
+    bank: STARTING_BANK,
+    table: null,
+    stats: emptyProfileStats(),
+    settings: opts.settings ?? {},
+  };
+}
+
+const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
+
+/** Fills in anything missing from stored or imported data, so older saves keep loading. */
+export function normalizeProfile(raw: unknown): Profile | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<Profile>;
+  if (typeof r.id !== 'string' || typeof r.name !== 'string') return null;
+  const base = emptyProfileStats();
+  const s = (r.stats ?? {}) as Partial<ProfileStats>;
+  const stats: ProfileStats = { ...base };
+  for (const k of Object.keys(base) as (keyof ProfileStats)[]) {
+    if (k === 'byVariant' || k === 'bestFinish') continue;
+    (stats[k] as number) = num(s[k], base[k] as number);
+  }
+  stats.bestFinish = typeof s.bestFinish === 'number' ? s.bestFinish : null;
+  stats.byVariant = {};
+  for (const [k, v] of Object.entries(s.byVariant ?? {})) if (typeof v === 'number') stats.byVariant[k] = v;
+  const t = r.table;
+  const table: TableSession | null = t && (t.kind === 'cash' || t.kind === 'tournament')
+    ? { kind: t.kind, paidIn: num(t.paidIn, 0), stack: num(t.stack, 0) }
+    : null;
+  return {
+    id: r.id,
+    name: cleanName(r.name) || 'Player',
+    color: typeof r.color === 'string' ? r.color : PROFILE_COLORS[0],
+    createdAt: num(r.createdAt, Date.now()),
+    updatedAt: num(r.updatedAt, Date.now()),
+    bank: Math.max(0, Math.floor(num(r.bank, STARTING_BANK))),
+    table,
+    stats,
+    settings: r.settings && typeof r.settings === 'object' ? { ...r.settings } : {},
+  };
+}
+
+// ---------- bank ----------
+
+function touch(p: Profile) {
+  p.updatedAt = Date.now();
+  p.stats.peakBank = Math.max(p.stats.peakBank, p.bank);
+}
+
+export const canAfford = (p: Profile, amount: number): boolean => p.bank >= amount;
+
+/** Takes a cash-game buy-in (or rebuy) from the bank. Returns false if the bank can't cover it. */
+export function buyIn(p: Profile, amount: number): boolean {
+  if (p.bank < amount) return false;
+  p.bank -= amount;
+  if (p.table?.kind === 'cash') {
+    p.table.paidIn += amount;
+    p.table.stack += amount;
+  } else {
+    p.table = { kind: 'cash', paidIn: amount, stack: amount };
+    p.stats.cashSessions++;
+  }
+  touch(p);
+  return true;
+}
+
+/** Remembers the player's cash-game stack after a hand, so it can be returned if the tab closes. */
+export function setTableStack(p: Profile, stack: number): void {
+  if (p.table?.kind !== 'cash') return;
+  p.table.stack = stack;
+  touch(p);
+}
+
+/** Leaves a cash game: the stack goes back to the bank. Returns the session's profit or loss. */
+export function cashOut(p: Profile, stack = p.table?.stack ?? 0): number {
+  if (p.table?.kind !== 'cash') return 0;
+  const net = stack - p.table.paidIn;
+  p.bank += stack;
+  p.stats.cashNet += net;
+  p.table = null;
+  touch(p);
+  return net;
+}
+
+/** Share of the prize pool for each paid place. */
+export function payoutShares(field: number): number[] {
+  if (field <= 3) return [1];
+  if (field <= 6) return [0.7, 0.3];
+  return [0.5, 0.3, 0.2];
+}
+
+export function prizeFor(place: number, field: number, fee = TOURNAMENT_FEE): number {
+  const share = payoutShares(field)[place - 1] ?? 0;
+  return Math.round(share * field * fee);
+}
+
+export function enterTournament(p: Profile, fee = TOURNAMENT_FEE): boolean {
+  if (p.bank < fee) return false;
+  p.bank -= fee;
+  p.table = { kind: 'tournament', paidIn: fee, stack: 0 };
+  p.stats.tournaments++;
+  touch(p);
+  return true;
+}
+
+/** Records a finished tournament and pays any prize into the bank. Returns the prize. */
+export function finishTournament(p: Profile, place: number, field: number, fee = TOURNAMENT_FEE): number {
+  if (p.table?.kind !== 'tournament') return 0;
+  const prize = prizeFor(place, field, fee);
+  p.bank += prize;
+  if (place === 1) p.stats.tournamentWins++;
+  if (prize > 0) p.stats.tournamentCashes++;
+  p.stats.bestFinish = p.stats.bestFinish === null ? place : Math.min(p.stats.bestFinish, place);
+  p.table = null;
+  touch(p);
+  return prize;
+}
+
+/** Walking away from a tournament before it ends forfeits the fee. */
+export function abandonTournament(p: Profile): void {
+  if (p.table?.kind !== 'tournament') return;
+  p.table = null;
+  touch(p);
+}
+
+/** Settles a table left open by a closed tab: cash stacks go home, tournaments are forfeited. */
+export function settleOpenTable(p: Profile): void {
+  if (p.table?.kind === 'cash') cashOut(p);
+  else if (p.table) abandonTournament(p);
+}
+
+export const canRefill = (p: Profile): boolean => !p.table && p.bank < REFILL_BELOW;
+
+/** Tops a nearly empty bank back up to the starting amount. */
+export function refill(p: Profile): boolean {
+  if (!canRefill(p)) return false;
+  p.bank = STARTING_BANK;
+  p.stats.refills++;
+  touch(p);
+  return true;
+}
+
+// ---------- stats ----------
+
+export interface HandOutcome {
+  variant: string;
+  /** Stack after the hand minus stack before it. */
+  net: number;
+  /** Chips collected from the pot (0 if none). */
+  collected: number;
+  showdownWin: boolean;
+}
+
+export function recordHand(p: Profile, h: HandOutcome): void {
+  const s = p.stats;
+  s.hands++;
+  s.byVariant[h.variant] = (s.byVariant[h.variant] ?? 0) + 1;
+  if (h.net > 0) {
+    s.handsWon++;
+    s.biggestPot = Math.max(s.biggestPot, h.collected);
+  }
+  if (h.showdownWin) s.showdownsWon++;
+  touch(p);
+}
+
+// ---------- backup ----------
+
+const EXPORT_FORMAT = 'backroom-poker-profile';
+
+export function exportProfile(p: Profile): string {
+  return JSON.stringify({ format: EXPORT_FORMAT, version: 1, profile: p }, null, 2);
+}
+
+/** Reads a profile backup. The copy gets a fresh id so it never overwrites an existing profile. */
+export function importProfile(text: string): Profile {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("That file isn't a Back Room Poker profile.");
+  }
+  const d = data as { format?: string; profile?: unknown };
+  const p = d && d.format === EXPORT_FORMAT ? normalizeProfile(d.profile) : null;
+  if (!p) throw new Error("That file isn't a Back Room Poker profile.");
+  p.id = newId();
+  settleOpenTable(p);
+  return p;
+}

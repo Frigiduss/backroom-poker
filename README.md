@@ -23,6 +23,20 @@ play offline.
 
 Keys: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
 
+## Players and chip bank
+
+On first visit the game asks who's playing. Each player has a chip bank (10,000 to start)
+that carries between games, lifetime stats, and their own lobby choices and table settings.
+
+- **Cash games** take the buy-in (and any rebuys) from the bank; leaving the table puts
+  your stack back. Closing the tab mid-game returns your stack as of the last finished hand.
+- **Sit & Go and heads-up** cost a 500-chip entry. Every seat pays in, and the pool goes to
+  the top finisher (2–3 players), the top two (4–6), or the top three (7+). Leaving early
+  forfeits the entry.
+- A bank under 1,000 can be refilled to 10,000.
+- Several players can share a device; switch from the profile page. Players are stored in
+  the browser, so use **Download backup** / **Import a backup** to move one between devices.
+
 ## Develop
 
 ```
@@ -44,6 +58,9 @@ npm run typecheck
   Decisions use Monte Carlo equity, pot odds, position, starting-hand charts, and at
   Hard/Expert, opponent ranges from their betting; Expert also adapts to each
   player's observed tendencies.
+- `src/accounts/` – player profiles: chip bank rules, stats, backups, and the
+  `AccountStore` interface. `LocalAccountStore` keeps profiles in browser storage; an
+  online store (sign-in plus a hosted database) can implement the same interface.
 - `src/ui/` – the browser front end (plain TypeScript + DOM).
 
 The engine and bots have no DOM dependencies, so they can be reused for other

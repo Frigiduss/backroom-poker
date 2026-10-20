@@ -5,7 +5,12 @@ import { createRng, makeCard, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
-import { cardHtml, chipsHtml, esc, fmt, save, store } from './dom';
+import {
+  LocalAccountStore, Profile, TOURNAMENT_FEE, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
+  finishTournament, prizeFor, recordHand, refill, setTableStack, settleOpenTable, abandonTournament,
+} from '../accounts';
+import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
+import { initAccounts, player, playerBadgeHtml, renderProfile, renderWelcome, savePlayer, selectPlayer } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 
 // ---------- settings ----------
@@ -35,14 +40,29 @@ interface Prefs {
   volume: number;
 }
 
-const SETUP_KEY = 'backroom-poker-setup';
-const PREFS_KEY = 'backroom-poker-prefs';
-let setup: Setup = store<Setup>(SETUP_KEY, {
+// Before player accounts, settings lived under these keys. They seed the first player.
+const LEGACY_SETUP_KEY = 'backroom-poker-setup';
+const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
+const DEFAULT_SETUP: Setup = {
   variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You',
-});
-let prefs: Prefs = store<Prefs>(PREFS_KEY, { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 });
-setVolume(prefs.volume, !prefs.sound);
-if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
+};
+const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 };
+let setup: Setup = { ...DEFAULT_SETUP };
+let prefs: Prefs = { ...DEFAULT_PREFS };
+
+/** Each player keeps their own lobby choices and table preferences. */
+function loadSettings(p: Profile) {
+  setup = { ...DEFAULT_SETUP, ...(p.settings.setup as Partial<Setup> | undefined), name: p.name };
+  prefs = { ...DEFAULT_PREFS, ...(p.settings.prefs as Partial<Prefs> | undefined) };
+  if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
+  setVolume(prefs.volume, !prefs.sound);
+}
+
+function saveSettings() {
+  const p = player();
+  p.settings = { ...p.settings, setup, prefs };
+  savePlayer();
+}
 
 const BIG_BLIND = 20;
 const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
@@ -65,6 +85,8 @@ const app = document.getElementById('app')!;
 function renderSetup() {
   game?.stop();
   game = null;
+  const me = player();
+  loadSettings(me);
   const v = VARIANTS[setup.variant];
   const maxOpp = v.maxPlayers - 1;
   if (setup.format === 'headsup') setup.opponents = 1;
@@ -79,9 +101,16 @@ function renderSetup() {
   const minis = (n: number) => Array.from({ length: n }, (_, i) => `<span style="--k:${i - (n - 1) / 2}"></span>`).join('');
   const heroCards = [makeCard(14, 3), makeCard(13, 2), makeCard(12, 0), makeCard(11, 1), makeCard(10, 3)];
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
+  const cost = entryCost(setup);
+  const affordable = canAfford(me, cost);
+  const field = (setup.format === 'headsup' ? 1 : setup.opponents) + 1;
+  const costLine = setup.format === 'cash'
+    ? `Buy-in <b>${fmt(cost)}</b> from your bank of ${fmt(me.bank)}`
+    : `Entry <b>${fmt(cost)}</b> · first place wins ${fmt(prizeFor(1, field))}`;
 
   app.innerHTML = `
   <main class="lobby">
+    <div class="lobby-top">${playerBadgeHtml()}</div>
     <header class="hero">
       <div class="hero-text">
         <span class="eyebrow">Card room · open all night</span>
@@ -143,22 +172,22 @@ function renderSetup() {
           ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed, () => setup.format === 'cash')}
           <span class="hint">${setup.format === 'cash' ? 'Only used in tournaments.' : `Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.`}</span>
         </div>
-        <div class="field">
-          <label for="pname">Your name</label>
-          <input id="pname" class="text-input" maxlength="14" value="${esc(setup.name)}" autocomplete="off">
-        </div>
       </div>
     </section>
 
     <div class="cta-bar">
-      <div class="summary-line"><b>${STRUCTURE_NAMES[struct]} ${v.name}</b><span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span></div>
-      <button type="button" class="btn btn-primary btn-lg" id="deal">Deal me in</button>
+      <div class="summary-line"><b>${STRUCTURE_NAMES[struct]} ${v.name}</b><span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
+        <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? costLine : `You need ${fmt(cost)} chips and your bank has ${fmt(me.bank)}.${setup.format === 'cash' && setup.stackBB > 50 && canAfford(me, 50 * BIG_BLIND) ? ' Try a smaller starting stack.' : ''}`}</span></div>
+      <div class="cta-buttons">
+        ${!affordable && canRefill(me) ? '<button type="button" class="btn btn-lg" id="refill">Refill bank</button>' : ''}
+        <button type="button" class="btn btn-primary btn-lg" id="deal" ${affordable ? '' : 'disabled'}>Deal me in</button>
+      </div>
     </div>
   </main>`;
 
   const update = (fn: () => void) => {
     fn();
-    save(SETUP_KEY, setup);
+    saveSettings();
     renderSetup();
   };
   app.querySelectorAll<HTMLButtonElement>('[data-variant]').forEach((b) => (b.onclick = () => update(() => (setup.variant = b.dataset.variant as VariantId))));
@@ -174,17 +203,24 @@ function renderSetup() {
   const opp = document.getElementById('opp') as HTMLInputElement;
   opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
   opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
-  const nameInput = document.getElementById('pname') as HTMLInputElement;
-  nameInput.oninput = () => {
-    setup.name = nameInput.value;
-    save(SETUP_KEY, setup);
+  document.getElementById('open-profile')!.onclick = () => renderProfile(app, renderSetup);
+  const refillBtn = document.getElementById('refill');
+  if (refillBtn) refillBtn.onclick = () => {
+    refill(me);
+    savePlayer();
+    renderSetup();
   };
   document.getElementById('deal')!.onclick = () => {
-    setup.name = nameInput.value.trim() || 'You';
-    save(SETUP_KEY, setup);
-    game = new Game(setup);
-    game.start();
+    saveSettings();
+    const next = new Game(setup);
+    if (!next.start()) return renderSetup();
+    game = next;
   };
+}
+
+/** Chips a game takes from the bank: the cash buy-in, or the tournament entry fee. */
+function entryCost(s: Setup): number {
+  return s.format === 'cash' ? s.stackBB * BIG_BLIND : TOURNAMENT_FEE;
 }
 
 function difficultyHint(d: DifficultyChoice): string {
@@ -220,6 +256,11 @@ class Game {
   private oddsValue: number | null = null;
   private turnCue = '';
   private stopped = false;
+  /** The player whose bank pays for this game. */
+  private readonly profile = player();
+  private recorded: Hand | null = null;
+  /** Tournament prize paid into the bank, once the player's finishing place is known. */
+  private prize: number | null = null;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
 
   constructor(s: Setup) {
@@ -245,15 +286,49 @@ class Game {
     for (const seat of this.table.seats) if (!seat.isHuman) this.bots.set(seat.id, new Bot(seat.difficulty!, seat.style));
   }
 
-  start() {
+  /** Pays the buy-in or entry fee and deals the first hand. False if the bank can't cover it. */
+  start(): boolean {
+    const p = this.profile;
+    const paid = this.table.isTournament ? enterTournament(p) : buyIn(p, this.table.config.startingStack);
+    if (!paid) return false;
+    savePlayer();
     document.addEventListener('keydown', this.keyHandler);
     this.dealNext();
+    return true;
   }
 
+  /** Ends the game. Cash-game chips go back to the bank; an unfinished tournament is forfeited. */
   stop() {
+    if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.timer);
     document.removeEventListener('keydown', this.keyHandler);
+    if (this.table.isTournament) abandonTournament(this.profile);
+    else cashOut(this.profile, this.myStack());
+    savePlayer();
+  }
+
+  /** The player's chips right now. Leaving mid-hand gives up whatever is already in the pot. */
+  private myStack(): number {
+    const hand = this.hand;
+    const hi = this.humanIndex;
+    return hand && !hand.isComplete && hi >= 0 ? hand.players[hi].stack : this.humanSeat.stack;
+  }
+
+  /** Adds a finished hand to the player's record and keeps their bank in step with the table. */
+  private recordResult(hand: Hand) {
+    if (this.recorded === hand) return;
+    this.recorded = hand;
+    const p = this.profile;
+    const hi = this.humanIndex;
+    if (hi >= 0) {
+      const me = hand.players[hi];
+      const won = hand.result?.won[hi] ?? 0;
+      recordHand(p, { variant: this.setup.variant, net: me.stack - me.startStack, collected: won, showdownWin: !!hand.result?.showdown && me.shown && won > 0 });
+    }
+    if (!this.table.isTournament) setTableStack(p, this.humanSeat.stack);
+    else if (this.humanSeat.place && this.prize === null) this.prize = finishTournament(p, this.humanSeat.place, this.table.seats.length);
+    savePlayer();
   }
 
   private get hand(): Hand | null {
@@ -299,6 +374,7 @@ class Game {
 
     if (hand.isComplete) {
       this.table.finishHand();
+      this.recordResult(hand);
       const me = this.humanSeat;
       if (!this.spectating && me.busted) this.modal = this.table.isTournament ? 'over' : 'busted';
       else if (this.table.isOver) this.modal = 'over';
@@ -669,15 +745,19 @@ class Game {
     if (this.modal === 'leave') {
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>Leave the table?</h2>
-        <p>This game ends and you go back to the game menu.</p>
+        <p>${t.isTournament
+          ? (this.prize !== null ? 'You go back to the game menu.' : `You give up your ${fmt(TOURNAMENT_FEE)} entry fee and go back to the game menu.`)
+          : `Your ${fmt(this.myStack())} chips go back to your bank.${this.hand && !this.hand.isComplete && this.humanIndex >= 0 && this.hand.players[this.humanIndex].status !== 'folded' ? ' Chips already in this pot are lost.' : ''}`}</p>
         <div class="row"><button type="button" class="btn" id="close-modal">Keep playing</button><button type="button" class="btn btn-primary" id="confirm-leave">Leave</button></div>
       </div></div>`;
     }
     if (this.modal === 'busted') {
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>You're out of chips</h2>
-        <p>Buy back in for ${fmt(t.config.startingStack)} and keep playing, or head back to the menu.${this.humanSeat.rebuys ? ` You have bought in ${this.humanSeat.rebuys + 1} times.` : ''}</p>
-        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button><button type="button" class="btn btn-primary" id="rebuy">Buy back in</button></div>
+        ${canAfford(this.profile, t.config.startingStack)
+          ? `<p>Buy back in for ${fmt(t.config.startingStack)} from your bank of ${fmt(this.profile.bank)}, or head back to the menu.${this.humanSeat.rebuys ? ` You have bought in ${this.humanSeat.rebuys + 1} times.` : ''}</p>`
+          : `<p>Your bank has ${fmt(this.profile.bank)} chips, not enough to buy back in for ${fmt(t.config.startingStack)}.${canRefill(this.profile) ? ' You can refill it from the game menu.' : ' Try a table with a smaller starting stack.'}</p>`}
+        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button>${canAfford(this.profile, t.config.startingStack) ? '<button type="button" class="btn btn-primary" id="rebuy">Buy back in</button>' : ''}</div>
       </div></div>`;
     }
     if (this.modal === 'over') {
@@ -687,7 +767,7 @@ class Game {
       const title = me.place === 1 ? 'You won the tournament!' : me.place ? `You finished ${ordinal(me.place)}` : 'Tournament over';
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>${title}</h2>
-        <p>${done ? `${t.handNumber} hands played.` : `${t.liveSeats.length} players are still in.`}</p>
+        <p>${done ? `${t.handNumber} hands played.` : `${t.liveSeats.length} players are still in.`}${this.prize ? ` <b class="prize">+${fmt(this.prize)} chips</b> to your bank.` : ''}</p>
         <table class="standings"><thead><tr><th>Place</th><th>Player</th><th>Level</th></tr></thead><tbody>
           ${ranked.map((s) => `<tr class="${s.isHuman ? 'me' : ''}"><td>${s.place ? ordinal(s.place) : 'Still in'}</td><td>${esc(s.name)}</td><td>${s.isHuman ? 'You' : DIFFICULTY_NAMES[s.difficulty!]}</td></tr>`).join('')}
         </tbody></table>
@@ -719,15 +799,18 @@ class Game {
     on('close-modal', () => this.closeModal());
     on('confirm-leave', () => renderSetup());
     on('again', () => {
-      game = new Game(this.setup);
       this.stop();
-      game.start();
+      const next = new Game(this.setup);
+      if (!next.start()) return renderSetup();
+      game = next;
     });
     on('spectate', () => {
       this.spectating = true;
       this.closeModal();
     });
     on('rebuy', () => {
+      if (!buyIn(this.profile, this.table.config.startingStack)) return;
+      savePlayer();
       this.table.rebuy(this.humanId);
       this.modal = 'none';
       this.dealNext();
@@ -783,14 +866,14 @@ class Game {
     });
     document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => (b.onclick = () => {
       prefs.speed = b.dataset.speed as Speed;
-      save(PREFS_KEY, prefs);
+      saveSettings();
       this.render();
     }));
     const pref = (id: string, key: keyof Prefs) => {
       const el = document.getElementById(id) as HTMLInputElement | null;
       if (el) el.onchange = () => {
         (prefs[key] as boolean) = el.checked;
-        save(PREFS_KEY, prefs);
+        saveSettings();
         setVolume(prefs.volume, !prefs.sound);
         this.render();
       };
@@ -812,7 +895,7 @@ class Game {
         if (box) box.checked = prefs.sound;
       };
       vol.onchange = () => {
-        save(PREFS_KEY, prefs);
+        saveSettings();
         play('chips');
       };
     }
@@ -820,7 +903,7 @@ class Game {
 
   private toggleSound() {
     prefs.sound = !prefs.sound;
-    save(PREFS_KEY, prefs);
+    saveSettings();
     setVolume(prefs.volume, !prefs.sound);
     this.render();
     play('chips');
@@ -878,4 +961,34 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => game?.render(), 150);
 });
-renderSetup();
+
+/** Opens the last player on this device, or asks who's playing on a first visit. */
+async function boot() {
+  let storage: Storage | null = null;
+  try {
+    storage = window.localStorage;
+  } catch {
+    /* storage blocked: players last for this visit */
+  }
+  const accounts = new LocalAccountStore(storage);
+  initAccounts(accounts);
+  const profiles = await accounts.list();
+  const currentId = await accounts.currentId();
+  let p = profiles.find((x) => x.id === currentId) ?? profiles.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  if (!p) {
+    // Carry over the name and settings from before accounts existed.
+    const legacySetup = store<Partial<Setup>>(LEGACY_SETUP_KEY, {});
+    const legacyPrefs = store<Partial<Prefs>>(LEGACY_PREFS_KEY, {});
+    const settings = Object.keys(legacySetup).length || Object.keys(legacyPrefs).length ? { setup: legacySetup, prefs: legacyPrefs } : {};
+    const name = legacySetup.name && legacySetup.name !== 'You' ? legacySetup.name : '';
+    if (!name) return renderWelcome(app, renderSetup, '', settings);
+    p = createProfile(name, { settings });
+    await accounts.put(p);
+  }
+  await selectPlayer(p);
+  settleOpenTable(p);
+  await savePlayer();
+  renderSetup();
+}
+
+boot();
