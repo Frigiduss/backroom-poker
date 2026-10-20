@@ -16,6 +16,7 @@ import { AdminCommand, AdminTableInfo } from '../online/protocol';
 import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, cleanName, emptyProfileStats } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer } from './profiles';
+import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
 
 /** What the console needs from a running game (main.ts's Game provides it). */
 export interface DevGame {
@@ -44,10 +45,12 @@ export interface DevHooks {
   /** Called after the console changes the lobby announcement. */
   announced(text: string): void;
   /** The online table on screen, if any; table commands then go to the table server. */
-  onlineTable(): { tableId: string; code: string } | null;
+  onlineTable(): { tableId: string; code: string; game?: 'poker' | 'blackjack' } | null;
+  /** The practice blackjack table on screen, if any. */
+  blackjack(): DevBlackjack | null;
 }
 
-type Out = (html: string, kind?: 'ok' | 'err' | 'dim' | 'cmd' | 'group') => void;
+export type Out = (html: string, kind?: 'ok' | 'err' | 'dim' | 'cmd' | 'group') => void;
 
 interface Command {
   name: string;
@@ -72,6 +75,8 @@ let known: AdminPlayer[] = [];
 let tables: TableClient | null = null;
 /** An online table picked with the table command, which table commands then act on. */
 let pinned: string | null = null;
+/** Whether the pinned table plays blackjack. */
+let pinnedBlackjack = false;
 
 export function initConsole(h: DevHooks, a: OnlineAuth | null) {
   hooks = h;
@@ -208,6 +213,12 @@ export async function execute(line: string, out: Out = print): Promise<void> {
   }
   const [name, ...args] = tokenize(line);
   const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
+  const bj = blackjackTarget();
+  try {
+    if (bj && (await runBlackjack(name.toLowerCase(), args, out, bj, auth?.current?.userId ?? null))) return;
+  } catch (err) {
+    return out(esc((err as Error).message || String(err)), 'err');
+  }
   if (!cmd) return out(`Unknown command <b>${esc(name)}</b>. Type <b>help</b> for the list.`, 'err');
   try {
     // At an online table, table commands run on the table server instead of this page.
@@ -217,6 +228,7 @@ export async function execute(line: string, out: Out = print): Promise<void> {
       return await remote(args, out);
     }
     await cmd.run(args, out);
+    if (cmd.name === 'help' && !args[0] && bj) blackjackHelp(out);
   } catch (err) {
     out(esc((err as Error).message || String(err)), 'err');
   }
@@ -231,9 +243,9 @@ function tokenize(line: string): string[] {
 
 // ---------- helpers ----------
 
-class UsageError extends Error {}
+export class UsageError extends Error {}
 
-function need<T>(x: T | null | undefined, msg: string): T {
+export function need<T>(x: T | null | undefined, msg: string): T {
   if (x === null || x === undefined) throw new UsageError(msg);
   return x;
 }
@@ -247,7 +259,7 @@ function onlineAdmin(): AdminApi {
 }
 
 /** "500", "+500", "-500", "10k" against a current value. */
-function amount(arg: string | undefined, current: number): number {
+export function amount(arg: string | undefined, current: number): number {
   const m = need(arg, 'Give an amount, like 50000, +5000 or -1000.').toLowerCase().replace(/,/g, '').match(/^([+-]?)(\d+(?:\.\d+)?)([km]?)$/);
   if (!m) throw new UsageError(`"${arg}" isn't an amount. Try 50000, +5000, -1000 or 2.5k.`);
   const n = Math.round(Number(m[2]) * (m[3] === 'k' ? 1e3 : m[3] === 'm' ? 1e6 : 1));
@@ -256,11 +268,11 @@ function amount(arg: string | undefined, current: number): number {
 }
 
 /** "As", "10h", "kd" → card. */
-function card(s: string): Card {
+export function card(s: string): Card {
   return parseCard(s.replace(/^10/, 'T'));
 }
 
-const cardsText = (cs: readonly Card[]): string => cs.map((c) => `<span class="dev-card s${c & 3}">${cardLabel(c)}</span>`).join(' ') || '<span class="dev-dim">none</span>';
+export const cardsText = (cs: readonly Card[]): string => cs.map((c) => `<span class="dev-card s${c & 3}">${cardLabel(c)}</span>`).join(' ') || '<span class="dev-dim">none</span>';
 
 function seatOf(t: Table, ref: string | undefined): Seat {
   const r = need(ref, 'Name a seat: its number from state (0 is you) or the start of a name.').toLowerCase();
@@ -271,7 +283,7 @@ function seatOf(t: Table, ref: string | undefined): Seat {
   return hits[0];
 }
 
-function table(rows: (string | number)[][], head: string[]): string {
+export function table(rows: (string | number)[][], head: string[]): string {
   return `<table class="dev-table"><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows
     .map((r) => `<tr>${r.map((c) => `<td>${typeof c === 'number' ? fmt(c) : c}</td>`).join('')}</tr>`)
     .join('')}</tbody></table>`;
@@ -368,6 +380,14 @@ function trueEquity(hand: Hand): Map<number, number> {
 }
 
 // ---------- online tables ----------
+
+/** Where blackjack commands go, when the table they would act on plays blackjack. */
+function blackjackTarget(): BjTarget | null {
+  const online = onlineTarget();
+  if (online) return (pinned ? pinnedBlackjack : hooks.onlineTable()?.game === 'blackjack') ? { remote: (c, o) => remote(c, o) } : null;
+  const local = hooks.blackjack();
+  return local ? { local } : null;
+}
 
 function onlineTarget(): { tableId?: string; code?: string } | null {
   if (pinned) return { code: pinned };
@@ -802,7 +822,10 @@ const COMMANDS: Command[] = [
       }
       pinned = code;
       try {
-        printTable(await remote({ do: 'inspect' }), out);
+        const info = await remote({ do: 'inspect' });
+        pinnedBlackjack = info.settings.game === 'blackjack';
+        if (pinnedBlackjack) await runBlackjack('state', [], out, { remote: (c, o) => remote(c, o) }, auth?.current?.userId ?? null);
+        else printTable(info, out);
       } catch (err) {
         pinned = null;
         throw err;

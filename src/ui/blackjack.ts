@@ -2,10 +2,11 @@
 // playing basic strategy in the other spots for company. Bets come straight out of the
 // player's chip bank and winnings go straight back in.
 import { blackjackTally, canRefill, credit, setBlackjackBank, takeUnlocks } from '../accounts';
-import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, BjHand, Round, RoundView, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../engine/blackjack';
+import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, BjHand, Round, RoundRig, RoundView, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../engine/blackjack';
 import { createRng, shuffle } from '../engine/cards';
 import { announce } from './achievements';
 import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
+import type { DevBlackjack } from './console-blackjack';
 import { cardHtml, chipsHtml, esc, fmt } from './dom';
 import { currentTitle, player, savePlayer, serverAwards } from './profiles';
 import { SoundName, play, setVolume } from './sound';
@@ -288,6 +289,10 @@ export class BlackjackTable {
   /** The player's last move busted their hand. */
   private busted = false;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
+  /** Developer console: the bots and dealer wait while paused. */
+  private paused = false;
+  /** Developer console: cards to deal next round, by spot id. */
+  private nextRig: RoundRig | null = null;
 
   constructor(private readonly h: Hooks) {
     const names = shuffle([...BOT_NAMES], this.rng);
@@ -352,7 +357,8 @@ export class BlackjackTable {
     }));
     this.h.setup.bet = bet;
     this.h.save();
-    this.round = new Round(this.shoe, entries);
+    this.round = new Round(this.shoe, entries, this.nextRig);
+    this.nextRig = null;
     this.rounds++;
     this.logCursor = 0;
     const cues: SoundName[] = [];
@@ -425,10 +431,56 @@ export class BlackjackTable {
   private schedule() {
     clearTimeout(this.timer);
     const r = this.round;
-    if (!r || r.isComplete || this.modal !== 'none' || this.stopped || this.myTurn(r)) return;
+    if (!r || r.isComplete || this.modal !== 'none' || this.stopped || this.paused || this.myTurn(r)) return;
     // Let the opening deal land before anyone moves.
     const landing = Math.max(0, this.dealLands - Date.now());
     this.timer = window.setTimeout(() => this.step(), DELAY[this.h.prefs.speed] + landing);
+  }
+
+  /** What the developer console sees and changes at this table. */
+  get dev(): DevBlackjack {
+    const t = this;
+    return {
+      shoe: t.shoe,
+      round: t.round,
+      spots: t.spots.map((s, i) => ({ id: s.id, name: s.isHuman ? t.profile.name : s.name, isHuman: s.isHuman, stack: s.isHuman ? t.bank : t.round && !t.round.isComplete ? t.round.seats[i].stack : s.stack })),
+      get nextRig() {
+        return t.nextRig;
+      },
+      set nextRig(r) {
+        t.nextRig = r;
+      },
+      get paused() {
+        return t.paused;
+      },
+      set paused(on) {
+        t.paused = on;
+        t.render();
+        t.schedule();
+      },
+      setStack(id, n) {
+        const i = t.spots.findIndex((s) => s.id === id);
+        const r = t.round;
+        if (r && !r.isComplete) r.seats[i].stack = n;
+        if (t.spots[i].isHuman) setBlackjackBank(t.profile, n);
+        else t.spots[i].stack = n;
+        if (r && !r.isComplete) t.sync();
+        else {
+          void savePlayer();
+          t.render();
+        }
+      },
+      refresh: () => {
+        if (t.round) t.sync();
+        else t.render();
+      },
+      step: () => {
+        const r = t.round;
+        if (!r || r.isComplete || t.myTurn(r)) return false;
+        t.step();
+        return true;
+      },
+    };
   }
 
   /** One move by a bot or the dealer. */
