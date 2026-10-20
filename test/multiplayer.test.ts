@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Action } from '../src/engine/hand';
 import { VARIANTS, VARIANT_ORDER } from '../src/engine/variants';
 import { TableSettings, TableView } from '../src/online/protocol';
-import { BOT_GAP_MS, DEAL_DELAY_MS, StoredView, TURN_MS, TableDb, TableRow, TableState, handle, rebuild } from '../src/online/server';
+import { AwardCredit, BOT_GAP_MS, DEAL_DELAY_MS, StoredView, TURN_MS, TableDb, TableRow, TableState, handle, rebuild } from '../src/online/server';
+import { Counters } from '../src/accounts/achievements';
 
 /** Keeps tables in memory, with the same compare-and-save rule as the real database. */
 class MemoryDb implements TableDb {
@@ -44,6 +45,23 @@ class MemoryDb implements TableDb {
     this.views.delete(`${tableId}/${userId}`);
   }
   async sweep() {}
+  /** Online achievement counters by `${userId}/${playerId}`, kept like the credit_awards function does. */
+  awarded = new Map<string, Counters>();
+  /** Each player's own saved counters, as the players table would hold them. */
+  profiles = new Map<string, Counters>();
+  async awards(userId: string, playerId: string) {
+    const k = `${userId}/${playerId}`;
+    return { server: { ...(this.awarded.get(k) ?? {}) }, profile: { ...(this.profiles.get(k) ?? {}) } };
+  }
+  async creditAwards(credits: AwardCredit[]) {
+    for (const c of credits) {
+      const k = `${c.userId}/${c.playerId}`;
+      const cur = this.awarded.get(k) ?? {};
+      for (const [key, v] of Object.entries(c.tally.sum)) cur[key] = (cur[key] ?? 0) + v;
+      for (const [key, v] of Object.entries(c.tally.max)) cur[key] = Math.max(cur[key] ?? 0, v);
+      this.awarded.set(k, cur);
+    }
+  }
   view(tableId: string, userId: string): TableView {
     return this.views.get(`${tableId}/${userId}`)!.view;
   }
@@ -249,4 +267,95 @@ test('every game replays exactly from its saved state', async () => {
     const t = rebuild((await s.db.byId(body.tableId))!.state);
     assert.ok(t.handNumber >= 3, `${variant} played some hands`);
   }
+});
+
+test('the server credits online achievements to the player each person sat down as', async () => {
+  const s = setup({ seats: 4 });
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice' });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await drive(s, body.tableId, ['alice', 'bob'], 300);
+  const alice = s.db.awarded.get('alice/pr_alice')!;
+  const bob = s.db.awarded.get('bob/pr_bob')!;
+  const t = rebuild((await s.db.byId(body.tableId))!.state);
+  assert.equal(alice['online.games'], 1);
+  assert.equal(alice['online.hosted'], 1, 'Alice hosted');
+  assert.equal(bob['online.hosted'], undefined);
+  const v = s.db.view(body.tableId, 'alice');
+  const played = (name: string) => t.stats[v.seats.find((x) => x.name === name)!.id].hands;
+  assert.ok(played('Alice') > 0);
+  assert.equal(alice['online.hands'], played('Alice'), 'every finished hand Alice played counted');
+  assert.equal(alice.hands, played('Alice'), 'online hands count toward the career total too');
+  assert.equal(bob['online.hands'], played('Bob'));
+});
+
+test('hands a bot plays for an away player earn them nothing', async () => {
+  const s = setup({ seats: 3 });
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice' });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await s.call('bob', { op: 'leave', tableId: body.tableId });
+  await drive(s, body.tableId, ['alice'], 300);
+  assert.ok((s.db.awarded.get('alice/pr_alice')?.['online.hands'] ?? 0) > 0);
+  assert.equal(s.db.awarded.get('bob/pr_bob')?.['online.hands'] ?? 0, 0);
+});
+
+test('a tournament winner with a friend at the table gets the online champion achievements', async () => {
+  const s = setup({ seats: 2, format: 'headsup', stackBB: 50 });
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice' });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  // Alice shoves every hand and Bob calls, so someone is soon out.
+  for (let i = 0; i < 400 && (await s.db.byId(body.tableId))!.state.phase === 'playing'; i++) {
+    const row = (await s.db.byId(body.tableId))!;
+    const turn = ['alice', 'bob'].find((u) => s.db.view(body.tableId, u).legal);
+    if (!turn) {
+      s.advance(DEAL_DELAY_MS);
+      await s.call('alice', { op: 'tick', tableId: body.tableId, version: row.version });
+      continue;
+    }
+    const v = s.db.view(body.tableId, turn);
+    const L = v.legal!;
+    const action: Action = L.kind === 'bet' && turn === 'alice' && L.raise ? { type: 'raise', to: L.maxRaiseTo } : L.kind === 'bet' && L.call ? { type: 'call' } : L.kind === 'bet' && L.check ? { type: 'check' } : { type: 'fold' };
+    await s.call(turn, { op: 'act', tableId: body.tableId, hand: v.handNumber, action });
+  }
+  const v = s.db.view(body.tableId, 'alice');
+  assert.equal(v.phase, 'over');
+  const winner = v.seats.find((x) => x.place === 1)!.name === 'Alice' ? 'alice/pr_alice' : 'bob/pr_bob';
+  const loser = winner === 'alice/pr_alice' ? 'bob/pr_bob' : 'alice/pr_alice';
+  assert.equal(s.db.awarded.get(winner)!['online.tourneyWins'], 1);
+  assert.equal(s.db.awarded.get(winner)!['online.friendTourneyWins'], 1);
+  assert.equal(s.db.awarded.get(winner)!.huWins, 1);
+  assert.equal(s.db.awarded.get(loser)!['online.tourneyWins'] ?? 0, 0);
+});
+
+test('people wear only titles they have earned, and everyone at the table sees them', async () => {
+  const s = setup();
+  s.db.profiles.set('alice/pr_alice', { hands: 1200 });
+  // Bob's own save claims an online achievement, but only the server can credit those.
+  s.db.profiles.set('bob/pr_bob', { 'online.games': 999 });
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice', title: 'hands-1000' });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob', title: 'online-250' });
+  const lobby = s.db.view(body.tableId, 'bob');
+  assert.deepEqual(lobby.members.map((m) => m.title), ['Grinder', null]);
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  const v = s.db.view(body.tableId, 'bob');
+  assert.equal(v.seats.find((x) => x.name === 'Alice')!.title, 'Grinder');
+  assert.equal(v.seats.find((x) => x.name === 'Bob')!.title, null);
+  assert.ok(v.seats.filter((x) => !x.isHuman).every((x) => x.title === null));
+
+  s.db.awarded.set('bob/pr_bob', { 'online.games': 250 });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob', title: 'online-250' });
+  assert.equal(s.db.view(body.tableId, 'alice').seats.find((x) => x.name === 'Bob')!.title, 'Card Room Regular', 'earned for real, it shows');
+});
+
+test('a table keeps going when achievements cannot be saved', async () => {
+  const s = setup({ seats: 3 });
+  s.db.creditAwards = async () => {
+    throw new Error('no player_awards table');
+  };
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await drive(s, body.tableId, ['alice'], 100);
+  assert.ok(rebuild((await s.db.byId(body.tableId))!.state).handNumber >= 3);
 });

@@ -1,6 +1,7 @@
 // Player profiles: a name, a chip bank that carries between games, lifetime stats and saved
 // settings. Everything here is plain data and pure bookkeeping, so the same rules work with
 // browser storage today and an online backend later.
+import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
 
 export const STARTING_BANK = 10_000;
 /** A player whose bank (with nothing at a table) drops below this can refill it. */
@@ -31,6 +32,15 @@ export interface ProfileStats {
   byVariant: Record<string, number>;
 }
 
+/** Progress toward achievements earned in this browser (online tables are counted by the server). */
+export interface AchievementRecord {
+  counters: Counters;
+  /** When each achievement was first seen unlocked, by id. */
+  unlocked: Record<string, number>;
+  /** Hands won in a row right now. */
+  run: number;
+}
+
 /** Chips currently committed to a table. Kept on the profile so a closed tab never loses them. */
 export interface TableSession {
   kind: 'cash' | 'tournament';
@@ -51,6 +61,9 @@ export interface Profile {
   stats: ProfileStats;
   /** UI settings (lobby choices, table preferences). Opaque to the account layer. */
   settings: Record<string, unknown>;
+  achievements: AchievementRecord;
+  /** The achievement whose title shows next to the name, or null for none. */
+  title: string | null;
 }
 
 export const emptyProfileStats = (bank = STARTING_BANK): ProfileStats => ({
@@ -79,7 +92,30 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     table: null,
     stats: emptyProfileStats(),
     settings: opts.settings ?? {},
+    achievements: { counters: {}, unlocked: {}, run: 0 },
+    title: null,
   };
+}
+
+/** Starting counters for a player saved before achievements existed, so their history counts. */
+function seedCounters(s: ProfileStats): Counters {
+  const c: Counters = { hands: s.hands, wins: s.handsWon, showdownWins: s.showdownsWon, peakBank: s.peakBank, cashes: s.tournamentCashes };
+  for (const [v, k] of Object.entries(s.byVariant)) c[`play.${v}`] = k;
+  return c;
+}
+
+function normalizeAchievements(raw: unknown, stats: ProfileStats): AchievementRecord {
+  const r = (raw && typeof raw === 'object' ? raw : null) as Partial<AchievementRecord> | null;
+  if (!r) {
+    const rec: AchievementRecord = { counters: seedCounters(stats), unlocked: {}, run: 0 };
+    for (const a of unlockedIn(rec.counters)) rec.unlocked[a.id] = 0;
+    return rec;
+  }
+  const counters: Counters = {};
+  for (const [k, v] of Object.entries(r.counters ?? {})) if (typeof v === 'number' && Number.isFinite(v)) counters[k] = v;
+  const unlocked: Record<string, number> = {};
+  for (const [k, v] of Object.entries(r.unlocked ?? {})) if (typeof v === 'number') unlocked[k] = v;
+  return { counters, unlocked, run: num(r.run, 0) };
 }
 
 const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
@@ -113,6 +149,8 @@ export function normalizeProfile(raw: unknown): Profile | null {
     table,
     stats,
     settings: r.settings && typeof r.settings === 'object' ? { ...r.settings } : {},
+    achievements: normalizeAchievements(r.achievements, stats),
+    title: typeof r.title === 'string' ? r.title : null,
   };
 }
 
@@ -237,6 +275,32 @@ export function recordHand(p: Profile, h: HandOutcome): void {
   }
   if (h.showdownWin) s.showdownsWon++;
   touch(p);
+}
+
+// ---------- achievements ----------
+
+/** The player's own counters, with the bank's high-water mark from their stats. */
+export function profileCounters(p: Profile): Counters {
+  const c = { ...p.achievements.counters };
+  c.peakBank = Math.max(c.peakBank ?? 0, p.stats.peakBank);
+  return c;
+}
+
+/** Everything that counts toward achievements: this player's own play plus what the table server credited. */
+export const allCounters = (p: Profile, server: Counters = {}): Counters => combine(profileCounters(p), server);
+
+/** Adds a game event to the player's progress. Online counters are left to the server. */
+export function credit(p: Profile, t: Tally): void {
+  addTally(p.achievements.counters, t);
+  touch(p);
+}
+
+/** Achievements unlocked since the player last looked, marked as seen now. */
+export function takeUnlocks(p: Profile, server: Counters = {}, now = Date.now()): Achievement[] {
+  const fresh = unlockedIn(allCounters(p, server)).filter((a) => !(a.id in p.achievements.unlocked));
+  for (const a of fresh) p.achievements.unlocked[a.id] = now;
+  if (fresh.length) touch(p);
+  return fresh;
 }
 
 // ---------- backup ----------

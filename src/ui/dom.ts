@@ -17,6 +17,10 @@ export function cardHtml(c: Card | null, cls = ''): string {
     + `<span class="corner tl">${corner}</span><span class="pip">${face ? r : sym}</span><span class="corner br">${corner}</span></div>`;
 }
 
+/** A player's title, shown next to their name. Nothing when they have none. */
+export const titleHtml = (title: string | null | undefined, cls = ''): string =>
+  title ? `<span class="ptitle ${cls}">${esc(title)}</span>` : '';
+
 const CHIP_VALUES = [5000, 1000, 500, 100, 25, 5, 1];
 
 /** A small stack of casino chips whose colours follow the amount's denominations. */

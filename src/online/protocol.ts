@@ -21,9 +21,16 @@ export interface TableSettings {
   seats: number;
 }
 
+/** Who is sitting down: the player (profile) id, so online achievements go to the right player, and the title they wear. */
+export interface PlayerTag {
+  playerId?: string;
+  /** Id of the achievement whose title to show. The server checks it was earned. */
+  title?: string | null;
+}
+
 export type Request =
-  | { op: 'create'; name: string; settings: TableSettings }
-  | { op: 'join'; code: string; name: string }
+  | ({ op: 'create'; name: string; settings: TableSettings } & PlayerTag)
+  | ({ op: 'join'; code: string; name: string } & PlayerTag)
   | { op: 'leave'; tableId: string }
   | { op: 'start'; tableId: string }
   | { op: 'act'; tableId: string; hand: number; action: Action }
@@ -47,6 +54,8 @@ export interface ErrorReply {
 
 export interface MemberView {
   name: string;
+  /** Title earned through achievements, or null. */
+  title: string | null;
   host: boolean;
   you: boolean;
   /** Seat id once the game has started (or once a late joiner is dealt in). */
@@ -57,6 +66,8 @@ export interface MemberView {
 export interface SeatView {
   id: string;
   name: string;
+  /** People only: their title, or null. */
+  title: string | null;
   isHuman: boolean;
   difficulty?: Difficulty;
   style?: BotStyle;

@@ -169,6 +169,8 @@ export class Hand {
   log: LogEntry[] = [];
   actions: ActionRecord[] = [];
   result: HandResult | null = null;
+  /** Some cards were fixed in advance (developer console), so the hand proves nothing. */
+  wasRigged = false;
   private deck: Card[];
   private muck: Card[] = [];
   private drawQueue: number[] = [];
@@ -202,6 +204,7 @@ export class Hand {
     }));
     this.deck = shuffle(fullDeck(cfg.variant.shortDeck), this.rng);
     if (cfg.rig) {
+      this.wasRigged = true;
       const problem = rigProblem(cfg.rig, cfg.variant.shortDeck);
       if (problem) throw new Error(problem);
       this.takeFromDeck([...Object.values(cfg.rig.hole ?? {}).flat(), ...(cfg.rig.board ?? [])]);
@@ -232,6 +235,7 @@ export class Hand {
     this.rigBoard = [];
     this.takeFromDeck(cards);
     this.rigBoard = [...cards];
+    this.wasRigged = true;
   }
 
   private takeFromDeck(cards: Card[]) {

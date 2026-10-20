@@ -7,11 +7,12 @@ import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, For
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
-  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament,
+  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
-import { goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
+import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice } from './profiles';
+import { announce, checkAchievements, renderAchievements } from './achievements';
 import { SoundName, play, setVolume } from './sound';
 import { bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
@@ -84,6 +85,8 @@ const structureFor = (v: VariantId): Structure => {
 const app = document.getElementById('app')!;
 /** The lobby message admins set from the developer console, for everyone. */
 let announcement = '';
+/** The player whose online achievements were last fetched. */
+let awardsChecked = '';
 
 // ---------- setup screen ----------
 
@@ -214,9 +217,12 @@ function renderSetup() {
   const opp = document.getElementById('opp') as HTMLInputElement;
   opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
   opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
-  document.getElementById('open-profile')!.onclick = () => renderProfile(app, renderSetup);
+  const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile));
+  document.getElementById('open-profile')!.onclick = openProfile;
   bindFriendsPanel(() => ({
     name: me.name,
+    playerId: me.id,
+    title: currentTitle() ? me.title : null,
     settings: {
       variant: setup.variant, structure: struct, format: setup.format, difficulty: setup.difficulty,
       stackBB: setup.stackBB, blindSpeed: setup.blindSpeed, seats: setup.format === 'headsup' ? 2 : setup.opponents + 1,
@@ -224,6 +230,14 @@ function renderSetup() {
   }));
   bindConsoleButton();
   void refreshConsoleAccess();
+  if (awardsChecked !== me.id) {
+    // Once per player: pick up achievements the table server credited since last time.
+    awardsChecked = me.id;
+    const before = currentTitle();
+    void checkAchievements().then(() => {
+      if (currentTitle() !== before && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
+    });
+  }
   const refillBtn = document.getElementById('refill');
   if (refillBtn) refillBtn.onclick = () => {
     refill(me);
@@ -279,6 +293,8 @@ class Game implements DevGame {
   /** The player whose bank pays for this game. */
   private readonly profile = player();
   private recorded: Hand | null = null;
+  /** The console rigged a hand or played for the player, so this game earns no achievements. */
+  private tainted = false;
   /** Tournament prize paid into the bank, once the player's finishing place is known. */
   private prize: number | null = null;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
@@ -328,7 +344,11 @@ class Game implements DevGame {
     clearTimeout(this.timer);
     document.removeEventListener('keydown', this.keyHandler);
     if (this.table.isTournament) abandonTournament(this.profile);
-    else cashOut(this.profile, this.myStack());
+    else {
+      const net = cashOut(this.profile, this.myStack());
+      if (!this.tainted) credit(this.profile, cashTally(net, BIG_BLIND));
+    }
+    announce(takeUnlocks(this.profile, serverAwards()));
     savePlayer();
   }
 
@@ -345,13 +365,26 @@ class Game implements DevGame {
     this.recorded = hand;
     const p = this.profile;
     const hi = this.humanIndex;
+    if (hand.wasRigged || this.autopilot) this.tainted = true;
     if (hi >= 0) {
       const me = hand.players[hi];
       const won = hand.result?.won[hi] ?? 0;
       recordHand(p, { variant: this.setup.variant, net: me.stack - me.startStack, collected: won, showdownWin: !!hand.result?.showdown && me.shown && won > 0 });
+      if (!this.tainted) {
+        const run = runAfter(p.achievements.run, hand, hi);
+        p.achievements.run = run;
+        credit(p, mergeTally(handTally(hand, hi), { sum: {}, max: { bestRun: run } }));
+      }
     }
     if (!this.table.isTournament) setTableStack(p, this.humanSeat.stack);
-    else if (this.humanSeat.place && this.prize === null) this.prize = finishTournament(p, this.humanSeat.place, this.table.seats.length);
+    else if (this.humanSeat.place && this.prize === null) {
+      this.prize = finishTournament(p, this.humanSeat.place, this.table.seats.length);
+      if (!this.tainted) {
+        const bots = this.table.seats.filter((s) => !s.isHuman).map((s) => s.difficulty);
+        credit(p, tournamentTally({ format: this.table.config.format, place: this.humanSeat.place, cashed: this.prize > 0, bots }));
+      }
+    }
+    announce(takeUnlocks(p, serverAwards()));
     savePlayer();
   }
 
@@ -627,7 +660,7 @@ class Game implements DevGame {
         <div class="pod" title="${esc(seat.name)} · ${tag}">
           <span class="avatar lv-${level}">${esc(seat.name.slice(0, 1).toUpperCase())}</span>
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
-          ${isMe ? '' : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
+          ${isMe ? (currentTitle() ? `<span class="lvl lv-human ttl">${esc(currentTitle()!)}</span>` : '') : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>
         <div class="bubbles">${handName}${bubble}</div>
       </div>`);

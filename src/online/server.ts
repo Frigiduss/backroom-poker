@@ -5,13 +5,17 @@
 // A table is saved as the state between hands (a checkpoint) plus the actions of the hand
 // in play. Loading it replays those actions, which keeps every rule in the engine instead
 // of copying it here, and keeps saves small because the list resets each hand.
+//
+// The server also credits achievements for online play: every finished hand and tournament
+// adds to each person's counters in player_awards, which browsers can read but not write.
+import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
 import { createRng, shuffle } from '../engine/cards';
 import { Action, Hand } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
-import { BlindSpeed, HandView, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
+import { BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
 
 export const BIG_BLIND = 20;
 export const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
@@ -32,6 +36,12 @@ export interface Member {
   name: string;
   seat: string | null;
   left: boolean;
+  /** The player (profile) in the person's account that online achievements go to. */
+  playerId?: string;
+  /** Their title, checked against their achievements when they sat down. */
+  title?: string | null;
+  /** Hands won in a row at this table. */
+  run?: number;
 }
 
 /** Everything a table needs between hands, in plain data. */
@@ -61,6 +71,8 @@ export interface TableState {
   turnStartedAt: number;
   handEndedAt: number | null;
   lastStepAt: number;
+  /** Seats a bot moved for in the hand in play (the person was away), which earn no achievements. */
+  autoplayed?: string[];
 }
 
 export interface TableRow {
@@ -74,6 +86,19 @@ export interface StoredView {
   userId: string;
   version: number;
   view: TableView;
+}
+
+/** Achievement progress to add to one player's online record. */
+export interface AwardCredit {
+  userId: string;
+  playerId: string;
+  tally: Tally;
+}
+
+/** A player's achievement counters: what this server credited, and what their own saved profile says. */
+export interface AwardCounters {
+  server: Counters;
+  profile: Counters;
 }
 
 /** Where tables are kept. The real one is Postgres through Supabase's REST API. */
@@ -90,6 +115,10 @@ export interface TableDb {
   dropView(tableId: string, userId: string): Promise<void>;
   /** Clears out tables nobody has touched since `before`. */
   sweep(before: Date): Promise<void>;
+  /** A player's achievement counters, to check the title they want to wear. */
+  awards(userId: string, playerId: string): Promise<AwardCounters>;
+  /** Adds to players' online achievement records. */
+  creditAwards(credits: AwardCredit[]): Promise<void>;
 }
 
 export class TableError extends Error {
@@ -105,6 +134,59 @@ export interface Outcome {
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const cleanName = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) || 'Player';
+const cleanPlayerId = (s: unknown): string | undefined => (typeof s === 'string' && /^[\w-]{1,80}$/.test(s) ? s : undefined);
+
+// ---------- achievements ----------
+
+/** The title a person may wear: only one their achievements have earned. */
+async function checkTitle(db: TableDb, userId: string, tag: PlayerTag): Promise<{ playerId?: string; title: string | null }> {
+  const playerId = cleanPlayerId(tag.playerId);
+  if (!playerId || typeof tag.title !== 'string') return { playerId, title: null };
+  try {
+    const a = await db.awards(userId, playerId);
+    return { playerId, title: titleFor(tag.title, combine(a.profile, a.server)) };
+  } catch {
+    return { playerId, title: null };
+  }
+}
+
+function addCredit(credits: AwardCredit[] | undefined, m: Member | undefined, tally: Tally) {
+  if (!credits || !m?.playerId) return;
+  const prev = credits.find((c) => c.userId === m.userId && c.playerId === m.playerId);
+  if (prev) prev.tally = mergeTally(prev.tally, tally);
+  else credits.push({ userId: m.userId, playerId: m.playerId, tally });
+}
+
+/** Seats played by a person who was at the table themselves (not a bot covering while they were away). */
+const memberAt = (state: TableState, seatId: string): Member | undefined =>
+  state.away[seatId] || state.autoplayed?.includes(seatId) ? undefined : state.members.find((m) => m.seat === seatId && !m.left);
+
+/** Achievements from a finished hand, and from any tournament places it decided. */
+function creditHand(state: TableState, t: Table, credits: AwardCredit[] | undefined) {
+  const hand = t.hand;
+  if (!credits || !hand?.isComplete) return;
+  const people = hand.players.map((_, i) => memberAt(state, t.handSeats[i]));
+  const friends = people.flatMap((m, i) => (m ? [i] : []));
+  people.forEach((m, i) => {
+    if (!m) return;
+    m.run = runAfter(m.run ?? 0, hand, i);
+    addCredit(credits, m, mergeTally(handTally(hand, i, { online: true, friends }), { sum: {}, max: { bestRun: m.run } }));
+  });
+  if (!t.isTournament) return;
+  const humans = t.seats.filter((s) => s.isHuman).length;
+  const bots = t.seats.filter((s) => !s.isHuman).map((s) => s.difficulty);
+  for (const id of t.handSeats) {
+    const seat = t.seats.find((s) => s.id === id)!;
+    const m = memberAt(state, id);
+    if (seat.place && m) addCredit(credits, m, tournamentTally({ format: t.config.format, place: seat.place, cashed: false, bots, online: true, friends: humans - 1 }));
+  }
+}
+
+/** A game with at least two people in it has started: count it for each of them, and for the host. */
+function creditGameStart(state: TableState, people: Member[], credits: AwardCredit[] | undefined) {
+  if (people.length < 2) return;
+  for (const m of people) addCredit(credits, m, { sum: { 'online.games': 1, ...(m.userId === state.host ? { 'online.hosted': 1 } : {}) }, max: {} });
+}
 
 // ---------- settings ----------
 
@@ -169,7 +251,7 @@ export function rebuild(state: TableState): Table {
   return t;
 }
 
-function startGame(state: TableState, now: number, seed: number) {
+function startGame(state: TableState, now: number, seed: number, credits?: AwardCredit[]) {
   const s = state.settings;
   const rng = createRng(seed ^ 0x5bd1e995);
   const people = state.members.filter((m) => !m.left).slice(0, s.seats);
@@ -200,11 +282,12 @@ function startGame(state: TableState, now: number, seed: number) {
   const t = new Table(config);
   state.checkpoint = snapshot(t);
   state.events = [];
-  dealNext(state, t, now);
+  creditGameStart(state, people, credits);
+  dealNext(state, t, now, credits);
 }
 
 /** Settles the last hand and deals the next one. False when there aren't two players with chips. */
-function dealNext(state: TableState, t: Table, now: number): boolean {
+function dealNext(state: TableState, t: Table, now: number, credits?: AwardCredit[]): boolean {
   t.finishHand();
   for (const id of state.pendingRebuys) {
     const seat = t.seats.find((s) => s.id === id);
@@ -218,6 +301,7 @@ function dealNext(state: TableState, t: Table, now: number): boolean {
     Object.assign(seat, { name: m.name, isHuman: true, difficulty: undefined, style: undefined, stack: t.config.startingStack, busted: false, rebuys: 0 });
     t.stats[seat.id] = emptyStats();
     m.seat = seat.id;
+    if (state.members.filter((x) => x.seat && !x.left).length >= 2) addCredit(credits, m, { sum: { 'online.games': 1 }, max: {} });
   }
   state.pendingSits = [];
   if (t.isOver) {
@@ -227,6 +311,7 @@ function dealNext(state: TableState, t: Table, now: number): boolean {
   if (t.liveSeats.length < 2) return false;
   state.checkpoint = snapshot(t);
   state.events = [{ t: 'deal' }];
+  state.autoplayed = [];
   t.nextHand();
   state.turnStartedAt = now;
   state.handEndedAt = null;
@@ -234,7 +319,7 @@ function dealNext(state: TableState, t: Table, now: number): boolean {
   return true;
 }
 
-function apply(state: TableState, t: Table, action: Action, now: number) {
+function apply(state: TableState, t: Table, action: Action, now: number, credits?: AwardCredit[]) {
   const hand = t.hand!;
   const a = hand.normalize(action);
   try {
@@ -248,6 +333,7 @@ function apply(state: TableState, t: Table, action: Action, now: number) {
   if (hand.isComplete) {
     state.handEndedAt = now;
     t.finishHand();
+    creditHand(state, t, credits);
     if (t.isOver) state.phase = 'over';
   }
 }
@@ -255,18 +341,19 @@ function apply(state: TableState, t: Table, action: Action, now: number) {
 const botFor = (seat: Seat, away: boolean): Bot => new Bot(away || !seat.difficulty ? 'medium' : seat.difficulty, seat.style ?? 'balanced');
 
 /** A move nobody is waiting on a person for: a bot's turn, a run-out clock, or the next deal. */
-export function autoStep(state: TableState, t: Table, now: number): boolean {
+export function autoStep(state: TableState, t: Table, now: number, credits?: AwardCredit[]): boolean {
   if (state.phase !== 'playing') return false;
   const hand = t.hand;
   if (!hand || hand.isComplete) {
     if (hand && now < (state.handEndedAt ?? 0) + DEAL_DELAY_MS) return false;
     const before = JSON.stringify([state.pendingRebuys, state.pendingSits, state.phase]);
-    return dealNext(state, t, now) || before !== JSON.stringify([state.pendingRebuys, state.pendingSits, state.phase]);
+    return dealNext(state, t, now, credits) || before !== JSON.stringify([state.pendingRebuys, state.pendingSits, state.phase]);
   }
   const seat = t.seatOf(hand.toAct);
   if (!seat.isHuman || state.away[seat.id]) {
     if (now < state.lastStepAt + BOT_GAP_MS) return false;
-    apply(state, t, botFor(seat, !!state.away[seat.id]).decide(buildView(hand, hand.toAct, t.stats)), now);
+    if (seat.isHuman && !state.autoplayed?.includes(seat.id)) (state.autoplayed ??= []).push(seat.id);
+    apply(state, t, botFor(seat, !!state.away[seat.id]).decide(buildView(hand, hand.toAct, t.stats)), now, credits);
     return true;
   }
   if (now < state.turnStartedAt + TURN_MS) return false;
@@ -274,7 +361,7 @@ export function autoStep(state: TableState, t: Table, now: number): boolean {
   const auto: Action = L.kind === 'draw' ? { type: 'draw', discard: [] } : L.kind === 'bet' && L.check ? { type: 'check' } : L.kind === 'bet' && L.bringIn ? { type: 'bringin' } : { type: 'fold' };
   state.timeouts[seat.id] = (state.timeouts[seat.id] ?? 0) + 1;
   if (state.timeouts[seat.id] >= TIMEOUTS_TO_AWAY) state.away[seat.id] = true;
-  apply(state, t, auto, now);
+  apply(state, t, auto, now, credits);
   return true;
 }
 
@@ -332,7 +419,7 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
   const humanTurn = !!hand && !hand.isComplete && t!.seatOf(hand.toAct).isHuman && !state.away[t!.seatOf(hand.toAct).id];
   const stalled = state.phase === 'playing' && !!t && (!hand || hand.isComplete) && t.liveSeats.length < 2 && !state.pendingRebuys.length && !state.pendingSits.length;
   const seats: SeatView[] = (t?.seats ?? []).map((s) => ({
-    id: s.id, name: s.name, isHuman: s.isHuman, difficulty: s.isHuman ? undefined : s.difficulty, style: s.isHuman ? undefined : s.style,
+    id: s.id, name: s.name, title: s.isHuman ? state.members.find((m) => m.seat === s.id)?.title ?? null : null, isHuman: s.isHuman, difficulty: s.isHuman ? undefined : s.difficulty, style: s.isHuman ? undefined : s.style,
     stack: s.stack, busted: s.busted, place: s.place, rebuys: s.rebuys, away: !!state.away[s.id], you: s.id === mySeat,
   }));
   return {
@@ -341,7 +428,7 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     code: row.code,
     phase: state.phase,
     settings: state.settings,
-    members: state.members.map((m) => ({ name: m.name, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left })),
+    members: state.members.map((m) => ({ name: m.name, title: m.title ?? null, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left })),
     isHost: state.host === userId,
     seats,
     mySeat,
@@ -384,7 +471,10 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
   }
 }
 
-async function publish(db: TableDb, row: TableRow, state: TableState, t: Table | null, now: number, userId: string): Promise<Outcome> {
+async function publish(db: TableDb, row: TableRow, state: TableState, t: Table | null, now: number, userId: string, credits: AwardCredit[] = []): Promise<Outcome> {
+  // Achievements first, so a browser that sees the finished hand finds them already counted.
+  // They never hold up the game: if they can't be saved, the table carries on.
+  if (credits.length) await db.creditAwards(credits).catch(() => undefined);
   const views = state.members.filter((m) => !m.left).map((m) => ({ userId: m.userId, version: row.version, view: viewFor(row, state, t, m.userId, now) }));
   await db.putViews(row.id, views);
   return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, now) } };
@@ -392,8 +482,9 @@ async function publish(db: TableDb, row: TableRow, state: TableState, t: Table |
 
 async function create(db: TableDb, userId: string, req: Extract<Request, { op: 'create' }>, now: number, seed: () => number): Promise<Outcome> {
   const settings = checkSettings(req.settings);
+  const tag = await checkTitle(db, userId, req);
   const state: TableState = {
-    phase: 'lobby', host: userId, settings, members: [{ userId, name: cleanName(req.name), seat: null, left: false }],
+    phase: 'lobby', host: userId, settings, members: [{ userId, name: cleanName(req.name), seat: null, left: false, ...tag }],
     config: null, checkpoint: null, events: [], away: {}, timeouts: {}, pendingRebuys: [], pendingSits: [], turnStartedAt: now, handEndedAt: null, lastStepAt: now,
   };
   await db.sweep(new Date(now - 3 * 24 * 3600 * 1000)).catch(() => undefined);
@@ -409,6 +500,7 @@ const findCode = (code: unknown) => String(code ?? '').toUpperCase().replace(/[^
 
 async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'join' }>, now: number): Promise<Outcome> {
   const code = findCode(req.code);
+  const tag = await checkTitle(db, userId, req);
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await db.byCode(code);
     if (!row) throw new TableError(`No table has the code ${code || '(blank)'}. Check it with whoever made the table.`, 404);
@@ -418,7 +510,11 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
     let m = state.members.find((x) => x.userId === userId);
     if (m) {
       m.left = false;
-      if (state.phase === 'lobby') m.name = name;
+      m.title = tag.title;
+      if (state.phase === 'lobby') {
+        m.name = name;
+        m.playerId = tag.playerId;
+      }
       if (m.seat) {
         delete state.away[m.seat];
         delete state.timeouts[m.seat];
@@ -433,7 +529,7 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
         if (!free) throw new TableError('That table is full.', 409);
         state.pendingSits.push({ userId, seat: free.id });
       }
-      m = { userId, name, seat: null, left: false };
+      m = { userId, name, seat: null, left: false, ...tag };
       state.members.push(m);
     }
     if (!(await db.update(row.id, row.version, state))) continue;
@@ -451,16 +547,17 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
     if (!m) throw new TableError("You aren't at that table.", 403);
     const at = now();
     let t = state.phase === 'lobby' ? null : rebuild(state);
+    const credits: AwardCredit[] = [];
     const unchanged = () => ({ status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, at) } });
 
     switch (req.op) {
       case 'tick':
-        if (req.version !== row.version || !t || !autoStep(state, t, at)) return unchanged();
+        if (req.version !== row.version || !t || !autoStep(state, t, at, credits)) return unchanged();
         break;
       case 'start':
         if (state.host !== userId) throw new TableError('Only the host can start the game.', 403);
         if (state.phase !== 'lobby') return unchanged();
-        startGame(state, at, seed());
+        startGame(state, at, seed(), credits);
         t = rebuild(state);
         break;
       case 'act': {
@@ -468,7 +565,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
         if (!t || !hand || hand.isComplete || !m.seat || req.hand !== t.handNumber || t.handSeats[hand.toAct] !== m.seat) throw new TableError("It isn't your turn.", 409);
         delete state.away[m.seat];
         state.timeouts[m.seat] = 0;
-        apply(state, t, checkAction(req.action), at);
+        apply(state, t, checkAction(req.action), at, credits);
         break;
       }
       case 'rebuy': {
@@ -509,7 +606,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
       continue;
     }
     const saved = { ...row, version: row.version + 1 };
-    const out = await publish(db, saved, state, t, at, userId);
+    const out = await publish(db, saved, state, t, at, userId, credits);
     if (req.op === 'leave') await db.dropView(row.id, userId);
     return out;
   }
