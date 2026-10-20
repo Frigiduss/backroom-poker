@@ -90,7 +90,7 @@ export class BjScreen {
     const bj = v.bj!;
     const betting = bj.phase === 'betting';
     const spots: FeltSpot[] = bj.spots.map((s) => ({
-      name: s.name, me: s.you, stack: s.stack, level: s.isHuman ? 'human' : 'medium',
+      id: s.id, name: s.name, me: s.you, stack: s.stack, level: s.isHuman ? 'human' : 'medium',
       label: s.isHuman ? (s.title ?? (s.you ? 'You' : 'Friend')) : 'Bot',
       seat: s.seat,
       bet: betting ? s.bet ?? 0 : 0,

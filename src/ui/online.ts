@@ -16,6 +16,7 @@ import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
 import { SoundName, play } from './sound';
 import { consoleEnabled, toggleConsole } from './console';
 import { BjScreen } from './online-blackjack';
+import { ChatDock } from './chat';
 import { BJ_RULES_LINE, limitText } from './blackjack';
 
 export interface TablePrefs {
@@ -223,6 +224,7 @@ class OnlineTable {
     sending: () => this.sending,
     secondsLeft: (at) => this.secondsLeft(at),
   });
+  private chat: ChatDock | null = null;
 
   constructor(view: TableView) {
     this.view = view;
@@ -239,6 +241,11 @@ class OnlineTable {
     this.absorbLog(false);
     window.scrollTo(0, 0);
     this.render();
+    this.chat = new ChatDock({
+      say: async (msg) => this.update((await client!.send({ op: 'chat', tableId: this.view.tableId, ...msg })).view),
+      sound: () => hooks.prefs().sound,
+    });
+    this.chat.update(this.view);
     this.schedule();
     this.poll();
   }
@@ -248,6 +255,8 @@ class OnlineTable {
     clearTimeout(this.pollTimer);
     clearTimeout(this.tickTimer);
     clearInterval(this.clockTimer);
+    this.chat?.destroy();
+    this.chat = null;
     document.removeEventListener('keydown', this.keyHandler);
     window.removeEventListener('resize', this.resizeHandler);
   }
@@ -288,6 +297,7 @@ class OnlineTable {
     if (next.hand?.phase !== 'draw' || next.legal === null) this.selected.clear();
     this.absorbLog(true);
     this.render();
+    this.chat?.update(next);
     this.schedule();
     // The server counts achievements as each hand finishes; look for new ones then.
     if (next.mySeat && next.hand?.result && next.handNumber !== this.awardsHand) {
@@ -642,7 +652,7 @@ class OnlineTable {
       const clock = hi >= 0 && hand.toAct === hi && !complete && v.turnDeadline ? `<span class="clock" title="Seconds left">${this.secondsLeft(v.turnDeadline)}</span>` : '';
       const badge = seat.isHuman
         ? seat.away ? '<span class="lvl lv-human">Away</span>' : seat.title ? `<span class="lvl lv-human ttl" title="Title">${esc(seat.title)}</span>` : isMe ? '' : '<span class="lvl lv-human">Friend</span>' : `<span class="lvl lv-${level}">${BOT_LABEL(seat.difficulty)}</span>`;
-      parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
+      parts.push(`<div class="${classes.join(' ')}" data-seat="${seat.id}" style="left:${p.x}%;top:${p.y}%">
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(seat.name)} · ${tag}">
           <span class="avatar lv-${level}">${esc(seat.name.slice(0, 1).toUpperCase())}</span>

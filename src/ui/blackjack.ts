@@ -124,6 +124,8 @@ export const OUTCOME_TEXT: Record<string, string> = { blackjack: 'Blackjack', wi
 
 /** One spot on the felt, for drawing. */
 export interface FeltSpot {
+  /** The spot's id at an online table, so chat can float over it. */
+  id?: string;
   name: string;
   /** The viewer's own spot. */
   me: boolean;
@@ -188,7 +190,7 @@ export class BjFelt {
       }
       const circle = `<div class="bj-circle ${wager ? 'has-bet' : ''}">${wager ? `${chipsHtml(wager, 6)}<span>${fmt(wager)}</span>` : ''}</div>`;
       const label = spot.label ? `<span class="lvl lv-${spot.level}${spot.me ? ' ttl' : ''}">${esc(spot.label)}</span>` : '';
-      parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
+      parts.push(`<div class="${classes.join(' ')}"${spot.id ? ` data-seat="${esc(spot.id)}"` : ''} style="left:${p.x}%;top:${p.y}%">
         <div class="bj-hands">${hands}</div>
         ${circle}
         <div class="pod" title="${esc(spot.name)}">

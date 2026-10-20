@@ -1,6 +1,6 @@
 // Table sounds, synthesized with the Web Audio API so the game ships no audio files and works offline.
 
-export type SoundName = 'deal' | 'flip' | 'check' | 'chips' | 'allin' | 'fold' | 'win' | 'pot' | 'turn' | 'shuffle' | 'bust' | 'blackjack';
+export type SoundName = 'deal' | 'flip' | 'check' | 'chips' | 'allin' | 'fold' | 'win' | 'pot' | 'turn' | 'shuffle' | 'bust' | 'blackjack' | 'chat';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -129,6 +129,8 @@ const SOUNDS: Record<SoundName, (t: number) => void> = {
     });
     for (let i = 0; i < 4; i++) chip(t + 0.3 + i * 0.05 + jitter(), 0.3);
   },
+  // A soft pop for a chat line from someone else.
+  chat: (t) => tone(t, 1250, 0.12, 0.07, 'sine', 1650),
   turn: (t) => {
     tone(t, 880, 0.35, 0.12, 'sine');
     tone(t + 0.09, 1318.5, 0.45, 0.1, 'sine');

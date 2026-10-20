@@ -16,6 +16,7 @@ import { Action, Hand, rigProblem } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjView, checkBjSettings } from './blackjack';
+import { ChatError, ChatState, chatAdmin, chatAdminInfo, chatSay, chatView, findMember } from './chat';
 import { AdminCommand, AdminReply, AdminTableInfo, AdminTableSummary, BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
 
 export const BIG_BLIND = 20;
@@ -80,6 +81,8 @@ export interface TableState {
   nextRig?: { hole: Record<string, Card[]>; board: Card[] } | null;
   /** A blackjack table (src/online/blackjack.ts); the poker fields above stay empty. */
   bj?: BjState;
+  /** Table chat (src/online/chat.ts). */
+  chat?: ChatState;
 }
 
 /** The poker table in play, or null in the lobby and at blackjack. */
@@ -496,6 +499,7 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     rebuyPending: !!mySeat && state.pendingRebuys.includes(mySeat),
     stalled,
     paused: !!state.paused,
+    ...chatView(state, userId),
     ...(state.bj ? { bj: bjView(state, userId), tickAt: bjTickAt(state), turnDeadline: bjDeadline(state) } : {}),
   };
 }
@@ -519,10 +523,10 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
       if (!(await db.isAdmin(userId))) throw new TableError('Only admin accounts can do that.', 403);
       return req.op === 'tables' ? await listTables(db) : await adminChange(db, userId, req, now);
     }
-    if (!['leave', 'start', 'act', 'bj', 'tick', 'rebuy', 'back'].includes(req.op)) throw new TableError('Unknown request.');
+    if (!['leave', 'start', 'act', 'bj', 'tick', 'rebuy', 'back', 'chat'].includes(req.op)) throw new TableError('Unknown request.');
     return await change(db, userId, req, now, seed);
   } catch (err) {
-    if (err instanceof TableError) return { status: err.status, body: { ok: false, error: err.message } };
+    if (err instanceof TableError || err instanceof ChatError) return { status: err.status, body: { ok: false, error: err.message } };
     throw err;
   }
 }
@@ -661,6 +665,9 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
         if (t?.hand && !t.hand.isComplete && t.handSeats[t.hand.toAct] === m.seat) state.turnStartedAt = at;
         if (state.bj) bjBack(state, m, at);
         break;
+      case 'chat':
+        chatSay(state, m, req, at);
+        break;
       case 'leave': {
         if (state.phase === 'lobby') {
           state.members = state.members.filter((x) => x !== m);
@@ -769,6 +776,7 @@ export function adminInfo(row: { id: string; code: string; version: number }, st
       : null,
     nextRig: state.nextRig ? clone(state.nextRig) : null,
     bj: bjAdminInfo(state),
+    ...chatAdminInfo(state),
   };
 }
 
@@ -810,7 +818,6 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
       const body: AdminReply = { ok: true, message: `Table ${row.code} closed.`, table: null };
       return { status: 200, body };
     }
-    if ((!table && !state.bj) || state.phase !== 'playing') throw new TableError(state.phase === 'lobby' ? "That table hasn't started yet." : 'That game is over.', 409);
     /** Saves the change and tells everyone at the table. Null when someone else saved first. */
     const commit = async (message: string, kicked: string | null = null): Promise<Outcome | null> => {
       if (!(await db.update(row.id, row.version, state))) return null;
@@ -820,6 +827,13 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
       await db.logAdmin(userId, `table ${cmd.do}`, { code: row.code, ...(cmd as object) });
       return reply(message, saved);
     };
+    // Chat can be looked after at any point, the waiting room included.
+    if (cmd.do === 'mute' || cmd.do === 'unmute' || cmd.do === 'clearchat') {
+      const out = await commit(chatAdmin(state, cmd, at));
+      if (out) return out;
+      continue;
+    }
+    if ((!table && !state.bj) || state.phase !== 'playing') throw new TableError(state.phase === 'lobby' ? "That table hasn't started yet." : 'That game is over.', 409);
     if (state.bj && !['pause', 'resume', 'kick'].includes(cmd.do)) {
       let message: string;
       try {
@@ -936,10 +950,7 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         break;
       }
       case 'kick': {
-        const r = String(cmd.member ?? '').trim().toLowerCase();
-        const hits = state.members.filter((m) => !m.left && m.name.toLowerCase().startsWith(r));
-        if (!r || hits.length !== 1) throw new TableError(hits.length ? `"${cmd.member}" matches ${hits.map((m) => m.name).join(', ')}.` : `Nobody called "${cmd.member}" is at the table.`);
-        const m = hits[0];
+        const m = findMember(state.members, cmd.member);
         kicked = m.userId;
         m.left = true;
         if (m.seat) state.away[m.seat] = true;
