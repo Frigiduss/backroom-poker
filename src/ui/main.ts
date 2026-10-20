@@ -11,7 +11,7 @@ import {
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
-import { goOnline, initAccounts, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
+import { goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
@@ -1040,7 +1040,8 @@ async function boot() {
       if (text && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
     });
   }
-  const open = () => (auth?.current ? goOnline(renderSetup, app) : openPlayer(renderSetup, app));
+  // With online accounts on, everyone starts at the sign-in screen unless already signed in.
+  const open = () => (auth?.current ? goOnline(renderSetup, app) : auth ? renderAuth(app, renderSetup) : openPlayer(renderSetup, app));
   if (resetPassword) renderNewPassword(app, open);
   else await open();
 }
