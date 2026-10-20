@@ -47,12 +47,25 @@ export function initOnlinePlay(h: Hooks) {
     const url = new URL(location.href);
     const code = url.searchParams.get('join');
     if (code) {
-      linkCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+      // Kept until used, so it survives signing up through an email link.
+      localStorage.setItem(JOIN_KEY, code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8));
       url.searchParams.delete('join');
       history.replaceState(null, '', url.toString());
     }
+    linkCode = localStorage.getItem(JOIN_KEY) ?? '';
   } catch {
-    /* no URL to read */
+    /* no URL or storage to read */
+  }
+}
+
+const JOIN_KEY = 'backroom-poker-join';
+
+function forgetLinkCode() {
+  linkCode = '';
+  try {
+    localStorage.removeItem(JOIN_KEY);
+  } catch {
+    /* nothing kept */
   }
 }
 
@@ -103,7 +116,7 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
     err('');
     try {
       const view = await fn();
-      linkCode = '';
+      forgetLinkCode();
       openTable(view);
     } catch (e) {
       busy(false);
@@ -134,7 +147,14 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
       if (v && document.querySelector('.friends-panel')) hooks.lobby();
     }).catch(() => undefined);
   }
-  if (linkCode && signedIn()) form?.requestSubmit();
+  if (linkCode && signedIn() && form) {
+    // Try the invite once; if it fails the code stays in the box with the reason.
+    const code = linkCode;
+    forgetLinkCode();
+    linkCode = code;
+    form.requestSubmit();
+    linkCode = '';
+  }
 }
 
 function gameName(s: TableSettings): string {
