@@ -15,6 +15,7 @@ import { Card, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, rigProblem } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
+import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjView, checkBjSettings } from './blackjack';
 import { AdminCommand, AdminReply, AdminTableInfo, AdminTableSummary, BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
 
 export const BIG_BLIND = 20;
@@ -77,7 +78,12 @@ export interface TableState {
   paused?: boolean;
   /** Developer console: cards to deal next hand, by seat id. */
   nextRig?: { hole: Record<string, Card[]>; board: Card[] } | null;
+  /** A blackjack table (src/online/blackjack.ts); the poker fields above stay empty. */
+  bj?: BjState;
 }
+
+/** The poker table in play, or null in the lobby and at blackjack. */
+export const tableOf = (state: TableState): Table | null => (state.phase === 'lobby' || state.bj ? null : rebuild(state));
 
 /** Changes an admin makes during a hand, replayed with the hand like any action. */
 export type AdminEdit =
@@ -215,6 +221,10 @@ function creditGameStart(state: TableState, people: Member[], credits: AwardCred
 
 export function checkSettings(raw: unknown): TableSettings {
   const s = (raw ?? {}) as Partial<TableSettings>;
+  if (s.game === 'blackjack') {
+    // The poker fields keep their defaults so nothing that reads them trips.
+    return { variant: 'holdem', structure: 'NL', format: 'cash', difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', ...checkBjSettings(s) };
+  }
   const v = VARIANTS[s.variant as VariantId];
   if (!v) throw new TableError('Pick a game for the table.');
   const format = s.format === 'sng' || s.format === 'headsup' ? s.format : 'cash';
@@ -278,8 +288,18 @@ export function rebuild(state: TableState): Table {
   return t;
 }
 
+/** Blackjack credits go into the same list as poker's. */
+const bjCredits = (credits: AwardCredit[] | undefined): BjCredits => (m, tally) => addCredit(credits, m, tally);
+
 function startGame(state: TableState, now: number, seed: number, credits?: AwardCredit[]) {
   const s = state.settings;
+  if (s.game === 'blackjack') {
+    const people = state.members.filter((m) => !m.left).slice(0, s.seats);
+    for (const m of state.members) if (!people.includes(m)) m.seat = null;
+    bjStart(state, people, now, seed);
+    creditGameStart(state, people, credits);
+    return;
+  }
   const rng = createRng(seed ^ 0x5bd1e995);
   const people = state.members.filter((m) => !m.left).slice(0, s.seats);
   const taken = new Set(people.map((m) => m.name.toLowerCase()));
@@ -476,6 +496,7 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     rebuyPending: !!mySeat && state.pendingRebuys.includes(mySeat),
     stalled,
     paused: !!state.paused,
+    ...(state.bj ? { bj: bjView(state, userId), tickAt: bjTickAt(state), turnDeadline: bjDeadline(state) } : {}),
   };
 }
 
@@ -498,7 +519,7 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
       if (!(await db.isAdmin(userId))) throw new TableError('Only admin accounts can do that.', 403);
       return req.op === 'tables' ? await listTables(db) : await adminChange(db, userId, req, now);
     }
-    if (!['leave', 'start', 'act', 'tick', 'rebuy', 'back'].includes(req.op)) throw new TableError('Unknown request.');
+    if (!['leave', 'start', 'act', 'bj', 'tick', 'rebuy', 'back'].includes(req.op)) throw new TableError('Unknown request.');
     return await change(db, userId, req, now, seed);
   } catch (err) {
     if (err instanceof TableError) return { status: err.status, body: { ok: false, error: err.message } };
@@ -541,7 +562,7 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
     if (!row) throw new TableError(`No table has the code ${code || '(blank)'}. Check it with whoever made the table.`, 404);
     const state = row.state;
     const name = cleanName(req.name);
-    const t = state.phase === 'lobby' ? null : rebuild(state);
+    const t = tableOf(state);
     let m = state.members.find((x) => x.userId === userId);
     if (m) {
       m.left = false;
@@ -558,6 +579,10 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
       if (state.phase === 'over') throw new TableError('That table has finished its game.', 409);
       if (state.phase === 'lobby') {
         if (state.members.filter((x) => !x.left).length >= state.settings.seats) throw new TableError('That table is full.', 409);
+      } else if (state.bj) {
+        const free = bjFreeSpot(state);
+        if (!free) throw new TableError('That table is full.', 409);
+        state.pendingSits.push({ userId, seat: free });
       } else {
         if (t!.isTournament) throw new TableError('That tournament has already started.', 409);
         const free = t!.seats.find((s) => !s.isHuman && !state.pendingSits.some((p) => p.seat === s.id));
@@ -581,19 +606,29 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
     const m = state.members.find((x) => x.userId === userId);
     if (!m) throw new TableError("You aren't at that table.", 403);
     const at = now();
-    let t = state.phase === 'lobby' ? null : rebuild(state);
+    let t = tableOf(state);
     const credits: AwardCredit[] = [];
     const unchanged = () => ({ status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, at) } });
 
     switch (req.op) {
       case 'tick':
-        if (req.version !== row.version || !t || !autoStep(state, t, at, credits)) return unchanged();
+        if (req.version !== row.version) return unchanged();
+        if (state.bj ? !bjAutoStep(state, at, bjCredits(credits)) : !t || !autoStep(state, t, at, credits)) return unchanged();
         break;
       case 'start':
         if (state.host !== userId) throw new TableError('Only the host can start the game.', 403);
         if (state.phase !== 'lobby') return unchanged();
         startGame(state, at, seed(), credits);
-        t = rebuild(state);
+        t = tableOf(state);
+        break;
+      case 'bj':
+        if (!state.bj || state.phase !== 'playing') throw new TableError("This isn't a blackjack table in play.", 409);
+        try {
+          bjMove(state, m, req, at, bjCredits(credits));
+        } catch (err) {
+          if (err instanceof BjError) throw new TableError(err.message, 409);
+          throw err;
+        }
         break;
       case 'act': {
         if (state.paused) throw new TableError('The table is paused. Wait for it to carry on.', 409);
@@ -605,6 +640,15 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
         break;
       }
       case 'rebuy': {
+        if (state.bj) {
+          try {
+            bjRebuy(state, m);
+          } catch (err) {
+            if (err instanceof BjError) throw new TableError(err.message);
+            throw err;
+          }
+          break;
+        }
         const seat = t?.seats.find((s) => s.id === m.seat);
         if (!t || !seat || t.isTournament || !seat.busted) throw new TableError('You can only buy back in after going broke in a cash game.');
         if (!state.pendingRebuys.includes(seat.id)) state.pendingRebuys.push(seat.id);
@@ -615,6 +659,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
         delete state.away[m.seat];
         state.timeouts[m.seat] = 0;
         if (t?.hand && !t.hand.isComplete && t.handSeats[t.hand.toAct] === m.seat) state.turnStartedAt = at;
+        if (state.bj) bjBack(state, m, at);
         break;
       case 'leave': {
         if (state.phase === 'lobby') {
@@ -637,7 +682,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
     if (!(await db.update(row.id, row.version, state))) {
       if (req.op === 'tick') {
         const fresh = await db.byId(row.id);
-        if (fresh) return { status: 200, body: { ok: true, tableId: fresh.id, code: fresh.code, view: viewFor(fresh, fresh.state, fresh.state.phase === 'lobby' ? null : rebuild(fresh.state), userId, at) } };
+        if (fresh) return { status: 200, body: { ok: true, tableId: fresh.id, code: fresh.code, view: viewFor(fresh, fresh.state, tableOf(fresh.state), userId, at) } };
       }
       continue;
     }
@@ -722,6 +767,7 @@ export function adminInfo(row: { id: string; code: string; version: number }, st
       }
       : null,
     nextRig: state.nextRig ? clone(state.nextRig) : null,
+    bj: bjAdminInfo(state),
   };
 }
 
@@ -731,9 +777,9 @@ async function listTables(db: TableDb): Promise<Outcome> {
     tableId: r.id,
     code: r.code,
     phase: r.state.phase,
-    game: `${r.state.settings.structure} ${VARIANTS[r.state.settings.variant]?.name ?? r.state.settings.variant}`,
+    game: r.state.settings.game === 'blackjack' ? 'Blackjack' : `${r.state.settings.structure} ${VARIANTS[r.state.settings.variant]?.name ?? r.state.settings.variant}`,
     people: r.state.members.filter((m) => !m.left).map((m) => m.name),
-    handNumber: r.state.checkpoint?.handNumber ?? 0,
+    handNumber: r.state.bj?.roundNumber ?? r.state.checkpoint?.handNumber ?? 0,
     paused: !!r.state.paused,
     updatedAt: r.updatedAt,
   }));
@@ -751,8 +797,8 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
     if (!row) throw new TableError('No table with that code.', 404);
     const state = row.state;
     const at = now();
-    const t = state.phase === 'lobby' ? null : rebuild(state);
-    const reply = (message: string, r: { id: string; code: string; version: number } = row, tb: Table | null = t): Outcome => {
+    const table = tableOf(state);
+    const reply = (message: string, r: { id: string; code: string; version: number } = row, tb: Table | null = table): Outcome => {
       const body: AdminReply = { ok: true, message, table: adminInfo(r, state, tb) };
       return { status: 200, body };
     };
@@ -763,8 +809,31 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
       const body: AdminReply = { ok: true, message: `Table ${row.code} closed.`, table: null };
       return { status: 200, body };
     }
-    if (!t || state.phase !== 'playing') throw new TableError(state.phase === 'lobby' ? "That table hasn't started yet." : 'That game is over.', 409);
-    const hand = t.hand;
+    if ((!table && !state.bj) || state.phase !== 'playing') throw new TableError(state.phase === 'lobby' ? "That table hasn't started yet." : 'That game is over.', 409);
+    /** Saves the change and tells everyone at the table. Null when someone else saved first. */
+    const commit = async (message: string, kicked: string | null = null): Promise<Outcome | null> => {
+      if (!(await db.update(row.id, row.version, state))) return null;
+      const saved = { ...row, version: row.version + 1 };
+      await publish(db, saved, state, table, at, userId);
+      if (kicked) await db.dropView(row.id, kicked);
+      await db.logAdmin(userId, `table ${cmd.do}`, { code: row.code, ...(cmd as object) });
+      return reply(message, saved);
+    };
+    if (state.bj && !['pause', 'resume', 'kick'].includes(cmd.do)) {
+      let message: string;
+      try {
+        message = bjAdmin(state, cmd, at, bjCredits(undefined));
+      } catch (err) {
+        if (err instanceof BjError) throw new TableError(err.message);
+        throw err;
+      }
+      const out = await commit(message);
+      if (out) return out;
+      continue;
+    }
+    // A blackjack table only gets here for pause, resume and kick, which don't touch the poker table.
+    const t = table as Table;
+    const hand = t?.hand ?? null;
     const live = !!hand && !hand.isComplete;
     let message: string;
     let kicked: string | null = null;
@@ -847,6 +916,7 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         state.turnStartedAt = at;
         state.lastStepAt = at;
         if (state.handEndedAt !== null) state.handEndedAt = at;
+        if (state.bj) bjResume(state, at);
         message = 'Table running again.';
         break;
       case 'step': {
@@ -880,12 +950,8 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
       default:
         throw new TableError('Unknown console command.');
     }
-    if (!(await db.update(row.id, row.version, state))) continue;
-    const saved = { ...row, version: row.version + 1 };
-    await publish(db, saved, state, t, at, userId);
-    if (kicked) await db.dropView(row.id, kicked);
-    await db.logAdmin(userId, `table ${cmd.do}`, { code: row.code, ...(cmd as object) });
-    return reply(message, saved);
+    const out = await commit(message, kicked);
+    if (out) return out;
   }
   throw new TableError('The table is busy. Try again.', 503);
 }

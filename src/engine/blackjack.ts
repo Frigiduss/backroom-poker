@@ -6,13 +6,21 @@
 // 17s, blackjack pays 3 to 2 and insurance 2 to 1. Players may double any first two cards
 // (after a split too), split pairs of the same value up to four hands, and split aces once
 // for one card each.
-import { Card, Rng, cardLabel, fullDeck, rankOf, shuffle } from './cards';
+import { Card, Rng, SeededRng, cardLabel, createRng, fullDeck, rankOf, shuffle } from './cards';
 
 export const BJ_DECKS = 6;
 /** Share of the shoe dealt before the cut card comes out and the shoe is reshuffled. */
 export const BJ_PENETRATION = 0.75;
 /** Hands one seat can hold after splitting. */
 export const BJ_MAX_HANDS = 4;
+
+export type BjLimits = 'low' | 'mid' | 'high';
+/** Table limits: the smallest and largest bet on one hand. */
+export const BJ_LIMITS: Record<BjLimits, { min: number; max: number }> = {
+  low: { min: 10, max: 500 },
+  mid: { min: 50, max: 2500 },
+  high: { min: 250, max: 10_000 },
+};
 
 /** Blackjack value of one card: aces count 11 here (handTotal brings them down to 1). */
 export function cardPoints(c: Card): number {
@@ -58,7 +66,7 @@ export class Shoe {
   private cards: Card[] = [];
   private dealt = 0;
   private cut = 0;
-  /** Cards to deal next, in order, before the shuffled ones (tests and the console). */
+  /** Cards to deal next, in order, before the shuffled ones (tests). */
   private rigged: Card[] = [];
   /** Bumps on every shuffle, so the table can play the shuffle sound. */
   shuffles = 0;
@@ -93,12 +101,77 @@ export class Shoe {
     this.rigged.push(...cards);
   }
 
+  /** Cards on top of the shoe that the developer console put there. */
+  private stacked = 0;
+  /** Whether the last card drawn was one the console stacked. */
+  lastWasRigged = false;
+
   draw(): Card {
+    this.lastWasRigged = false;
     if (this.rigged.length) return this.rigged.shift()!;
     if (!this.cards.length) this.shuffle();
     this.dealt++;
+    this.lastWasRigged = this.stacked > 0;
+    if (this.stacked > 0) this.stacked--;
     return this.cards.pop()!;
   }
+
+  /** The next `n` cards out of the shoe, first one first (the developer console's peek). */
+  upcoming(n: number): Card[] {
+    return [...this.rigged, ...this.cards.slice(-n).reverse()].slice(0, n);
+  }
+
+  /** Takes one copy of `card` out of the shoe. False when every copy is already out. */
+  take(card: Card): boolean {
+    const i = this.cards.lastIndexOf(card);
+    if (i < 0) return false;
+    this.cards.splice(i, 1);
+    if (i >= this.cards.length - this.stacked + 1) this.stacked--;
+    return true;
+  }
+
+  /** Puts a card back under the rest, where it won't come out this shoe. */
+  putBack(card: Card) {
+    this.cards.unshift(card);
+  }
+
+  /**
+   * Moves these cards to the top of the shoe, so they come out next in this order. A card
+   * with every copy already dealt is added anyway: the console can deal a seventh ace.
+   */
+  stackTop(cards: readonly Card[]) {
+    for (const c of cards) this.take(c);
+    this.cards.push(...[...cards].reverse());
+    this.stacked += cards.length;
+  }
+
+  /** The shoe as plain data, for a server to save between requests. */
+  save(): ShoeData {
+    return { decks: this.decks, cards: [...this.cards], dealt: this.dealt, cut: this.cut, shuffles: this.shuffles, rng: (this.rng as SeededRng).state ?? 0, stacked: this.stacked };
+  }
+
+  static load(d: ShoeData): Shoe {
+    const rng = createRng(d.rng);
+    const shoe = new Shoe(d.decks, rng);
+    shoe.cards = [...d.cards];
+    shoe.dealt = d.dealt;
+    shoe.cut = d.cut;
+    shoe.shuffles = d.shuffles;
+    shoe.stacked = d.stacked ?? 0;
+    rng.state = d.rng;
+    return shoe;
+  }
+}
+
+/** A saved shoe. Needs a seeded rng (createRng) so later shuffles carry on from `rng`. */
+export interface ShoeData {
+  decks: number;
+  cards: Card[];
+  dealt: number;
+  cut: number;
+  shuffles: number;
+  rng: number;
+  stacked?: number;
 }
 
 // ---------- a round ----------
@@ -161,6 +234,37 @@ const newHand = (bet: number, cards: Card[] = [], split = false): BjHand => ({
   cards, bet, doubled: false, split, splitAces: false, done: false, outcome: null, payout: 0,
 });
 
+/** A saved round: everything but the shoe. */
+export interface RoundData {
+  seats: BjSeat[];
+  dealer: Card[];
+  holeShown: boolean;
+  phase: Phase;
+  seatTurn: number;
+  handTurn: number;
+  log: BjEvent[];
+  rigged?: boolean;
+}
+
+/** Cards the developer console fixed for a round: each seat's two (by seat id), and the dealer's upcard and hole card. */
+export interface RoundRig {
+  seats?: Record<string, Card[]>;
+  dealer?: Card[];
+}
+
+/** A round as the players see it: the dealer's hole card stays hidden until it is turned. */
+export interface RoundView {
+  seats: (BjSeat & { net: number | null })[];
+  /** null for the face-down hole card. */
+  dealer: (Card | null)[];
+  holeShown: boolean;
+  phase: Phase;
+  seatTurn: number;
+  handTurn: number;
+  insuranceTurn: number;
+  log: BjEvent[];
+}
+
 export class Round {
   readonly seats: BjSeat[];
   readonly dealer: Card[] = [];
@@ -170,16 +274,18 @@ export class Round {
   seatTurn = -1;
   handTurn = 0;
   readonly log: BjEvent[] = [];
+  /** The developer console fixed some of this round's cards, so it earns no achievements. */
+  rigged = false;
 
-  constructor(private readonly shoe: Shoe, entries: readonly SeatEntry[]) {
+  constructor(private readonly shoe: Shoe, entries: readonly SeatEntry[], rig?: RoundRig | null) {
     if (!entries.length) throw new Error('A round needs at least one seat.');
     this.seats = entries.map((e) => {
       if (!(e.bet > 0) || e.bet > e.stack) throw new Error(`${e.name} can't cover a bet of ${e.bet}.`);
       return { id: e.id, name: e.name, stack: e.stack - e.bet, hands: [newHand(e.bet)], insurance: null, wagered: e.bet, returned: 0 };
     });
     for (let pass = 0; pass < 2; pass++) {
-      for (const s of this.seats) s.hands[0].cards.push(this.shoe.draw());
-      this.dealer.push(this.shoe.draw());
+      for (const s of this.seats) s.hands[0].cards.push(this.dealFrom(rig?.seats?.[s.id]?.[pass]));
+      this.dealer.push(this.dealFrom(rig?.dealer?.[pass]));
     }
     this.say('deal', `Dealer shows ${cardLabel(this.upcard)}`);
     if (rankOf(this.upcard) === 14) {
@@ -193,8 +299,59 @@ export class Round {
     else this.beginPlay();
   }
 
+  save(): RoundData {
+    const { seats, dealer, holeShown, phase, seatTurn, handTurn, log, rigged } = this;
+    return JSON.parse(JSON.stringify({ seats, dealer, holeShown, phase, seatTurn, handTurn, log, rigged }));
+  }
+
+  /** Picks a saved round back up, dealing from `shoe`. */
+  static load(shoe: Shoe, d: RoundData): Round {
+    const r = Object.create(Round.prototype) as Round;
+    Object.assign(r, JSON.parse(JSON.stringify(d)), { shoe });
+    return r;
+  }
+
+  view(): RoundView {
+    const d = this.save();
+    return {
+      seats: d.seats.map((s, i) => ({ ...s, net: this.isComplete ? this.net(i) : null })),
+      dealer: d.dealer.map((c, k) => (k === 1 && !d.holeShown ? null : c)),
+      holeShown: d.holeShown,
+      phase: d.phase,
+      seatTurn: d.seatTurn,
+      handTurn: d.handTurn,
+      insuranceTurn: this.insuranceTurn(),
+      log: d.log,
+    };
+  }
+
   get upcard(): Card {
     return this.dealer[0];
+  }
+
+  private draw(): Card {
+    const c = this.shoe.draw();
+    if (this.shoe.lastWasRigged) this.rigged = true;
+    return c;
+  }
+
+  /** A card the console fixed, taken out of the shoe; or the next card off the shoe. */
+  private dealFrom(fixed: Card | undefined): Card {
+    if (fixed === undefined) return this.draw();
+    this.shoe.take(fixed);
+    this.rigged = true;
+    return fixed;
+  }
+
+  /** The developer console: swaps the dealer's face-down card. The old one goes under the shoe. */
+  setHole(card: Card) {
+    if (this.holeShown || this.isComplete) throw new Error('The hole card is already face up.');
+    const peeked = this.phase !== 'insurance' && (rankOf(this.upcard) === 14 || cardPoints(this.upcard) === 10);
+    if (peeked && isNatural([this.upcard, card])) throw new Error('The dealer already checked for blackjack, so that card can\'t be the hole card now.');
+    this.shoe.take(card);
+    this.shoe.putBack(this.dealer[1]);
+    this.dealer[1] = card;
+    this.rigged = true;
   }
 
   get isComplete(): boolean {
@@ -284,7 +441,7 @@ export class Round {
     const s = this.seats[si];
     const h = this.hand!;
     if (a === 'hit') {
-      const c = this.shoe.draw();
+      const c = this.draw();
       h.cards.push(c);
       const t = handTotal(h.cards);
       this.say('card', `${s.name} hits: ${cardLabel(c)} (${describeTotal(h.cards, false)})`, si);
@@ -297,7 +454,7 @@ export class Round {
       s.wagered += h.bet;
       h.bet *= 2;
       h.doubled = true;
-      const c = this.shoe.draw();
+      const c = this.draw();
       h.cards.push(c);
       h.done = true;
       this.say('card', `${s.name} doubles to ${h.bet}: ${cardLabel(c)} (${describeTotal(h.cards, false)})`, si);
@@ -313,7 +470,7 @@ export class Round {
         if (!aces) continue;
         // Split aces get one card each and no more.
         x.splitAces = true;
-        x.cards.push(this.shoe.draw());
+        x.cards.push(this.draw());
         x.done = true;
       }
       if (!aces) this.dealSecond(h);
@@ -324,7 +481,7 @@ export class Round {
   /** A split hand gets its second card when its turn comes. */
   private dealSecond(h: BjHand) {
     if (h.cards.length !== 1) return;
-    const c = this.shoe.draw();
+    const c = this.draw();
     h.cards.push(c);
     this.say('card', `${this.seats[this.seatTurn].name} gets ${cardLabel(c)} (${describeTotal(h.cards, false)})`, this.seatTurn);
     if (handTotal(h.cards).total === 21) h.done = true;
@@ -361,7 +518,7 @@ export class Round {
       return true;
     }
     if (this.live && handTotal(this.dealer).total < 17) {
-      const c = this.shoe.draw();
+      const c = this.draw();
       this.dealer.push(c);
       this.say('card', `Dealer draws ${cardLabel(c)} (${describeTotal(this.dealer, false)})`);
       return true;

@@ -2,7 +2,7 @@
 // playing basic strategy in the other spots for company. Bets come straight out of the
 // player's chip bank and winnings go straight back in.
 import { blackjackTally, canRefill, credit, setBlackjackBank, takeUnlocks } from '../accounts';
-import { BJ_DECKS, BjAction, BjHand, Round, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../engine/blackjack';
+import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, BjHand, Round, RoundView, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../engine/blackjack';
 import { createRng, shuffle } from '../engine/cards';
 import { announce } from './achievements';
 import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
@@ -12,13 +12,8 @@ import { SoundName, play, setVolume } from './sound';
 
 // ---------- lobby settings ----------
 
-export type BjLimits = 'low' | 'mid' | 'high';
-
-export const BJ_LIMITS: Record<BjLimits, { min: number; max: number; chips: number[] }> = {
-  low: { min: 10, max: 500, chips: [5, 25, 100] },
-  mid: { min: 50, max: 2500, chips: [25, 100, 500] },
-  high: { min: 250, max: 10_000, chips: [25, 100, 500, 1000] },
-};
+/** Chips to bet with at each table limit. */
+export const BJ_CHIPS: Record<BjLimits, number[]> = { low: [5, 25, 100], mid: [25, 100, 500], high: [25, 100, 500, 1000] };
 
 export interface BjSetup {
   limits: BjLimits;
@@ -41,7 +36,7 @@ export interface BjPrefs {
   fourColor: boolean;
 }
 
-const limitText = (l: BjLimits) => `${fmt(BJ_LIMITS[l].min)} – ${fmt(BJ_LIMITS[l].max)}`;
+export const limitText = (l: BjLimits) => `${fmt(BJ_LIMITS[l].min)} – ${fmt(BJ_LIMITS[l].max)}`;
 export const BJ_RULES_LINE = 'Six decks · dealer stands on 17 · pays 3 to 2';
 
 /** The "Your table" card in the lobby when blackjack is picked. */
@@ -122,9 +117,148 @@ const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana'
 const BOT_LEVELS = ['beginner', 'easy', 'medium', 'hard', 'expert'];
 const DELAY: Record<BjPrefs['speed'], number> = { relaxed: 1000, normal: 620, fast: 240 };
 const BOT_BUYIN = 40;
+export const OUTCOME_TEXT: Record<string, string> = { blackjack: 'Blackjack', win: 'Win', push: 'Push', lose: 'Lose', bust: 'Bust' };
+
+// ---------- drawing the felt ----------
+
+/** One spot on the felt, for drawing. */
+export interface FeltSpot {
+  name: string;
+  /** The viewer's own spot. */
+  me: boolean;
+  stack: number;
+  /** Avatar colour class. */
+  level: string;
+  /** Shown under the name: a title, "Bot", "Away"… */
+  label: string | null;
+  /** Index into the round's seats, or -1 when the spot sits this round out. */
+  seat: number;
+  /** Chips in the betting circle when no round is in play there. */
+  bet: number;
+  /** A small note in place of the round result, like "Betting…". */
+  note?: string;
+}
+
 const DEAL_GAP = 0.13;
 
-const OUTCOME_TEXT: Record<string, string> = { blackjack: 'Blackjack', win: 'Win', push: 'Push', lose: 'Lose', bust: 'Bust' };
+/** Draws the half-moon table from a round as players see it. Keeps track of which cards have been dealt, to animate only new ones. */
+export class BjFelt {
+  private seen = new Set<string>();
+
+  html(o: { round: RoundView | null; spots: FeltSpot[]; roundNo: number; opening: boolean; msg: string; shoeTitle: string }): string {
+    const r = o.round;
+    const n = r ? r.seats.length : o.spots.length;
+    const pos = spotLayout(o.spots.length);
+    const parts: string[] = [];
+    if (this.seen.size > 3000) this.seen.clear();
+
+    let dealer = '<div class="bj-cards dealer-cards empty"></div>';
+    let dealerTotal = '';
+    if (r) {
+      const cards = r.dealer.map((c, k) => {
+        const delay = k < 2 && o.opening ? (k * (n + 1) + n) * DEAL_GAP : 0;
+        return this.card(c, `${o.roundNo}:d:${k}:${c !== null}`, delay, k);
+      }).join('');
+      dealer = `<div class="bj-cards dealer-cards" style="--n:${r.dealer.length}">${cards}</div>`;
+      const shown = r.dealer.filter((c): c is number => c !== null);
+      const natural = r.holeShown && isNatural(shown);
+      dealerTotal = `<span class="bj-total ${handTotal(shown).total > 21 ? 'bust' : ''} ${natural ? 'natural' : ''}">${describeTotal(shown, natural)}</span>`;
+    }
+    parts.push(`<div class="bj-dealer">${dealer}<div class="bj-dealer-tag"><span class="bj-dealer-name">Dealer</span>${dealerTotal}</div></div>`);
+
+    o.spots.forEach((spot, i) => {
+      const p = pos[i];
+      const si = spot.seat;
+      const seat = r && si >= 0 ? r.seats[si] : null;
+      const classes = ['bj-spot'];
+      if (spot.me) classes.push('me');
+      if (r && si >= 0 && ((r.phase === 'play' && r.seatTurn === si) || (r.phase === 'insurance' && r.insuranceTurn === si))) classes.push('acting');
+      let hands = '';
+      let wager = spot.bet;
+      let tag = spot.note ? `<span class="bubble">${esc(spot.note)}</span>` : '';
+      if (seat && r) {
+        if (r.phase !== 'done') wager = seat.hands.reduce((sum, h) => sum + h.bet, 0);
+        hands = seat.hands.map((h, hi) => this.handHtml(r, h, si, hi, o.opening ? n : -1, o.roundNo)).join('');
+        const net = seat.net;
+        if (net !== null) {
+          classes.push(net > 0 ? 'winner' : net < 0 ? 'loser' : 'pushed');
+          tag = `<span class="bubble ${net > 0 ? 'won' : net < 0 ? 'lost' : ''}">${net > 0 ? `+${fmt(net)}` : net < 0 ? `−${fmt(-net)}` : 'Even'}</span>`;
+        } else if (seat.insurance) tag = `<span class="bubble">Insured ${fmt(seat.insurance)}</span>`;
+      }
+      const circle = `<div class="bj-circle ${wager ? 'has-bet' : ''}">${wager ? `${chipsHtml(wager, 6)}<span>${fmt(wager)}</span>` : ''}</div>`;
+      const label = spot.label ? `<span class="lvl lv-${spot.level}${spot.me ? ' ttl' : ''}">${esc(spot.label)}</span>` : '';
+      parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
+        <div class="bj-hands">${hands}</div>
+        ${circle}
+        <div class="pod" title="${esc(spot.name)}">
+          <span class="avatar lv-${spot.level}">${esc(spot.name.slice(0, 1).toUpperCase())}</span>
+          <span class="plate"><span class="nm">${esc(spot.name)}</span><span class="stk">${fmt(spot.stack)}</span></span>
+          ${label}
+        </div>
+        <div class="bubbles">${tag}</div>
+      </div>`);
+    });
+
+    return `<div class="bj-table">
+      <div class="bj-rail"><div class="bj-felt">
+        <svg class="bj-print" viewBox="0 0 1000 500" aria-hidden="true">
+          <defs>
+            <path id="bj-arc1" d="M 260 150 A 240 60 0 0 0 740 150"/>
+            <path id="bj-arc2" d="M 290 122 A 210 50 0 0 0 710 122"/>
+          </defs>
+          <text class="bj-print-big"><textPath href="#bj-arc1" startOffset="50%" text-anchor="middle">BLACKJACK PAYS 3 TO 2</textPath></text>
+          <text class="bj-print-small"><textPath href="#bj-arc2" startOffset="50%" text-anchor="middle">Dealer stands on all 17s · Insurance pays 2 to 1</textPath></text>
+        </svg>
+      </div></div>
+      <div class="bj-shoe" title="${esc(o.shoeTitle)}"><span></span></div>
+      <div class="bj-tray" aria-hidden="true">${[5000, 1000, 500, 100, 25, 5].map((v) => `<i class="v${v}"></i>`).join('')}</div>
+      ${o.msg ? `<div class="bj-msg">${esc(o.msg)}</div>` : ''}
+      ${parts.join('')}
+    </div>`;
+  }
+
+  /** A card, with the deal animation the first time it shows (staggered for the opening deal). */
+  private card(c: number | null, key: string, delay: number, k: number): string {
+    const fresh = !this.seen.has(key);
+    if (fresh) this.seen.add(key);
+    const style = `--k:${k}`;
+    const anim = fresh ? ` deal" style="animation-delay:${delay.toFixed(2)}s;${style}` : `" style="${style}`;
+    return cardHtml(c, '').replace(/" aria-label=/, `${anim}" aria-label=`);
+  }
+
+  private handHtml(r: RoundView, h: BjHand, si: number, hi: number, openingSeats: number, roundNo: number): string {
+    const seat = r.seats[si];
+    const active = r.phase === 'play' && r.seatTurn === si && r.handTurn === hi;
+    const cls = ['bj-hand'];
+    if (active && seat.hands.length > 1) cls.push('active');
+    if (h.outcome) cls.push(`o-${h.outcome}`);
+    const cards = h.cards.map((c, k) => {
+      const delay = openingSeats >= 0 && k < 2 ? (k * (openingSeats + 1) + si) * DEAL_GAP : 0;
+      return this.card(c, `${roundNo}:${si}:${hi}:${k}:${c}`, delay, k);
+    }).join('');
+    const natural = isNatural(h.cards) && !h.split;
+    const total = describeTotal(h.cards, natural);
+    const bust = handTotal(h.cards).total > 21;
+    const result = h.outcome && h.outcome !== 'blackjack' && h.outcome !== 'bust' ? `<span class="bj-result">${OUTCOME_TEXT[h.outcome]}</span>` : '';
+    const bet = seat.hands.length > 1 ? `<span class="bj-hbet">${fmt(h.bet)}</span>` : h.doubled ? '<span class="bj-hbet">Doubled</span>' : '';
+    return `<div class="${cls.join(' ')}">
+      <div class="bj-cards" style="--n:${h.cards.length}">${cards}</div>
+      <div class="bj-tags"><span class="bj-total ${bust ? 'bust' : ''} ${natural ? 'natural' : ''}">${total}</span>${result}${bet}</div>
+    </div>`;
+  }
+}
+
+/** Where each spot sits on the arc, first base (dealt first) on the right. */
+function spotLayout(n: number): { x: number; y: number }[] {
+  const narrow = window.matchMedia('(max-width: 720px)').matches;
+  const spread = n === 1 ? 0 : narrow ? Math.min(130, 50 * (n - 1)) : Math.min(120, 34 * (n - 1));
+  return Array.from({ length: n }, (_, i) => {
+    const a = ((90 - spread / 2 + (n === 1 ? 0 : (spread * i) / (n - 1))) * Math.PI) / 180;
+    return narrow
+      ? { x: 50 + 38 * Math.cos(a), y: 10 + 68 * Math.sin(a) }
+      : { x: 50 + 42 * Math.cos(a), y: 7 + 73 * Math.sin(a) };
+  });
+}
 
 export class BlackjackTable {
   private readonly rng = createRng();
@@ -139,7 +273,7 @@ export class BlackjackTable {
   private timer: number | undefined;
   private modal: 'none' | 'leave' | 'settings' = 'none';
   private logCursor = 0;
-  private seen = new Set<string>();
+  private readonly felt = new BjFelt();
   /** Wins in a row this sitting (a push doesn't break it). */
   private run = 0;
   private recorded: Round | null = null;
@@ -358,137 +492,29 @@ export class BlackjackTable {
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
       </header>
-      <div class="table-wrap">${this.tableHtml(r)}</div>
+      <div class="table-wrap">${this.feltHtml(r)}</div>
       <div class="actionbar">${this.actionsHtml(r)}</div>
     </div>
     ${this.modalHtml()}`;
-    if (this.seen.size > 3000) this.seen.clear();
     this.opening = false;
     this.bind();
   }
 
-  /** Where each spot sits on the arc, first base (dealt first) on the right. */
-  private spotLayout(): { x: number; y: number }[] {
-    const n = this.spots.length;
-    const narrow = window.matchMedia('(max-width: 720px)').matches;
-    const spread = n === 1 ? 0 : narrow ? Math.min(130, 50 * (n - 1)) : Math.min(120, 34 * (n - 1));
-    return this.spots.map((_, i) => {
-      const a = ((90 - spread / 2 + (n === 1 ? 0 : (spread * i) / (n - 1))) * Math.PI) / 180;
-      return narrow
-        ? { x: 50 + 38 * Math.cos(a), y: 10 + 68 * Math.sin(a) }
-        : { x: 50 + 42 * Math.cos(a), y: 7 + 73 * Math.sin(a) };
-    });
-  }
-
-  /** A card, with the deal animation the first time it shows (staggered for the opening deal). */
-  private card(c: number | null, key: string, delay: number, cls = '', style = ''): string {
-    const fresh = !this.seen.has(key);
-    if (fresh) this.seen.add(key);
-    const anim = fresh ? ` deal" style="animation-delay:${delay.toFixed(2)}s;${style}` : `" style="${style}`;
-    return cardHtml(c, cls).replace(/" aria-label=/, `${anim}" aria-label=`);
-  }
-
-  private tableHtml(r: Round | null): string {
-    const pos = this.spotLayout();
-    const n = this.spots.length;
-    const opening = this.opening;
-    const parts: string[] = [];
-
-    // The dealer.
-    let dealer = '<div class="bj-cards dealer-cards empty"></div>';
-    let dealerTotal = '';
-    if (r) {
-      const cards = r.dealer.map((c, k) => {
-        const visible = k === 0 || r.holeShown;
-        const delay = k < 2 && opening ? (k * (n + 1) + n) * DEAL_GAP : 0;
-        return this.card(visible ? c : null, `${this.rounds}:d:${k}:${visible}`, delay, '', `--k:${k}`);
-      }).join('');
-      dealer = `<div class="bj-cards dealer-cards" style="--n:${r.dealer.length}">${cards}</div>`;
-      const shown = r.dealerVisible;
-      dealerTotal = `<span class="bj-total ${r.holeShown && handTotal(r.dealer).total > 21 ? 'bust' : ''} ${r.holeShown && isNatural(r.dealer) ? 'natural' : ''}">${describeTotal(shown, r.holeShown && isNatural(r.dealer))}</span>`;
-    }
-    parts.push(`<div class="bj-dealer">${dealer}<div class="bj-dealer-tag"><span class="bj-dealer-name">Dealer</span>${dealerTotal}</div></div>`);
-
-    this.spots.forEach((spot, si) => {
-      const p = pos[si];
-      const seat = r?.seats[si];
-      const classes = ['bj-spot'];
-      if (spot.isHuman) classes.push('me');
-      const acting = !!r && ((r.phase === 'play' && r.seatTurn === si) || (r.phase === 'insurance' && r.insuranceTurn() === si));
-      if (acting) classes.push('acting');
-      let hands = '';
-      let wager = 0;
-      let tag = '';
-      if (seat) {
-        // After a round the spot shows the hands, but the circle holds the next bet.
-        wager = r!.isComplete ? (spot.isHuman ? this.bet : 0) : seat.hands.reduce((sum, h) => sum + h.bet, 0);
-        hands = seat.hands.map((h, hi) => this.handHtml(r!, h, si, hi, opening ? n : -1)).join('');
-        const net = r!.net(si);
-        if (r!.isComplete) {
-          classes.push(net > 0 ? 'winner' : net < 0 ? 'loser' : 'pushed');
-          tag = `<span class="bubble ${net > 0 ? 'won' : net < 0 ? 'lost' : ''}">${net > 0 ? `+${fmt(net)}` : net < 0 ? `−${fmt(-net)}` : 'Even'}</span>`;
-        } else if (seat.insurance) tag = `<span class="bubble">Insured ${fmt(seat.insurance)}</span>`;
-      } else if (spot.isHuman) wager = this.bet;
-      const circle = `<div class="bj-circle ${wager ? 'has-bet' : ''}">${wager ? `${chipsHtml(wager, 6)}<span>${fmt(wager)}</span>` : ''}</div>`;
-      const stack = spot.isHuman ? this.bank : spot.stack;
-      const title = spot.isHuman ? currentTitle() : null;
-      parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
-        <div class="bj-hands">${hands}</div>
-        ${circle}
-        <div class="pod" title="${esc(spot.name)}">
-          <span class="avatar lv-${spot.level}">${esc(spot.name.slice(0, 1).toUpperCase())}</span>
-          <span class="plate"><span class="nm">${esc(spot.name)}</span><span class="stk">${fmt(stack)}</span></span>
-          ${spot.isHuman ? (title ? `<span class="lvl lv-human ttl">${esc(title)}</span>` : '') : '<span class="lvl lv-' + spot.level + '">Bot</span>'}
-        </div>
-        <div class="bubbles">${tag}</div>
-      </div>`);
-    });
-
-    const msg = !r
-      ? '<div class="bj-msg">Place your bet</div>'
-      : this.shuffleNote && opening ? '<div class="bj-msg">Fresh shoe, shuffled</div>' : '';
-    return `<div class="bj-table">
-      <div class="bj-rail"><div class="bj-felt">
-        <svg class="bj-print" viewBox="0 0 1000 500" aria-hidden="true">
-          <defs>
-            <path id="bj-arc1" d="M 260 150 A 240 60 0 0 0 740 150"/>
-            <path id="bj-arc2" d="M 290 122 A 210 50 0 0 0 710 122"/>
-          </defs>
-          <text class="bj-print-big"><textPath href="#bj-arc1" startOffset="50%" text-anchor="middle">BLACKJACK PAYS 3 TO 2</textPath></text>
-          <text class="bj-print-small"><textPath href="#bj-arc2" startOffset="50%" text-anchor="middle">Dealer stands on all 17s · Insurance pays 2 to 1</textPath></text>
-        </svg>
-      </div></div>
-      <div class="bj-shoe" title="${this.shoe.remaining} cards left in the shoe"><span></span></div>
-      <div class="bj-tray" aria-hidden="true">${[5000, 1000, 500, 100, 25, 5].map((v) => `<i class="v${v}"></i>`).join('')}</div>
-      ${msg}
-      ${parts.join('')}
-    </div>`;
-  }
-
-  private handHtml(r: Round, h: BjHand, si: number, hi: number, openingSeats: number): string {
-    const seat = r.seats[si];
-    const active = r.phase === 'play' && r.seatTurn === si && r.handTurn === hi;
-    const cls = ['bj-hand'];
-    if (active && seat.hands.length > 1) cls.push('active');
-    if (h.outcome) cls.push(`o-${h.outcome}`);
-    const cards = h.cards.map((c, k) => {
-      const delay = openingSeats >= 0 && k < 2 ? (k * (openingSeats + 1) + si) * DEAL_GAP : 0;
-      return this.card(c, `${this.rounds}:${si}:${hi}:${k}:${c}`, delay, '', `--k:${k}`);
-    }).join('');
-    const natural = isNatural(h.cards) && !h.split;
-    const total = describeTotal(h.cards, natural);
-    const bust = handTotal(h.cards).total > 21;
-    const result = h.outcome && h.outcome !== 'blackjack' && h.outcome !== 'bust' ? `<span class="bj-result">${OUTCOME_TEXT[h.outcome]}</span>` : '';
-    const bet = seat.hands.length > 1 ? `<span class="bj-hbet">${fmt(h.bet)}</span>` : h.doubled ? '<span class="bj-hbet">Doubled</span>' : '';
-    return `<div class="${cls.join(' ')}">
-      <div class="bj-cards" style="--n:${h.cards.length}">${cards}</div>
-      <div class="bj-tags"><span class="bj-total ${bust ? 'bust' : ''} ${natural ? 'natural' : ''}">${total}</span>${result}${bet}</div>
-    </div>`;
+  private feltHtml(r: Round | null): string {
+    const spots: FeltSpot[] = this.spots.map((s, i) => ({
+      name: s.name, me: s.isHuman, stack: s.isHuman ? this.bank : s.stack, level: s.level,
+      label: s.isHuman ? currentTitle() : 'Bot', seat: r ? i : -1,
+      // Between rounds the circle holds the next bet.
+      bet: s.isHuman && (!r || r.isComplete) ? this.bet : 0,
+    }));
+    const msg = !r ? 'Place your bet' : this.shuffleNote && this.opening ? 'Fresh shoe, shuffled' : '';
+    return this.felt.html({ round: r ? r.view() : null, spots, roundNo: this.rounds, opening: this.opening, msg, shoeTitle: `${this.shoe.remaining} cards left in the shoe` });
   }
 
   private actionsHtml(r: Round | null): string {
     const bank = this.bank;
-    const { min, max, chips } = this.limits;
+    const { min, max } = this.limits;
+    const chips = BJ_CHIPS[this.h.setup.limits];
     if (!r || r.isComplete) {
       // Between rounds: build the next bet.
       const lines: string[] = [];

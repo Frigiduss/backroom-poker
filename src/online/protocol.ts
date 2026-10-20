@@ -1,6 +1,7 @@
 // What travels between the browser and the poker-table server function. The server keeps
 // the deck, every player's cards and the shuffle seed to itself; each player only ever
 // receives a TableView, which shows their own cards and whatever the table can see.
+import { BjLegal, BjLimits, RoundData, RoundRig, RoundView } from '../engine/blackjack';
 import { Card } from '../engine/cards';
 import { Action, ActionRecord, HandPhase, HandResult, LegalActions, LogEntry, PlayerStatus, Stakes } from '../engine/hand';
 import { BotStyle, Difficulty, Format, PlayerStats } from '../engine/table';
@@ -17,9 +18,17 @@ export interface TableSettings {
   difficulty: DifficultyChoice;
   stackBB: number;
   blindSpeed: BlindSpeed;
-  /** Seats at the table, people plus bots. */
+  /** Seats at the table, people plus bots. At blackjack, the most people who can sit. */
   seats: number;
+  /** Poker unless it says blackjack (then the poker fields above are unused). */
+  game?: 'poker' | 'blackjack';
+  /** Blackjack: the table limits. */
+  bjLimits?: BjLimits;
+  /** Blackjack: bots in the other spots. */
+  bots?: number;
 }
+
+export type BjMove = 'bet' | 'sitout' | 'hit' | 'stand' | 'double' | 'split' | 'insure' | 'noinsure';
 
 /** Who is sitting down: the player (profile) id, so online achievements go to the right player, and the title they wear. */
 export interface PlayerTag {
@@ -37,6 +46,8 @@ export type Request =
   /** Lets the server move things along: a bot's turn, a player's clock running out, the next deal. */
   | { op: 'tick'; tableId: string; version: number }
   | { op: 'rebuy'; tableId: string }
+  /** A blackjack move; `round` is the round number it was made for, and `amount` the bet. */
+  | { op: 'bj'; tableId: string; round: number; move: BjMove; amount?: number }
   /** Take your seat back from the bot that played while you were away. */
   | { op: 'back'; tableId: string }
   /** Developer console: change or look inside any table. Only admin accounts (supabase/admin.sql). */
@@ -62,7 +73,11 @@ export type AdminCommand =
   /** Removes a person from the table (a bot plays their chips). */
   | { do: 'kick'; member: string }
   /** Deletes the table for everyone. */
-  | { do: 'close' };
+  | { do: 'close' }
+  /** Blackjack: these cards come out of the shoe next, in order. */
+  | { do: 'stackshoe'; cards: Card[] }
+  /** Blackjack: swaps the dealer's face-down card in the round in play. */
+  | { do: 'hole'; card: Card };
 
 /** Everything about a live table, every card included. Only ever sent to admins. */
 export interface AdminTableInfo {
@@ -93,6 +108,24 @@ export interface AdminTableInfo {
   };
   /** Cards fixed for the next hand, by seat id. */
   nextRig: { hole: Record<string, Card[]>; board: Card[] } | null;
+  /** A blackjack table, every card included. */
+  bj?: BjAdminInfo | null;
+}
+
+export interface BjAdminInfo {
+  phase: 'betting' | 'round';
+  roundNumber: number;
+  spots: { id: string; name: string; isHuman: boolean; stack: number; bet: number | null; sittingOut: boolean; away: boolean }[];
+  /** The round on the table, hole card included. */
+  round: RoundData | null;
+  /** Spot ids of the round's seats, in order. */
+  inRound: string[];
+  /** Next cards out of the shoe, first one first. */
+  upcoming: Card[];
+  shoeLeft: number;
+  shoeSize: number;
+  /** Cards fixed for the next round: seats by spot id, and the dealer's upcard and hole card. */
+  nextRig: RoundRig | null;
 }
 
 export interface AdminTableSummary {
@@ -220,6 +253,49 @@ export interface TableView {
   stalled: boolean;
   /** An admin has paused the table from the developer console. */
   paused?: boolean;
+  /** A blackjack table: everything about it (the poker fields above stay empty). */
+  bj?: BjTableView | null;
+}
+
+/** One spot at an online blackjack table. */
+export interface BjSpotView {
+  id: string;
+  name: string;
+  title: string | null;
+  isHuman: boolean;
+  stack: number;
+  rebuys: number;
+  away: boolean;
+  you: boolean;
+  /** Betting: the bet placed, or null. */
+  bet: number | null;
+  /** Betting: chose to sit this round out. */
+  sittingOut: boolean;
+  /** Index into the round's seats, or -1 when the spot isn't in the round on the table. */
+  seat: number;
+}
+
+export interface BjTableView {
+  limits: BjLimits;
+  min: number;
+  max: number;
+  startingStack: number;
+  /** Taking bets for the next round, or a round on the table. */
+  phase: 'betting' | 'round';
+  roundNumber: number;
+  spots: BjSpotView[];
+  /** The round in play, or the last one played (shown while bets go down). */
+  round: RoundView | null;
+  /** The viewer's choices when it is their turn to play a hand. */
+  legal: BjLegal | null;
+  /** What insurance costs, when it is the viewer's turn to decide on it. */
+  insuranceCost: number | null;
+  /** When betting closes. */
+  bettingEndsAt: number | null;
+  shoeLeft: number;
+  shoeSize: number;
+  /** The viewer's last bet, offered again. */
+  lastBet: number;
 }
 
 export const TURN_SECONDS = 30;

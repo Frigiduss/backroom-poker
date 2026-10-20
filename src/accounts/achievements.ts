@@ -454,7 +454,8 @@ export function tournamentTally(f: TournamentFinish): Tally {
 export function blackjackTally(round: Round, seat: number, run = 0): Tally {
   const t = emptyTally();
   const s = round.seats[seat];
-  if (!round.isComplete || !s) return t;
+  // A round the developer console rigged proves nothing.
+  if (!round.isComplete || !s || round.rigged) return t;
   const add = (k: string, by = 1) => (t.sum[k] = (t.sum[k] ?? 0) + by);
   const net = round.net(seat);
   add('bj.hands');
