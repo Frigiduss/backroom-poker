@@ -11,6 +11,7 @@ import {
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { initAccounts, player, playerBadgeHtml, renderProfile, renderWelcome, savePlayer, selectPlayer } from './profiles';
+import { SoundName, play, setVolume } from './sound';
 
 // ---------- settings ----------
 
@@ -35,6 +36,8 @@ interface Prefs {
   showOdds: boolean;
   fourColor: boolean;
   reveal: boolean;
+  sound: boolean;
+  volume: number;
 }
 
 // Before player accounts, settings lived under these keys. They seed the first player.
@@ -43,7 +46,7 @@ const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
   variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You',
 };
-const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false };
+const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
 let prefs: Prefs = { ...DEFAULT_PREFS };
 
@@ -52,6 +55,7 @@ function loadSettings(p: Profile) {
   setup = { ...DEFAULT_SETUP, ...(p.settings.setup as Partial<Setup> | undefined), name: p.name };
   prefs = { ...DEFAULT_PREFS, ...(p.settings.prefs as Partial<Prefs> | undefined) };
   if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
+  setVolume(prefs.volume, !prefs.sound);
 }
 
 function saveSettings() {
@@ -250,6 +254,7 @@ class Game {
   private logOpen = window.matchMedia('(min-width: 1280px)').matches;
   private oddsKey = '';
   private oddsValue: number | null = null;
+  private turnCue = '';
   private stopped = false;
   /** The player whose bank pays for this game. */
   private readonly profile = player();
@@ -358,11 +363,13 @@ class Game {
       this.logHand = hand;
       this.logCursor = 0;
     }
+    const fresh = hand.log.slice(this.logCursor);
     for (; this.logCursor < hand.log.length; this.logCursor++) {
       const e = hand.log[this.logCursor];
       const text = e.kind === 'start' ? `Hand ${this.table.handNumber} · ${e.text}` : e.text;
       this.log.push({ text: this.speak(text), kind: e.kind, me: e.player !== undefined && e.player === this.humanIndex });
     }
+    this.playSounds(hand, fresh);
     if (this.log.length > 500) this.log.splice(0, this.log.length - 500);
 
     if (hand.isComplete) {
@@ -409,6 +416,40 @@ class Game {
     this.sync();
   }
 
+  /** Turn the log lines a sync just added into table sounds, spaced out so a burst (blinds, a deal) reads clearly. */
+  private playSounds(hand: Hand, entries: Hand['log']) {
+    const cues: SoundName[] = [];
+    let won = false;
+    for (const e of entries) {
+      const t = e.text;
+      if (e.kind === 'start') cues.push('shuffle');
+      else if (e.kind === 'deal') cues.push('deal', 'deal', 'deal');
+      else if (e.kind === 'street') cues.push(hand.variant.family === 'flop' ? 'flip' : 'deal');
+      else if (e.kind === 'info' && / shows /.test(t)) cues.push('flip');
+      else if (e.kind === 'win') won = true;
+      else if (e.kind === 'action') {
+        if (/all-in/.test(t)) cues.push('allin');
+        else if (/ folds$/.test(t)) cues.push('fold');
+        else if (/ (checks|stands pat)$/.test(t)) cues.push('check');
+        else if (/ draws \d/.test(t)) cues.push('deal', 'deal');
+        else cues.push('chips');
+      }
+    }
+    if (won) {
+      const res = hand.result;
+      const hi = this.humanIndex;
+      const mine = !!res && hi >= 0 && res.pots.some((p) => (p.eligible.length > 1 || !res.showdown) && [...p.winnersHi, ...p.winnersLo].includes(hi));
+      cues.push(mine ? 'win' : 'pot');
+    }
+    const key = `${this.table.handNumber}:${hand.log.length}`;
+    if (!hand.isComplete && hand.toAct >= 0 && hand.toAct === this.humanIndex && !this.spectating && this.turnCue !== key) {
+      this.turnCue = key;
+      cues.push('turn');
+    }
+    // Keep a long burst short: the last few cues are the ones that matter.
+    cues.slice(-6).forEach((c, i) => play(c, i * 0.13));
+  }
+
   /** Engine text is third person ("Ada calls"). When the player is named "You", fix the verbs. */
   private speak(text: string): string {
     if (this.humanSeat.name !== 'You') return text;
@@ -448,6 +489,7 @@ class Game {
         </div>
         <div class="tb-actions">
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
+          <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
@@ -690,6 +732,9 @@ class Game {
       return `<div class="overlay"><div class="modal" role="dialog" aria-labelledby="set-title">
         <h2 id="set-title">Table settings</h2>
         <div class="field"><span class="flabel">Bot speed</span><div class="seg">${speeds.map(([s, l]) => `<button type="button" data-speed="${s}" aria-pressed="${prefs.speed === s}">${l}</button>`).join('')}</div></div>
+        <div class="field"><label for="pref-volume">Sound volume <output id="vol-out">${prefs.sound ? `${Math.round(prefs.volume * 100)}%` : 'Muted'}</output></label>
+          <input id="pref-volume" class="slider" type="range" min="0" max="100" step="5" value="${Math.round(prefs.volume * 100)}"></div>
+        <label class="toggle"><input type="checkbox" id="pref-sound" ${prefs.sound ? 'checked' : ''}> Play table sounds</label>
         <label class="toggle"><input type="checkbox" id="pref-auto" ${prefs.autoDeal ? 'checked' : ''}> Deal the next hand automatically</label>
         <label class="toggle"><input type="checkbox" id="pref-odds" ${prefs.showOdds ? 'checked' : ''}> Show my pot share against random hands</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
@@ -829,6 +874,7 @@ class Game {
       if (el) el.onchange = () => {
         (prefs[key] as boolean) = el.checked;
         saveSettings();
+        setVolume(prefs.volume, !prefs.sound);
         this.render();
       };
     };
@@ -836,6 +882,31 @@ class Game {
     pref('pref-odds', 'showOdds');
     pref('pref-four', 'fourColor');
     pref('pref-reveal', 'reveal');
+    pref('pref-sound', 'sound');
+    on('sound-toggle', () => this.toggleSound());
+    const vol = document.getElementById('pref-volume') as HTMLInputElement | null;
+    if (vol) {
+      vol.oninput = () => {
+        prefs.volume = Number(vol.value) / 100;
+        if (prefs.volume > 0) prefs.sound = true;
+        setVolume(prefs.volume, !prefs.sound);
+        document.getElementById('vol-out')!.textContent = `${vol.value}%`;
+        const box = document.getElementById('pref-sound') as HTMLInputElement | null;
+        if (box) box.checked = prefs.sound;
+      };
+      vol.onchange = () => {
+        saveSettings();
+        play('chips');
+      };
+    }
+  }
+
+  private toggleSound() {
+    prefs.sound = !prefs.sound;
+    saveSettings();
+    setVolume(prefs.volume, !prefs.sound);
+    this.render();
+    play('chips');
   }
 
   private openModal(m: 'settings' | 'leave') {
@@ -871,6 +942,10 @@ class Game {
       if (document.getElementById('do-check')) click('do-check');
       else click('do-call');
     } else if (k === 'r') click('do-raise');
+    else if (k === 'm') {
+      e.preventDefault();
+      this.toggleSound();
+    }
   }
 }
 
