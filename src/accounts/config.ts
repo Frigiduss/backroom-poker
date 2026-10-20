@@ -7,6 +7,6 @@ import { OnlineConfig } from './online';
  * supabase/setup.sql is what keeps each account's players private.
  */
 export const ONLINE: OnlineConfig = {
-  url: '',
-  anonKey: '',
+  url: 'https://yqvizfunfdxtlozvtqfs.supabase.co',
+  anonKey: 'sb_publishable_LTshLjzpLxeYiRB9Zkz8aA_24T7b0Bm',
 };
