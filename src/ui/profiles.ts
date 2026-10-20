@@ -5,6 +5,7 @@ import {
 import { VARIANTS, VariantId } from '../engine/variants';
 import { makeCard } from '../engine/cards';
 import { cardHtml, esc, fmt, titleHtml } from './dom';
+import { applyLook } from './looks';
 
 // ---------- the signed-in player ----------
 
@@ -59,6 +60,7 @@ export async function openPlayer(onReady: () => void, app: HTMLElement) {
   const p = players.find((x) => x.id === id) ?? players.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
   if (!p) {
     current = null;
+    applyLook(null, {});
     return renderWelcome(app, onReady);
   }
   await selectPlayer(p);
@@ -100,6 +102,7 @@ export function player(): Profile {
 
 export async function selectPlayer(p: Profile | null) {
   current = p;
+  applyLook(p, serverAwards());
   await store.setCurrentId(p?.id ?? null);
 }
 
@@ -128,6 +131,8 @@ export async function refreshAwards(): Promise<Achievement[]> {
       /* offline for now: keep what we had */
     }
   }
+  // A felt unlocked online only counts once the table server's progress is in.
+  applyLook(p, serverAwards());
   const fresh = takeUnlocks(p, serverAwards());
   if (fresh.length) await savePlayer();
   return fresh;
@@ -381,6 +386,7 @@ async function signOutTo(app: HTMLElement, onReady: () => void) {
   await auth?.signOut();
   store = local;
   current = null;
+  applyLook(null, {});
   saveError = '';
   renderAuth(app, onReady);
 }
@@ -418,7 +424,7 @@ function achievementsStripHtml(p: Profile): string {
     <span class="sl">Achievements</span>
     <b>${got} <span>of ${ACHIEVEMENTS.length}</span></b>
     <span class="bar" aria-hidden="true"><i style="width:${(got / ACHIEVEMENTS.length) * 100}%"></i></span>
-    <span class="pb-more">${p.title ? 'See all and titles' : 'See all · pick a title'}</span>
+    <span class="pb-more">See all · titles, felts and card backs</span>
   </button>`;
 }
 
