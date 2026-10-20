@@ -16,6 +16,7 @@ import { announce, checkAchievements, renderAchievements } from './achievements'
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { bindGamePicker, gamePickerHtml } from './picker';
+import { bindLobbyExtras, lobbyExtrasHtml } from './leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
@@ -138,7 +139,7 @@ function renderSetup() {
         <span class="eyebrow">Card room · open all night</span>
         <h1>Back Room <em>Poker</em></h1>
       </div>
-      <div class="lobby-top">${consoleButtonHtml()}${playerBadgeHtml()}</div>
+      <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${playerBadgeHtml()}</div>
     </header>
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
@@ -246,6 +247,7 @@ function renderSetup() {
     },
   }));
   bindConsoleButton();
+  bindLobbyExtras(app, renderSetup);
   void refreshConsoleAccess();
   if (awardsChecked !== me.id) {
     // Once per player: pick up achievements the table server credited since last time.
