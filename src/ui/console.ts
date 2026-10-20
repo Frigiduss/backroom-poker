@@ -787,6 +787,7 @@ const COMMANDS: Command[] = [
       const a = d.action;
       const what = a.type === 'raise' ? `raise to ${fmt(a.to)}` : a.type === 'draw' ? `discard ${a.discard.length}` : a.type;
       out(`${esc(seat.name)} (${DIFFICULTY_NAMES[bot.difficulty]} ${STYLE_NAMES[bot.style]}) would <b>${what}</b>${d.equity !== undefined ? ` · thinks it wins ${Math.round(d.equity * 100)}% of the time` : ''}`);
+      if (d.reason) out(esc(d.reason), 'dim');
     },
   },
   {

@@ -1,7 +1,7 @@
-import { Bot, STYLE_NAMES } from '../bots/bot';
+import { Bot, Decision, STYLE_NAMES } from '../bots/bot';
 import { simulateEquity, specFromView } from '../bots/equity';
 import { buildView } from '../bots/view';
-import { createRng, shuffle } from '../engine/cards';
+import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
@@ -36,6 +36,8 @@ interface Setup {
   blindSpeed: BlindSpeed;
   name: string;
   bj: BjSetup;
+  /** Free table with a coach: hints on every decision, no bank, stats or achievements. */
+  practice: boolean;
 }
 
 interface Prefs {
@@ -52,7 +54,7 @@ interface Prefs {
 const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
-  game: 'poker', bj: DEFAULT_BJ, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You',
+  game: 'poker', bj: DEFAULT_BJ, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -117,9 +119,11 @@ function renderSetup() {
   const familyName = { flop: 'Community cards', draw: 'Draw', stud: 'Stud' } as const;
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
   const cost = entryCost(setup);
-  const affordable = canAfford(me, cost);
+  const affordable = setup.practice || canAfford(me, cost);
   const field = (setup.format === 'headsup' ? 1 : setup.opponents) + 1;
-  const costLine = setup.format === 'cash'
+  const costLine = setup.practice
+    ? 'Free practice chips · your bank, stats and achievements stay as they are'
+    : setup.format === 'cash'
     ? `Buy-in <b>${fmt(cost)}</b> from your bank of ${fmt(me.bank)}`
     : `Entry <b>${fmt(cost)}</b> · first place wins ${fmt(prizeFor(1, field))}`;
 
@@ -161,7 +165,7 @@ function renderSetup() {
 
       ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
-          <span class="eyebrow">Your table</span>
+          <span class="eyebrow">${setup.practice ? 'Your practice table' : 'Your table'}</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
           <span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
         </div>
@@ -200,6 +204,11 @@ function renderSetup() {
             ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed)}
             <span class="hint">Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.</span>
           </div>`}
+          <div class="field practice-field">
+            <span class="flabel">Practice with hints</span>
+            ${seg('practice', [['off', 'Off'], ['on', 'On']], setup.practice ? 'on' : 'off')}
+            <span class="hint">On your turn a Hard bot shows your odds, what it would do and why. Free chips, and nothing counts toward your record.</span>
+          </div>
         </div>
         <div class="deal-box">
           <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? costLine : `You need ${fmt(cost)} chips and your bank has ${fmt(me.bank)}.${setup.format === 'cash' && setup.stackBB > 50 && canAfford(me, 50 * BIG_BLIND) ? ' Try a smaller starting stack.' : ''}`}</span>
@@ -233,6 +242,7 @@ function renderSetup() {
   app.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach((b) => (b.onclick = () => update(() => (setup.difficulty = b.dataset.difficulty as DifficultyChoice))));
   app.querySelectorAll<HTMLButtonElement>('[data-stack]').forEach((b) => (b.onclick = () => update(() => (setup.stackBB = Number(b.dataset.stack)))));
   app.querySelectorAll<HTMLButtonElement>('[data-blinds]').forEach((b) => (b.onclick = () => update(() => (setup.blindSpeed = b.dataset.blinds as BlindSpeed))));
+  app.querySelectorAll<HTMLButtonElement>('[data-practice]').forEach((b) => (b.onclick = () => update(() => (setup.practice = b.dataset.practice === 'on'))));
   const opp = document.getElementById('opp') as HTMLInputElement | null;
   if (opp) {
     opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
@@ -316,6 +326,10 @@ class Game implements DevGame {
   private logOpen = window.matchMedia('(min-width: 1280px)').matches;
   private oddsKey = '';
   private oddsValue: number | null = null;
+  /** What a Hard bot would do in the player's seat, for practice tables. */
+  private coach: Bot | null = null;
+  private hintKey = '';
+  private hint: Decision | null = null;
   private turnCue = '';
   private stopped = false;
   /** The player whose bank pays for this game. */
@@ -352,12 +366,18 @@ class Game implements DevGame {
       seats,
     });
     for (const seat of this.table.seats) if (!seat.isHuman) this.bots.set(seat.id, new Bot(seat.difficulty!, seat.style));
+    if (s.practice) this.coach = new Bot('hard');
+  }
+
+  /** Practice tables play for free chips and leave the player's record alone. */
+  get practice(): boolean {
+    return this.setup.practice;
   }
 
   /** Pays the buy-in or entry fee and deals the first hand. False if the bank can't cover it. */
   start(): boolean {
     const p = this.profile;
-    const paid = this.table.isTournament ? enterTournament(p) : buyIn(p, this.table.config.startingStack);
+    const paid = this.practice || (this.table.isTournament ? enterTournament(p) : buyIn(p, this.table.config.startingStack));
     if (!paid) return false;
     savePlayer();
     document.addEventListener('keydown', this.keyHandler);
@@ -371,6 +391,7 @@ class Game implements DevGame {
     this.stopped = true;
     clearTimeout(this.timer);
     document.removeEventListener('keydown', this.keyHandler);
+    if (this.practice) return;
     if (this.table.isTournament) abandonTournament(this.profile);
     else {
       const net = cashOut(this.profile, this.myStack());
@@ -391,6 +412,7 @@ class Game implements DevGame {
   private recordResult(hand: Hand) {
     if (this.recorded === hand) return;
     this.recorded = hand;
+    if (this.practice) return;
     const p = this.profile;
     const hi = this.humanIndex;
     if (hand.wasRigged || this.autopilot) this.tainted = true;
@@ -587,7 +609,7 @@ class Game implements DevGame {
       <header class="topbar">
         <div class="tb-game">
           <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
-          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
+          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.practice ? ' · <b class="practice-flag">Practice</b>' : ''}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
         </div>
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 18h7"/></svg><span>Console</span></button>` : ''}
@@ -733,7 +755,8 @@ class Game implements DevGame {
     const p = hand.players[hi];
     const name = describeHolding(hand.variant, p.cards, hand.board);
     let odds = '';
-    if (prefs.showOdds && !hand.isComplete && p.status !== 'folded') {
+    const coaching = !!this.coach && !this.spectating && !this.autopilot && hand.toAct === hi;
+    if (prefs.showOdds && !coaching && !hand.isComplete && p.status !== 'folded') {
       const live = hand.players.filter((q) => q.status !== 'folded').length;
       const key = `${this.table.handNumber}|${hand.street}|${hand.phase}|${hand.board.length}|${live}|${p.cards.join(',')}`;
       if (key !== this.oddsKey) {
@@ -750,6 +773,35 @@ class Game implements DevGame {
       }
     }
     return `<div class="myhand"><span class="hn">${esc(name || ' ')}</span>${odds}</div>`;
+  }
+
+  /** The coach's read on the player's decision: equity, the price of a call, and what a Hard bot would do. */
+  private hintHtml(): string {
+    const hand = this.hand!;
+    const hi = this.humanIndex;
+    if (!this.coach || this.spectating || this.autopilot || hand.isComplete || hand.toAct !== hi) return '';
+    const key = `${this.table.handNumber}|${hand.actions.length}|${hand.phase}|${hand.street}`;
+    if (key !== this.hintKey) {
+      this.hintKey = key;
+      this.hint = this.coach.think(buildView(hand, hi, this.table.stats));
+    }
+    const d = this.hint;
+    if (!d) return '';
+    const a = d.action;
+    const cards = hand.players[hi].cards;
+    const L = hand.legal();
+    const what = a.type === 'raise'
+      ? `${L.kind === 'bet' && L.bringIn ? 'Complete to' : L.kind === 'bet' && L.isBet ? 'Bet' : 'Raise to'} ${fmt(a.to)}`
+      : a.type === 'draw'
+        ? (a.discard.length ? `Throw away ${a.discard.map((k) => cardLabel(cards[k])).join(' ')}` : 'Stand pat')
+        : a.type === 'bringin' ? 'Bring in' : a.type[0].toUpperCase() + a.type.slice(1);
+    const stats: string[] = [];
+    if (d.equity !== undefined) stats.push(`<span>Equity <b>${Math.round(d.equity * 100)}%</b></span>`);
+    if (d.potOdds !== undefined) stats.push(`<span>Pot odds <b>${Math.round(d.potOdds * 100)}%</b></span>`);
+    return `<div class="hint-panel" role="note" aria-label="Practice hint">
+      <span class="hp-head"><span class="eyebrow">Hard bot would</span><b class="hp-act">${esc(what)}</b>${stats.join('')}</span>
+      ${d.reason ? `<span class="hp-why">${esc(d.reason)}</span>` : ''}
+    </div>`;
   }
 
   private actionsHtml(): string {
@@ -772,11 +824,11 @@ class Game implements DevGame {
     const L = hand.legal();
     if (L.kind === 'draw') {
       const n = this.selected.size;
-      return `${mine}<span class="status">Tap the cards you want to throw away.</span>
+      return `${mine}${this.hintHtml()}<span class="status">Tap the cards you want to throw away.</span>
         <div class="acts"><button type="button" class="act raise" id="do-draw">${n ? `Discard ${n} and draw` : 'Stand pat'}</button></div>`;
     }
     if (L.kind !== 'bet') return mine;
-    return `${mine}<div class="acts">${this.betButtons(L, hand)}</div>`;
+    return `${mine}${this.hintHtml()}<div class="acts">${this.betButtons(L, hand)}</div>`;
   }
 
   private betButtons(L: Extract<LegalActions, { kind: 'bet' }>, hand: Hand): string {
@@ -841,7 +893,7 @@ class Game implements DevGame {
         <label class="toggle"><input type="checkbox" id="pref-auto" ${prefs.autoDeal ? 'checked' : ''}> Deal the next hand automatically</label>
         <label class="toggle"><input type="checkbox" id="pref-odds" ${prefs.showOdds ? 'checked' : ''}> Show my pot share against random hands</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
-        <label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Practice mode: show the bots' cards</label>
+        <label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Show the bots' cards (peek at their hands)</label>
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
     }
@@ -849,18 +901,20 @@ class Game implements DevGame {
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>Leave the table?</h2>
         <p>${t.isTournament
-          ? (this.prize !== null ? 'You go back to the game menu.' : `You give up your ${fmt(TOURNAMENT_FEE)} entry fee and go back to the game menu.`)
-          : `Your ${fmt(this.myStack())} chips go back to your bank.${this.hand && !this.hand.isComplete && this.humanIndex >= 0 && this.hand.players[this.humanIndex].status !== 'folded' ? ' Chips already in this pot are lost.' : ''}`}</p>
+          ? (this.practice ? 'It\'s a practice tournament, so nothing is lost.' : this.prize !== null ? 'You go back to the game menu.' : `You give up your ${fmt(TOURNAMENT_FEE)} entry fee and go back to the game menu.`)
+          : this.practice ? 'Practice chips stay at the table.' : `Your ${fmt(this.myStack())} chips go back to your bank.${this.hand && !this.hand.isComplete && this.humanIndex >= 0 && this.hand.players[this.humanIndex].status !== 'folded' ? ' Chips already in this pot are lost.' : ''}`}</p>
         <div class="row"><button type="button" class="btn" id="close-modal">Keep playing</button><button type="button" class="btn btn-primary" id="confirm-leave">Leave</button></div>
       </div></div>`;
     }
     if (this.modal === 'busted') {
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>You're out of chips</h2>
-        ${canAfford(this.profile, t.config.startingStack)
+        ${this.practice
+          ? `<p>It's a practice table, so another ${fmt(t.config.startingStack)} in practice chips is on the house.</p>`
+          : canAfford(this.profile, t.config.startingStack)
           ? `<p>Buy back in for ${fmt(t.config.startingStack)} from your bank of ${fmt(this.profile.bank)}, or head back to the menu.${this.humanSeat.rebuys ? ` You have bought in ${this.humanSeat.rebuys + 1} times.` : ''}</p>`
           : `<p>Your bank has ${fmt(this.profile.bank)} chips, not enough to buy back in for ${fmt(t.config.startingStack)}.${canRefill(this.profile) ? ' You can refill it from the game menu.' : ' Try a table with a smaller starting stack.'}</p>`}
-        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button>${canAfford(this.profile, t.config.startingStack) ? '<button type="button" class="btn btn-primary" id="rebuy">Buy back in</button>' : ''}</div>
+        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button>${this.practice || canAfford(this.profile, t.config.startingStack) ? '<button type="button" class="btn btn-primary" id="rebuy">Buy back in</button>' : ''}</div>
       </div></div>`;
     }
     if (this.modal === 'over') {
@@ -913,7 +967,7 @@ class Game implements DevGame {
       this.closeModal();
     });
     on('rebuy', () => {
-      if (!buyIn(this.profile, this.table.config.startingStack)) return;
+      if (!this.practice && !buyIn(this.profile, this.table.config.startingStack)) return;
       savePlayer();
       this.table.rebuy(this.humanId);
       this.modal = 'none';
