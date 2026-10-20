@@ -6,11 +6,12 @@ import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
 import {
-  LocalAccountStore, Profile, TOURNAMENT_FEE, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
-  finishTournament, prizeFor, recordHand, refill, setTableStack, settleOpenTable, abandonTournament,
+  LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
+  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
-import { initAccounts, player, playerBadgeHtml, renderProfile, renderWelcome, savePlayer, selectPlayer } from './profiles';
+import { ONLINE } from '../accounts/config';
+import { goOnline, initAccounts, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 
 // ---------- settings ----------
@@ -110,7 +111,10 @@ function renderSetup() {
 
   app.innerHTML = `
   <main class="lobby">
-    <div class="lobby-top">${playerBadgeHtml()}</div>
+    <div class="lobby-top">${(() => {
+      const n = takeNotice();
+      return n ? `<p class="notice" role="status">${esc(n)}</p>` : '';
+    })()}${playerBadgeHtml()}</div>
     <header class="hero">
       <div class="hero-text">
         <span class="eyebrow">Card room · open all night</span>
@@ -962,7 +966,7 @@ window.addEventListener('resize', () => {
   resizeTimer = window.setTimeout(() => game?.render(), 150);
 });
 
-/** Opens the last player on this device, or asks who's playing on a first visit. */
+/** Opens the last player (online if signed in), or asks who's playing on a first visit. */
 async function boot() {
   let storage: Storage | null = null;
   try {
@@ -970,25 +974,34 @@ async function boot() {
   } catch {
     /* storage blocked: players last for this visit */
   }
-  const accounts = new LocalAccountStore(storage);
-  initAccounts(accounts);
-  const profiles = await accounts.list();
-  const currentId = await accounts.currentId();
-  let p = profiles.find((x) => x.id === currentId) ?? profiles.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
-  if (!p) {
-    // Carry over the name and settings from before accounts existed.
-    const legacySetup = store<Partial<Setup>>(LEGACY_SETUP_KEY, {});
-    const legacyPrefs = store<Partial<Prefs>>(LEGACY_PREFS_KEY, {});
-    const settings = Object.keys(legacySetup).length || Object.keys(legacyPrefs).length ? { setup: legacySetup, prefs: legacyPrefs } : {};
-    const name = legacySetup.name && legacySetup.name !== 'You' ? legacySetup.name : '';
-    if (!name) return renderWelcome(app, renderSetup, '', settings);
-    p = createProfile(name, { settings });
-    await accounts.put(p);
+  const local = new LocalAccountStore(storage);
+  const auth = onlineEnabled(ONLINE) ? new OnlineAuth(ONLINE, storage) : null;
+  initAccounts(local, auth, storage);
+  await migrateLegacySettings(local);
+
+  // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.
+  let resetPassword = false;
+  if (auth && /access_token|error_description/.test(location.hash)) {
+    const hash = location.hash;
+    history.replaceState(null, '', location.href.split('#')[0]);
+    const r = await auth.fromRedirect(hash).catch(() => null);
+    if (r && 'type' in r && r.type === 'recovery') resetPassword = true;
   }
-  await selectPlayer(p);
-  settleOpenTable(p);
-  await savePlayer();
-  renderSetup();
+  const open = () => (auth?.current ? goOnline(renderSetup, app) : openPlayer(renderSetup, app));
+  if (resetPassword) renderNewPassword(app, open);
+  else await open();
+}
+
+/** Before accounts existed, one name and its settings lived under older keys. They become the first player. */
+async function migrateLegacySettings(local: LocalAccountStore) {
+  if ((await local.list()).length) return;
+  const legacySetup = store<Partial<Setup>>(LEGACY_SETUP_KEY, {});
+  const legacyPrefs = store<Partial<Prefs>>(LEGACY_PREFS_KEY, {});
+  if (!Object.keys(legacySetup).length && !Object.keys(legacyPrefs).length) return;
+  const settings = { setup: legacySetup, prefs: legacyPrefs };
+  const name = legacySetup.name && legacySetup.name !== 'You' ? legacySetup.name : '';
+  if (name) await local.put(createProfile(name, { settings }));
+  else setWelcomeSettings(settings);
 }
 
 boot();

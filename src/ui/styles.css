@@ -433,6 +433,24 @@ input[type="range"]:disabled { opacity: .35; }
 .pr-bank { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .pr-go { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--gold); }
 .prize { color: var(--good); }
+.lobby-top { align-items: center; gap: 12px; flex-wrap: wrap; }
+.notice {
+  margin: 0 auto 0 0; flex: 1 1 300px;
+  color: var(--text); font-size: 14px;
+  background: rgba(230, 184, 92, .1); border: 1px solid rgba(230, 184, 92, .35); border-radius: 10px; padding: 8px 12px;
+}
+.unsaved { font-style: normal; color: var(--bad); }
+.account-panel { display: grid; gap: 12px; }
+.account-panel .step { margin: 0; }
+.account-panel p { margin: 0; color: var(--muted); }
+.account-panel p b { color: var(--text); }
+.account-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.account-form .row-btns { grid-column: 1 / -1; }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14px; }
+.form-ok { margin: 0; color: var(--good); font-size: 14px; }
+.form-ok:empty { display: none; }
+.welcome .account-panel { max-width: 560px; width: 100%; justify-self: center; padding: 20px 28px; }
 @media (max-width: 720px) {
   .bank-box { justify-items: start; width: 100%; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
