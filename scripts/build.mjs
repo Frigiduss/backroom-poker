@@ -23,9 +23,18 @@ async function bundleTests() {
   execFileSync(process.execPath, ['--test', ...files.map((f) => join(out, f.replace(/\.ts$/, '.js')))], { stdio: 'inherit' });
 }
 
+/** Tab and home-screen icons, inlined as data URIs so the page stays a single file. */
+function icons() {
+  const svg = readFileSync(join(root, 'src/ui/icon.svg')).toString('base64');
+  const png = readFileSync(join(root, 'src/ui/apple-touch-icon.png')).toString('base64');
+  return `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${svg}">\n`
+    + `<link rel="apple-touch-icon" href="data:image/png;base64,${png}">`;
+}
+
 function page(js, css) {
   const html = readFileSync(join(root, 'src/ui/index.html'), 'utf8');
   return html
+    .replace('<!--__ICONS__-->', icons)
     .replace('/*__CSS__*/', () => css)
     .replace('<script src="game.js"></script>', () => `<script>${js.replace(/<\/script/g, '<\\/script')}</script>`);
 }
@@ -70,7 +79,7 @@ if (args.includes('--test')) {
     outdir: join(dist, 'dev'), entryNames: 'game', logLevel: 'info',
   });
   await ctx.watch();
-  writeFileSync(join(dist, 'dev', 'index.html'), readFileSync(join(root, 'src/ui/index.html'), 'utf8').replace('/*__CSS__*/', '').replace('</head>', '<link rel="stylesheet" href="styles.css"></head>'));
+  writeFileSync(join(dist, 'dev', 'index.html'), readFileSync(join(root, 'src/ui/index.html'), 'utf8').replace('<!--__ICONS__-->', icons).replace('/*__CSS__*/', '').replace('</head>', '<link rel="stylesheet" href="styles.css"></head>'));
   writeFileSync(join(dist, 'dev', 'styles.css'), readFileSync(join(root, 'src/ui/styles.css'), 'utf8'));
   const { port } = await ctx.serve({ servedir: join(dist, 'dev'), port: 8000 });
   console.log(`Dev server on http://localhost:${port}`);
