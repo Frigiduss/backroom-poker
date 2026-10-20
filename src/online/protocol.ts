@@ -105,6 +105,8 @@ export interface AdminTableInfo {
     upcoming: Card[];
     /** Board cards fixed to come. */
     rigBoard: Card[];
+    /** What the rest of the hand deals if nobody else folds (stud cards by seat id). */
+    coming: { name: string; board: Card[]; players: { seat: string; card: Card }[]; draws: Card[] }[];
   };
   /** Cards fixed for the next hand, by seat id. */
   nextRig: { hole: Record<string, Card[]>; board: Card[] } | null;

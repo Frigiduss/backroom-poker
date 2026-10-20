@@ -764,6 +764,7 @@ export function adminInfo(row: { id: string; code: string; version: number }, st
         players: hand.players.map((p, i) => ({ seat: t.handSeats[i], cards: [...p.cards], status: p.status, stack: p.stack, totalBet: p.totalBet })),
         upcoming: hand.upcoming(16),
         rigBoard: hand.rigged.board,
+        coming: hand.coming().map((c) => ({ ...c, players: c.players.map((x) => ({ seat: t.handSeats[x.player], card: x.card })) })),
       }
       : null,
     nextRig: state.nextRig ? clone(state.nextRig) : null,

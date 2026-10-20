@@ -129,3 +129,38 @@ test('rigProblem catches repeated cards and short-deck gaps', () => {
   assert.match(rigProblem({ hole: { 0: parseCards('2s 3d') } }, true)!, /short deck/);
   assert.equal(rigProblem({ hole: { 0: parseCards('As Ad') } }, false), null);
 });
+
+test('coming() names the flop, turn and river before they are dealt', () => {
+  for (let seed = 1; seed <= 20; seed++) {
+    const hand = new Hand({
+      variant: VARIANTS.holdem, structure: 'NL', stakes: { sb: 1, bb: 2, ante: 0, bringIn: 0, smallBet: 2, bigBet: 4 },
+      players: [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}`, stack: 100 })), button: 0, rng: createRng(seed),
+    });
+    const told = hand.coming();
+    assert.deepEqual(told.map((s) => s.name), ['Flop', 'Turn', 'River']);
+    while (!hand.isComplete) hand.act(hand.normalize({ type: 'call' }));
+    assert.deepEqual(hand.board, told.flatMap((s) => s.board), `seed ${seed}`);
+  }
+});
+
+test('coming() follows a fixed board, and stud and draw cards', () => {
+  const stakes = { sb: 1, bb: 2, ante: 1, bringIn: 1, smallBet: 2, bigBet: 4 };
+  const players = [0, 1, 2].map((i) => ({ id: `p${i}`, name: `P${i}`, stack: 500 }));
+  const flop = new Hand({ variant: VARIANTS.holdem, structure: 'NL', stakes, players, button: 0, rng: createRng(5) });
+  const spare = flop.upcoming(52).slice(-2);
+  flop.setBoard(spare);
+  assert.deepEqual(flop.coming()[0].board.slice(0, 2), spare);
+
+  const stud = new Hand({ variant: VARIANTS.stud7, structure: 'FL', stakes, players, button: 0, rng: createRng(9) });
+  const fourth = stud.coming()[0];
+  assert.equal(fourth.name, 'Fourth street');
+  while (stud.street === 0 && !stud.isComplete) stud.act(stud.normalize({ type: 'call' }));
+  for (const { player, card } of fourth.players) assert.equal(stud.players[player].cards[3], card);
+
+  const draw = new Hand({ variant: VARIANTS.draw5, structure: 'FL', stakes, players, button: 0, rng: createRng(4) });
+  const next = draw.coming()[0].draws;
+  while (draw.phase !== 'draw' && !draw.isComplete) draw.act(draw.normalize({ type: 'call' }));
+  const who = draw.toAct;
+  draw.act({ type: 'draw', discard: [0, 1] });
+  assert.deepEqual(draw.players[who].cards.slice(-2), next.slice(0, 2));
+});

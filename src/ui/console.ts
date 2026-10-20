@@ -139,7 +139,7 @@ function openConsole() {
       <span class="dev-title">&gt;_ Developer console</span>
       <span class="dev-who">${esc(auth?.current?.email ?? '')} · admin</span>
       <span class="dev-quick">
-        ${['state', 'reveal', 'pause', 'deck', 'players', 'accounts', 'help'].map((c) => `<button type="button" data-run="${c}">${c}</button>`).join('')}
+        ${['state', 'peek', 'reveal', 'pause', 'players', 'accounts', 'help'].map((c) => `<button type="button" data-run="${c}">${c}</button>`).join('')}
       </span>
       <button type="button" class="dev-close" id="dev-close" aria-label="Close console">✕</button>
     </header>
@@ -415,10 +415,26 @@ function printTable(info: AdminTableInfo, out: Out) {
   if (info.nextRig) out(`Next hand is rigged: ${Object.entries(info.nextRig.hole).map(([id, c]) => `${esc(info.seats.find((s) => s.id === id)?.name ?? id)} ${cardsText(c)}`).join(' · ')}${info.nextRig.board.length ? ` · board ${cardsText(info.nextRig.board)}` : ''}`, 'dim');
 }
 
+/** Prints Hand.coming(): what each remaining street will deal. */
+function printComing(streets: { name: string; board: Card[]; players: { name: string; card: Card }[]; draws: Card[] }[], out: Out) {
+  if (!streets.length) return out('Nothing left to deal this hand.');
+  for (const s of streets) {
+    if (s.board.length) out(`<b>${esc(s.name)}</b> ${cardsText(s.board)}`);
+    else if (s.players.length) out(`<b>${esc(s.name)}</b> ${s.players.map((x) => `${esc(x.name)} ${cardsText([x.card])}`).join(' · ')}`);
+    else if (s.draws.length) out(`<b>${esc(s.name)}</b> ${cardsText(s.draws)} <span class="dev-dim">(in drawing order)</span>`);
+  }
+  out('Changes if the board is fixed again or, in stud, if someone folds.', 'dim');
+}
+
 /** The table commands, as run on the table server for an online table. */
 const ONLINE_TABLE: Record<string, (args: string[], out: Out) => Promise<void>> = {
   async state(_, out) {
     printTable(await remote({ do: 'inspect' }), out);
+  },
+  async peek(_, out) {
+    const info = await remote({ do: 'inspect' });
+    const h = need(info.hand, 'No hand dealt yet.');
+    printComing(h.coming.map((c) => ({ ...c, players: c.players.map((x) => ({ name: info.seats.find((s) => s.id === x.seat)?.name ?? x.seat, card: x.card })) })), out);
   },
   async deck(args, out) {
     const h = need((await remote({ do: 'inspect' })).hand, 'No hand dealt yet.');
@@ -575,6 +591,14 @@ const COMMANDS: Command[] = [
     run(args, out) {
       const on = args[0] ? args[0] === 'on' : !hooks.reveal();
       out(`Bots' cards ${hooks.reveal(on) ? 'face up' : 'face down'}.`, 'ok');
+    },
+  },
+  {
+    name: 'peek', usage: 'peek', group: 'Table', help: 'The cards still to come this hand, street by street: the flop, turn and river (burns skipped), each stud player\'s next card, or the cards waiting for the draw.',
+    run(_, out) {
+      const t = currentGame().table;
+      const h = need(t.hand, 'No hand dealt yet.');
+      printComing(h.coming().map((c) => ({ ...c, players: c.players.map((x) => ({ name: t.seatOf(x.player).name, card: x.card })) })), out);
     },
   },
   {

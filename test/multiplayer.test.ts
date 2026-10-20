@@ -487,3 +487,24 @@ test('a hand an admin rigged earns no achievements', async () => {
   assert.equal(s.db.awarded.get('alice/pr_alice')?.['online.hands'] ?? 0, 0);
   assert.equal(s.db.awarded.get('alice/pr_alice')?.['online.games'], 1, 'the game itself still counts');
 });
+
+test('admins can peek at the turn and river of an online hand; nobody else can', async () => {
+  const s = setup();
+  s.db.admins.add('fridge');
+  const body = await startedTable(s);
+  assert.equal((await admin(s, 'bob', { op: 'admin', tableId: body.tableId, command: { do: 'inspect' } })).status, 403);
+  const info = (await admin(s, 'fridge', { op: 'admin', tableId: body.tableId, command: { do: 'inspect' } })).body.table!;
+  const told = info.hand!.coming;
+  assert.deepEqual(told.map((c) => c.name), ['Flop', 'Turn', 'River']);
+  // Hold'em boards come off the deck the same way whoever folds, so play on and compare.
+  for (let i = 0; i < 60; i++) {
+    const t = rebuild((await s.db.byId(body.tableId))!.state);
+    if (t.hand!.isComplete || t.handNumber > 1) break;
+    const turn = ['alice', 'bob'].find((u) => s.db.view(body.tableId, u).legal);
+    if (turn) await s.call(turn, { op: 'act', tableId: body.tableId, hand: 1, action: { type: 'call' } });
+    else await admin(s, 'fridge', { op: 'admin', tableId: body.tableId, command: { do: 'step' } });
+  }
+  const board = rebuild((await s.db.byId(body.tableId))!.state).hand!.board;
+  assert.ok(board.length >= 3, `the flop came out (board ${board.length})`);
+  assert.deepEqual(board, told.flatMap((c) => c.board).slice(0, board.length));
+});
