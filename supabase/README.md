@@ -114,3 +114,24 @@ never write, so nobody can hand themselves one. To switch that on:
 Until both are done, online tables play as usual and simply don't count achievements.
 Titles shown at online tables are checked by the function too: a title only shows if the
 player has earned it.
+
+## Daily bonus and leaderboard
+
+Once a day each player can collect free chips from the lobby: 1,000 on the first day, 500 more
+for each day in a row, up to 4,000 from day seven. It comes back 20 hours after a claim, and a
+streak holds as long as the next claim is within 48 hours. For online players the database keeps
+the claim time, so changing the device clock or editing a saved player can't collect it twice.
+Players kept only in a browser use the browser's clock.
+
+The leaderboard ranks online players by chip bank, biggest pot and achievements unlocked. Anyone
+can open it, even signed out, and it only shows each player's name, colour, title and score.
+Players appear after 10 hands, and anyone can take a player off it from the leaderboard page.
+
+To switch both on, open **SQL Editor → New query**, paste everything from
+[`leaderboard.sql`](leaderboard.sql), and click **Run**. Until then the lobby says they aren't
+set up yet.
+
+The scores come from each player's saved numbers, which the browser keeps (see "How it
+behaves" above). Someone determined could edit their own player to climb the board. If that
+happens, the developer console can set their bank and stats back, or turn the leaderboard
+off for that player with `edit <player> board off`, which their own setting can't undo.
