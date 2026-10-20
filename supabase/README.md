@@ -62,3 +62,33 @@ To remove one: `delete from public.admins where user_id = (select id from auth.u
 Admin powers are checked by the database (row level security and the `is_admin()`
 function), not by the page, so nobody can turn the console's account powers on by editing
 the site. Every change made to a player from the console is written to the `admin_log` table.
+
+## Playing with friends (online tables)
+
+Signed-in players can make a private table, send its five-letter code (or invite link) to
+friends, and play together. Bots take every seat nobody fills, and a bot also plays for
+anyone who leaves or lets their 30-second clock run out twice, until they're back.
+
+The table runs on Supabase, not in anyone's browser: an Edge Function called `poker-table`
+shuffles, deals, plays the bots and settles every pot, and keeps the deck and everyone's
+cards in a table that browsers can't read. Each player only ever receives their own cards
+plus what the whole table can see. Online tables use table chips, so banks aren't touched.
+
+To switch it on, do these once:
+
+1. **Create the tables.** In Supabase, open **SQL Editor → New query**, paste everything
+   from [`multiplayer.sql`](multiplayer.sql), and click **Run**.
+2. **Let GitHub deploy the table server.** In Supabase, click your avatar (top right) →
+   **Account preferences → Access Tokens → Generate new token**, name it `github`, and copy
+   it. In GitHub, open the repository's **Settings → Secrets and variables → Actions → New
+   repository secret**, name it `SUPABASE_ACCESS_TOKEN`, paste the token, and save.
+3. **Deploy it.** In GitHub, open **Actions → Deploy table server to Supabase → Run
+   workflow**. From then on it redeploys on its own whenever the server code changes.
+
+Rather not use GitHub? In Supabase open **Edge Functions → Deploy a new function → Via
+Editor**, name it `poker-table`, replace the sample code with everything in
+[`functions/poker-table/index.ts`](functions/poker-table/index.ts), and click **Deploy**.
+Then open the function's **Details** and turn **Verify JWT** off (the function checks each
+player's sign-in itself). Repeat the paste whenever that file changes.
+
+Tables nobody has played at for three days are cleared out when someone makes a new one.

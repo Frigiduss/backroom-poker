@@ -1,0 +1,31 @@
+# Deploys the online table server (supabase/functions/poker-table) to Supabase whenever it
+# changes on main. One-time setup: add a repository secret named SUPABASE_ACCESS_TOKEN
+# (see supabase/README.md). Without it this workflow skips the deploy.
+name: Deploy table server to Supabase
+
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/functions/**', 'supabase/config.toml', '.github/workflows/supabase-functions.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when no access token is set
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "::notice::Add the SUPABASE_ACCESS_TOKEN secret to deploy the table server (see supabase/README.md)."
+      - uses: supabase/setup-cli@v1
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        with:
+          version: latest
+      - name: Deploy poker-table
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: supabase functions deploy poker-table --project-ref yqvizfunfdxtlozvtqfs --no-verify-jwt --use-api

@@ -550,6 +550,10 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   flex: 1;
   height: 100vh;
   height: 100dvh;
+  /* A long hand log must scroll inside its panel, not stretch the page. */
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1217,3 +1221,59 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   .dev-close { margin-left: auto; }
   .dev-quick { order: 3; width: 100%; margin-left: 0; }
 }
+
+/* ---------- playing with friends ---------- */
+.friends-panel { display: grid; gap: 12px; }
+.friends-panel .step { margin: 0; }
+.friends-panel p { margin: 0; color: var(--muted); }
+.friends-actions { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.join-form { display: flex; gap: 8px; flex: 1; min-width: 240px; max-width: 380px; }
+.code-input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: .25em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.code-input::placeholder { letter-spacing: .04em; font-weight: 400; text-transform: none; }
+.resume-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px;
+  padding: 10px 14px; border: 1px solid rgba(230, 184, 92, .35); border-radius: 12px; background: rgba(230, 184, 92, .07);
+}
+.resume-row b { color: var(--gold); letter-spacing: .12em; }
+
+.room { min-height: 100vh; min-height: 100dvh; align-content: center; padding-bottom: 28px; }
+.room-card { max-width: 620px; width: 100%; justify-self: center; display: grid; gap: 16px; padding: 28px; }
+.room-card h1 { margin: 0; font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.05; }
+.room-card p { margin: 0; color: var(--muted); }
+.room-card p b { color: var(--text); }
+.room-meta { margin-top: -8px !important; }
+.room-code-box {
+  display: grid; justify-items: center; gap: 6px; padding: 18px 16px;
+  border: 1px dashed rgba(230, 184, 92, .45); border-radius: 14px; background: rgba(0, 0, 0, .25);
+}
+.room-code {
+  font-family: var(--label); font-weight: 700; font-size: clamp(40px, 9vw, 60px); letter-spacing: .3em; padding-left: .3em;
+  color: var(--gold-hi); line-height: 1; font-variant-numeric: tabular-nums;
+}
+.room-seats { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.room-seats li {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 8px;
+  border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255, 255, 255, .03);
+}
+.room-seats li.open { border-style: dashed; opacity: .7; }
+.room-seats .avatar { width: 32px; font-size: 16px; }
+.rs-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-tag { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--muted); }
+.rs-tag.host { color: var(--gold); }
+.room-card .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.room-wait { color: var(--muted); font-style: italic; }
+
+.code-tag { letter-spacing: .15em; color: var(--gold) !important; }
+.net-problem {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: calc(100% - 32px);
+  margin: 0; padding: 6px 12px; border-radius: 10px; font-size: 14px; text-align: center;
+  color: #ffd9d3; background: rgba(60, 20, 16, .92); border: 1px solid rgba(240, 106, 91, .4);
+}
+.seat .clock {
+  position: absolute; right: -10px; top: -10px; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 999px;
+  display: grid; place-items: center; font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums;
+  background: var(--gold); color: var(--ink); box-shadow: 0 0 0 2px rgba(0, 0, 0, .6);
+}
+.seat.away .pod { opacity: .7; }
+.turn-clock { color: var(--gold-hi); }
+.acts.sending { opacity: .6; pointer-events: none; }

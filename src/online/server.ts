@@ -1,0 +1,517 @@
+// The online table: rules, bots and dealing, run on the server so no browser ever holds
+// another player's cards or the deck. This file is plain game logic over a small storage
+// interface; src/online/edge.ts wires it to Supabase as an Edge Function.
+//
+// A table is saved as the state between hands (a checkpoint) plus the actions of the hand
+// in play. Loading it replays those actions, which keeps every rule in the engine instead
+// of copying it here, and keeps saves small because the list resets each hand.
+import { Bot } from '../bots/bot';
+import { buildView } from '../bots/view';
+import { createRng, shuffle } from '../engine/cards';
+import { Action, Hand } from '../engine/hand';
+import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
+import { VARIANTS, VariantId } from '../engine/variants';
+import { BlindSpeed, HandView, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
+
+export const BIG_BLIND = 20;
+export const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
+/** Shortest gap between two bot moves, so people can follow the action. */
+export const BOT_GAP_MS = 700;
+/** Pause after a hand before the next deal, to read the result. */
+export const DEAL_DELAY_MS = 4500;
+export const TURN_MS = TURN_SECONDS * 1000;
+/** Clock run-outs in a row before a bot takes over the seat. */
+const TIMEOUTS_TO_AWAY = 2;
+const NAME_MAX = 14;
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana', 'Iris', 'Jax', 'Kai', 'Lulu', 'Milo', 'Nova', 'Otto', 'Pia', 'Quinn', 'Rex', 'Sage', 'Tess', 'Vic', 'Wren', 'Zed', 'Bea'];
+const STYLES: BotStyle[] = ['balanced', 'balanced', 'tight', 'loose', 'aggressive', 'passive'];
+
+export interface Member {
+  userId: string;
+  name: string;
+  seat: string | null;
+  left: boolean;
+}
+
+/** Everything a table needs between hands, in plain data. */
+export interface Checkpoint {
+  seats: Seat[];
+  stats: Record<string, PlayerStats>;
+  button: number;
+  handNumber: number;
+  level: number;
+  rng: number;
+}
+
+export interface TableState {
+  phase: 'lobby' | 'playing' | 'over';
+  host: string;
+  settings: TableSettings;
+  members: Member[];
+  config: TableConfig | null;
+  checkpoint: Checkpoint | null;
+  /** The hand in play: dealt, then each action exactly as applied. */
+  events: ({ t: 'deal' } | { t: 'act'; a: Action })[];
+  away: Record<string, boolean>;
+  timeouts: Record<string, number>;
+  pendingRebuys: string[];
+  /** People who joined a cash game in progress, seated in place of a bot at the next deal. */
+  pendingSits: { userId: string; seat: string }[];
+  turnStartedAt: number;
+  handEndedAt: number | null;
+  lastStepAt: number;
+}
+
+export interface TableRow {
+  id: string;
+  code: string;
+  version: number;
+  state: TableState;
+}
+
+export interface StoredView {
+  userId: string;
+  version: number;
+  view: TableView;
+}
+
+/** Where tables are kept. The real one is Postgres through Supabase's REST API. */
+export interface TableDb {
+  byId(id: string): Promise<TableRow | null>;
+  byCode(code: string): Promise<TableRow | null>;
+  /** Null when the code is already taken. */
+  insert(code: string, state: TableState): Promise<TableRow | null>;
+  /** Saves only if nobody else saved since `version` was read; the row's version becomes version + 1. */
+  update(id: string, version: number, state: TableState): Promise<boolean>;
+  remove(id: string): Promise<void>;
+  /** Each person's view; an older version never replaces a newer one. */
+  putViews(tableId: string, views: StoredView[]): Promise<void>;
+  dropView(tableId: string, userId: string): Promise<void>;
+  /** Clears out tables nobody has touched since `before`. */
+  sweep(before: Date): Promise<void>;
+}
+
+export class TableError extends Error {
+  constructor(message: string, readonly status = 400) {
+    super(message);
+  }
+}
+
+export interface Outcome {
+  status: number;
+  body: unknown;
+}
+
+const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+const cleanName = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) || 'Player';
+
+// ---------- settings ----------
+
+export function checkSettings(raw: unknown): TableSettings {
+  const s = (raw ?? {}) as Partial<TableSettings>;
+  const v = VARIANTS[s.variant as VariantId];
+  if (!v) throw new TableError('Pick a game for the table.');
+  const format = s.format === 'sng' || s.format === 'headsup' ? s.format : 'cash';
+  const structure = s.structure && v.structures.includes(s.structure) ? s.structure : v.defaultStructure;
+  const difficulty = s.difficulty === 'mixed' || DIFFICULTIES.includes(s.difficulty as Difficulty) ? s.difficulty! : 'medium';
+  const stackBB = [50, 100, 200].includes(Number(s.stackBB)) ? Number(s.stackBB) : 100;
+  const blindSpeed = s.blindSpeed === 'slow' || s.blindSpeed === 'turbo' ? s.blindSpeed : 'normal';
+  const seats = format === 'headsup' ? 2 : Math.max(2, Math.min(v.maxPlayers, Math.round(Number(s.seats) || 6)));
+  return { variant: v.id, structure, format, difficulty, stackBB, blindSpeed, seats };
+}
+
+function checkAction(raw: unknown): Action {
+  const a = (raw ?? {}) as { type?: unknown; to?: unknown; discard?: unknown };
+  switch (a.type) {
+    case 'fold':
+    case 'check':
+    case 'call':
+    case 'bringin':
+      return { type: a.type };
+    case 'raise': {
+      const to = Number(a.to);
+      if (!Number.isFinite(to)) throw new TableError('That bet size is not a number.');
+      return { type: 'raise', to };
+    }
+    case 'draw':
+      return { type: 'draw', discard: Array.isArray(a.discard) ? a.discard.map(Number).filter((n) => Number.isInteger(n)) : [] };
+    default:
+      throw new TableError('Unknown move.');
+  }
+}
+
+export function newCode(rand: () => number = Math.random): string {
+  return Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(rand() * CODE_CHARS.length)]).join('');
+}
+
+// ---------- the table in play ----------
+
+function snapshot(t: Table): Checkpoint {
+  return { seats: clone(t.seats), stats: clone(t.stats), button: t.button, handNumber: t.handNumber, level: t.level, rng: t.rng.state };
+}
+
+/** Rebuilds the Table from its checkpoint and replays the hand in play. */
+export function rebuild(state: TableState): Table {
+  const t = new Table(state.config!);
+  const cp = state.checkpoint!;
+  t.seats.forEach((s, i) => Object.assign(s, clone(cp.seats[i])));
+  for (const id of Object.keys(t.stats)) t.stats[id] = clone(cp.stats[id] ?? emptyStats());
+  t.button = cp.button;
+  t.handNumber = cp.handNumber;
+  t.level = cp.level;
+  t.rng.state = cp.rng;
+  for (const e of state.events) {
+    if (e.t === 'deal') t.nextHand();
+    else t.hand!.act(e.a);
+  }
+  if (t.hand?.isComplete) t.finishHand();
+  return t;
+}
+
+function startGame(state: TableState, now: number, seed: number) {
+  const s = state.settings;
+  const rng = createRng(seed ^ 0x5bd1e995);
+  const people = state.members.filter((m) => !m.left).slice(0, s.seats);
+  const taken = new Set(people.map((m) => m.name.toLowerCase()));
+  const names = shuffle(BOT_NAMES.filter((n) => !taken.has(n.toLowerCase())), rng);
+  const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rng.next() * xs.length)];
+  const seats: SeatConfig[] = people.map((m) => ({ name: m.name, isHuman: true }));
+  while (seats.length < Math.max(2, s.seats)) {
+    seats.push({ name: names[seats.length % names.length], isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: pick(STYLES) });
+  }
+  // People sit in a random order around the table.
+  const order = shuffle(seats.map((_, i) => i), rng);
+  const config: TableConfig = {
+    variant: s.variant,
+    structure: s.structure,
+    format: s.format,
+    startingStack: s.stackBB * BIG_BLIND,
+    bigBlind: BIG_BLIND,
+    handsPerLevel: HANDS_PER_LEVEL[s.blindSpeed],
+    seats: order.map((i) => seats[i]),
+    seed,
+  };
+  people.forEach((m, i) => (m.seat = `p${order.indexOf(i)}`));
+  // Anyone over the seat limit watches instead.
+  for (const m of state.members) if (!people.includes(m)) m.seat = null;
+  state.config = config;
+  state.phase = 'playing';
+  const t = new Table(config);
+  state.checkpoint = snapshot(t);
+  state.events = [];
+  dealNext(state, t, now);
+}
+
+/** Settles the last hand and deals the next one. False when there aren't two players with chips. */
+function dealNext(state: TableState, t: Table, now: number): boolean {
+  t.finishHand();
+  for (const id of state.pendingRebuys) {
+    const seat = t.seats.find((s) => s.id === id);
+    if (seat && seat.busted) t.rebuy(id);
+  }
+  state.pendingRebuys = [];
+  for (const sit of state.pendingSits) {
+    const seat = t.seats.find((s) => s.id === sit.seat);
+    const m = state.members.find((x) => x.userId === sit.userId);
+    if (!seat || seat.isHuman || !m || m.left) continue;
+    Object.assign(seat, { name: m.name, isHuman: true, difficulty: undefined, style: undefined, stack: t.config.startingStack, busted: false, rebuys: 0 });
+    t.stats[seat.id] = emptyStats();
+    m.seat = seat.id;
+  }
+  state.pendingSits = [];
+  if (t.isOver) {
+    state.phase = 'over';
+    return true;
+  }
+  if (t.liveSeats.length < 2) return false;
+  state.checkpoint = snapshot(t);
+  state.events = [{ t: 'deal' }];
+  t.nextHand();
+  state.turnStartedAt = now;
+  state.handEndedAt = null;
+  state.lastStepAt = now;
+  return true;
+}
+
+function apply(state: TableState, t: Table, action: Action, now: number) {
+  const hand = t.hand!;
+  const a = hand.normalize(action);
+  try {
+    hand.act(a);
+  } catch (err) {
+    throw new TableError((err as Error).message);
+  }
+  state.events.push({ t: 'act', a });
+  state.lastStepAt = now;
+  state.turnStartedAt = now;
+  if (hand.isComplete) {
+    state.handEndedAt = now;
+    t.finishHand();
+    if (t.isOver) state.phase = 'over';
+  }
+}
+
+const botFor = (seat: Seat, away: boolean): Bot => new Bot(away || !seat.difficulty ? 'medium' : seat.difficulty, seat.style ?? 'balanced');
+
+/** A move nobody is waiting on a person for: a bot's turn, a run-out clock, or the next deal. */
+export function autoStep(state: TableState, t: Table, now: number): boolean {
+  if (state.phase !== 'playing') return false;
+  const hand = t.hand;
+  if (!hand || hand.isComplete) {
+    if (hand && now < (state.handEndedAt ?? 0) + DEAL_DELAY_MS) return false;
+    const before = JSON.stringify([state.pendingRebuys, state.pendingSits, state.phase]);
+    return dealNext(state, t, now) || before !== JSON.stringify([state.pendingRebuys, state.pendingSits, state.phase]);
+  }
+  const seat = t.seatOf(hand.toAct);
+  if (!seat.isHuman || state.away[seat.id]) {
+    if (now < state.lastStepAt + BOT_GAP_MS) return false;
+    apply(state, t, botFor(seat, !!state.away[seat.id]).decide(buildView(hand, hand.toAct, t.stats)), now);
+    return true;
+  }
+  if (now < state.turnStartedAt + TURN_MS) return false;
+  const L = hand.legal();
+  const auto: Action = L.kind === 'draw' ? { type: 'draw', discard: [] } : L.kind === 'bet' && L.check ? { type: 'check' } : L.kind === 'bet' && L.bringIn ? { type: 'bringin' } : { type: 'fold' };
+  state.timeouts[seat.id] = (state.timeouts[seat.id] ?? 0) + 1;
+  if (state.timeouts[seat.id] >= TIMEOUTS_TO_AWAY) state.away[seat.id] = true;
+  apply(state, t, auto, now);
+  return true;
+}
+
+// ---------- what each person sees ----------
+
+function handView(hand: Hand, me: number): HandView {
+  return {
+    variant: hand.variant.id,
+    structure: hand.structure,
+    stakes: hand.stakes,
+    street: hand.street,
+    numStreets: hand.numStreets,
+    phase: hand.phase,
+    toAct: hand.isComplete ? -1 : hand.toAct,
+    button: hand.button,
+    board: [...hand.board],
+    pot: hand.pot,
+    currentBet: hand.currentBet,
+    players: hand.players.map((p, i) => ({
+      id: p.id,
+      name: p.name,
+      startStack: p.startStack,
+      stack: p.stack,
+      cards: p.cards.map((c, k) => (i === me || p.shown || p.faceUp[k] ? c : null)),
+      faceUp: [...p.faceUp],
+      status: p.status,
+      streetBet: p.streetBet,
+      totalBet: p.totalBet,
+      lastAction: p.lastAction,
+      drew: p.drew,
+      shown: p.shown,
+    })),
+    log: hand.log.map((e) => ({ ...e })),
+    actions: hand.actions.map((a) => ({ ...a })),
+    result: hand.result ? clone(hand.result) : null,
+  };
+}
+
+/** When the server will next accept a tick, or null if it is waiting on a person. */
+function tickAt(state: TableState, t: Table | null, stalled: boolean): number | null {
+  if (state.phase !== 'playing' || !t || stalled) return null;
+  const hand = t.hand;
+  if (!hand || hand.isComplete) return (state.handEndedAt ?? 0) + DEAL_DELAY_MS;
+  const seat = t.seatOf(hand.toAct);
+  if (!seat.isHuman || state.away[seat.id]) return state.lastStepAt + BOT_GAP_MS;
+  return state.turnStartedAt + TURN_MS;
+}
+
+export function viewFor(row: { id: string; code: string; version: number }, state: TableState, t: Table | null, userId: string, now: number): TableView {
+  const me = state.members.find((m) => m.userId === userId);
+  const mySeat = me?.seat ?? null;
+  const hand = t?.hand ?? null;
+  const hi = hand && mySeat ? t!.handIndexOf(mySeat) : -1;
+  const myTurn = !!hand && !hand.isComplete && hi >= 0 && hand.toAct === hi && !state.away[mySeat!];
+  const humanTurn = !!hand && !hand.isComplete && t!.seatOf(hand.toAct).isHuman && !state.away[t!.seatOf(hand.toAct).id];
+  const stalled = state.phase === 'playing' && !!t && (!hand || hand.isComplete) && t.liveSeats.length < 2 && !state.pendingRebuys.length && !state.pendingSits.length;
+  const seats: SeatView[] = (t?.seats ?? []).map((s) => ({
+    id: s.id, name: s.name, isHuman: s.isHuman, difficulty: s.isHuman ? undefined : s.difficulty, style: s.isHuman ? undefined : s.style,
+    stack: s.stack, busted: s.busted, place: s.place, rebuys: s.rebuys, away: !!state.away[s.id], you: s.id === mySeat,
+  }));
+  return {
+    version: row.version,
+    tableId: row.id,
+    code: row.code,
+    phase: state.phase,
+    settings: state.settings,
+    members: state.members.map((m) => ({ name: m.name, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left })),
+    isHost: state.host === userId,
+    seats,
+    mySeat,
+    waitingForSeat: state.pendingSits.some((p) => p.userId === userId),
+    handNumber: t?.handNumber ?? 0,
+    level: t?.level ?? 0,
+    handsUntilNextLevel: t && t.isTournament ? t.handsUntilNextLevel() : null,
+    hand: hand ? handView(hand, hi) : null,
+    legal: myTurn ? hand!.legal() : null,
+    stats: t ? clone(t.stats) : {},
+    serverNow: now,
+    turnDeadline: humanTurn ? state.turnStartedAt + TURN_MS : null,
+    nextDealAt: hand?.isComplete && state.phase === 'playing' ? (state.handEndedAt ?? now) + DEAL_DELAY_MS : null,
+    tickAt: tickAt(state, t, stalled),
+    rebuyPending: !!mySeat && state.pendingRebuys.includes(mySeat),
+    stalled,
+  };
+}
+
+// ---------- requests ----------
+
+export interface ServerOptions {
+  now?: () => number;
+  seed?: () => number;
+}
+
+/** Handles one request from a signed-in person. */
+export async function handle(db: TableDb, userId: string, raw: unknown, opts: ServerOptions = {}): Promise<Outcome> {
+  const now = opts.now ?? Date.now;
+  const seed = opts.seed ?? (() => (Math.random() * 2 ** 32) >>> 0);
+  try {
+    const req = (raw ?? {}) as Request;
+    if (req.op === 'create') return await create(db, userId, req, now(), seed);
+    if (req.op === 'join') return await join(db, userId, req, now());
+    if (!['leave', 'start', 'act', 'tick', 'rebuy', 'back'].includes(req.op)) throw new TableError('Unknown request.');
+    return await change(db, userId, req, now, seed);
+  } catch (err) {
+    if (err instanceof TableError) return { status: err.status, body: { ok: false, error: err.message } };
+    throw err;
+  }
+}
+
+async function publish(db: TableDb, row: TableRow, state: TableState, t: Table | null, now: number, userId: string): Promise<Outcome> {
+  const views = state.members.filter((m) => !m.left).map((m) => ({ userId: m.userId, version: row.version, view: viewFor(row, state, t, m.userId, now) }));
+  await db.putViews(row.id, views);
+  return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, now) } };
+}
+
+async function create(db: TableDb, userId: string, req: Extract<Request, { op: 'create' }>, now: number, seed: () => number): Promise<Outcome> {
+  const settings = checkSettings(req.settings);
+  const state: TableState = {
+    phase: 'lobby', host: userId, settings, members: [{ userId, name: cleanName(req.name), seat: null, left: false }],
+    config: null, checkpoint: null, events: [], away: {}, timeouts: {}, pendingRebuys: [], pendingSits: [], turnStartedAt: now, handEndedAt: null, lastStepAt: now,
+  };
+  await db.sweep(new Date(now - 3 * 24 * 3600 * 1000)).catch(() => undefined);
+  const rng = createRng(seed());
+  for (let i = 0; i < 8; i++) {
+    const row = await db.insert(newCode(() => rng.next()), state);
+    if (row) return publish(db, row, state, null, now, userId);
+  }
+  throw new TableError('Could not make a table code. Try again.', 503);
+}
+
+const findCode = (code: unknown) => String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'join' }>, now: number): Promise<Outcome> {
+  const code = findCode(req.code);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await db.byCode(code);
+    if (!row) throw new TableError(`No table has the code ${code || '(blank)'}. Check it with whoever made the table.`, 404);
+    const state = row.state;
+    const name = cleanName(req.name);
+    const t = state.phase === 'lobby' ? null : rebuild(state);
+    let m = state.members.find((x) => x.userId === userId);
+    if (m) {
+      m.left = false;
+      if (state.phase === 'lobby') m.name = name;
+      if (m.seat) {
+        delete state.away[m.seat];
+        delete state.timeouts[m.seat];
+      }
+    } else {
+      if (state.phase === 'over') throw new TableError('That table has finished its game.', 409);
+      if (state.phase === 'lobby') {
+        if (state.members.filter((x) => !x.left).length >= state.settings.seats) throw new TableError('That table is full.', 409);
+      } else {
+        if (t!.isTournament) throw new TableError('That tournament has already started.', 409);
+        const free = t!.seats.find((s) => !s.isHuman && !state.pendingSits.some((p) => p.seat === s.id));
+        if (!free) throw new TableError('That table is full.', 409);
+        state.pendingSits.push({ userId, seat: free.id });
+      }
+      m = { userId, name, seat: null, left: false };
+      state.members.push(m);
+    }
+    if (!(await db.update(row.id, row.version, state))) continue;
+    return publish(db, { ...row, version: row.version + 1 }, state, t, now, userId);
+  }
+  throw new TableError('The table is busy. Try again.', 503);
+}
+
+async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' }>, now: () => number, seed: () => number): Promise<Outcome> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await db.byId(String(req.tableId ?? ''));
+    if (!row) throw new TableError('That table is gone.', 404);
+    const state = row.state;
+    const m = state.members.find((x) => x.userId === userId);
+    if (!m) throw new TableError("You aren't at that table.", 403);
+    const at = now();
+    let t = state.phase === 'lobby' ? null : rebuild(state);
+    const unchanged = () => ({ status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, at) } });
+
+    switch (req.op) {
+      case 'tick':
+        if (req.version !== row.version || !t || !autoStep(state, t, at)) return unchanged();
+        break;
+      case 'start':
+        if (state.host !== userId) throw new TableError('Only the host can start the game.', 403);
+        if (state.phase !== 'lobby') return unchanged();
+        startGame(state, at, seed());
+        t = rebuild(state);
+        break;
+      case 'act': {
+        const hand = t?.hand;
+        if (!t || !hand || hand.isComplete || !m.seat || req.hand !== t.handNumber || t.handSeats[hand.toAct] !== m.seat) throw new TableError("It isn't your turn.", 409);
+        delete state.away[m.seat];
+        state.timeouts[m.seat] = 0;
+        apply(state, t, checkAction(req.action), at);
+        break;
+      }
+      case 'rebuy': {
+        const seat = t?.seats.find((s) => s.id === m.seat);
+        if (!t || !seat || t.isTournament || !seat.busted) throw new TableError('You can only buy back in after going broke in a cash game.');
+        if (!state.pendingRebuys.includes(seat.id)) state.pendingRebuys.push(seat.id);
+        break;
+      }
+      case 'back':
+        if (!m.seat || !state.away[m.seat]) return unchanged();
+        delete state.away[m.seat];
+        state.timeouts[m.seat] = 0;
+        if (t?.hand && !t.hand.isComplete && t.handSeats[t.hand.toAct] === m.seat) state.turnStartedAt = at;
+        break;
+      case 'leave': {
+        if (state.phase === 'lobby') {
+          state.members = state.members.filter((x) => x !== m);
+          if (!state.members.length) {
+            await db.remove(row.id);
+            return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: null } };
+          }
+          if (state.host === userId) state.host = state.members[0].userId;
+        } else {
+          m.left = true;
+          if (m.seat) state.away[m.seat] = true;
+          state.pendingSits = state.pendingSits.filter((p) => p.userId !== userId);
+          if (state.host === userId) state.host = state.members.find((x) => !x.left)?.userId ?? state.host;
+        }
+        break;
+      }
+    }
+
+    if (!(await db.update(row.id, row.version, state))) {
+      if (req.op === 'tick') {
+        const fresh = await db.byId(row.id);
+        if (fresh) return { status: 200, body: { ok: true, tableId: fresh.id, code: fresh.code, view: viewFor(fresh, fresh.state, fresh.state.phase === 'lobby' ? null : rebuild(fresh.state), userId, at) } };
+      }
+      continue;
+    }
+    const saved = { ...row, version: row.version + 1 };
+    const out = await publish(db, saved, state, t, at, userId);
+    if (req.op === 'leave') await db.dropView(row.id, userId);
+    return out;
+  }
+  throw new TableError('The table is busy. Try again.', 503);
+}
