@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRng } from '../src/engine/cards';
-import { Hand, Stakes } from '../src/engine/hand';
+import { createRng, parseCards } from '../src/engine/cards';
+import { Hand, Stakes, rigProblem } from '../src/engine/hand';
 import { VARIANTS } from '../src/engine/variants';
 
 const stakes: Stakes = { sb: 10, bb: 20, ante: 0, bringIn: 0, smallBet: 20, bigBet: 40 };
@@ -95,4 +95,37 @@ test('stud bring-in and completion', () => {
   h.act({ type: 'raise', to: 20 });
   const L3 = h.legal();
   assert.ok(L3.kind === 'bet' && L3.minRaiseTo === 40);
+});
+
+test('a rig deals chosen hole cards and board, and the rest of the deck stays whole', () => {
+  const rng = createRng(7);
+  const hand = new Hand({
+    variant: VARIANTS.holdem, structure: 'NL', stakes: { sb: 1, bb: 2, ante: 0, bringIn: 0, smallBet: 2, bigBet: 4 },
+    players: [{ id: 'a', name: 'A', stack: 100 }, { id: 'b', name: 'B', stack: 100 }, { id: 'c', name: 'C', stack: 100 }],
+    button: 0, rng, rig: { hole: { 1: parseCards('As Ad') }, board: parseCards('Ah Ac 2d 7s 9h') },
+  });
+  assert.deepEqual(hand.players[1].cards, parseCards('As Ad'));
+  while (!hand.isComplete) hand.act(hand.normalize({ type: 'call' }));
+  assert.deepEqual(hand.board, parseCards('Ah Ac 2d 7s 9h'));
+  const seen = [...hand.board, ...hand.players.flatMap((p) => p.cards)];
+  assert.equal(new Set(seen).size, seen.length);
+});
+
+test('setBoard fixes the cards still to come and refuses ones already out', () => {
+  const hand = new Hand({
+    variant: VARIANTS.holdem, structure: 'NL', stakes: { sb: 1, bb: 2, ante: 0, bringIn: 0, smallBet: 2, bigBet: 4 },
+    players: [{ id: 'a', name: 'A', stack: 100 }, { id: 'b', name: 'B', stack: 100 }],
+    button: 0, rng: createRng(3),
+  });
+  assert.throws(() => hand.setBoard([hand.players[0].cards[0]]), /already been dealt/);
+  hand.setBoard(parseCards('Kh Qh Jh'));
+  assert.deepEqual(hand.upcoming(52).filter((c) => parseCards('Kh Qh Jh').includes(c)), []);
+  while (hand.board.length < 3) hand.act(hand.normalize({ type: 'call' }));
+  assert.deepEqual(hand.board, parseCards('Kh Qh Jh'));
+});
+
+test('rigProblem catches repeated cards and short-deck gaps', () => {
+  assert.match(rigProblem({ hole: { 0: parseCards('As Ad') }, board: parseCards('As') }, false)!, /twice/);
+  assert.match(rigProblem({ hole: { 0: parseCards('2s 3d') } }, true)!, /short deck/);
+  assert.equal(rigProblem({ hole: { 0: parseCards('As Ad') } }, false), null);
 });

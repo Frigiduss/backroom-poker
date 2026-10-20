@@ -1,5 +1,6 @@
 // A tiny in-memory stand-in for the parts of Supabase the game uses (email sign-in and
-// the `players` table with owner-only access), for testing without a real project.
+// the `players` table with owner-only access, plus the admin rules from admin.sql), for testing
+// without a real project.
 
 interface Row { id: string; owner: string; data: unknown; updated_at: string }
 
@@ -10,6 +11,10 @@ export class FakeSupabase {
   tokens = new Map<string, string>();
   refreshTokens = new Map<string, string>();
   rows: Row[] = [];
+  /** User ids in the admins table. */
+  admins = new Set<string>();
+  site = new Map<string, unknown>();
+  log: { at: string; admin: string; action: string; detail: unknown }[] = [];
   /** Seconds a new access token lasts. */
   expiresIn = 3600;
   requireConfirm = false;
@@ -67,24 +72,62 @@ export class FakeSupabase {
     }
     if (p === '/auth/v1/recover') return { status: 200, body: {} };
 
+    const prefer = headers.Prefer ?? headers.prefer ?? '';
+    const admin = !!uid && this.admins.has(uid);
+    const denied = { status: 403, body: { code: '42501', message: 'permission denied' } };
+
     if (p === '/rest/v1/players') {
       if (!uid) return { status: 401, body: { code: 'PGRST301', message: 'JWT expired' } };
       const idEq = u.searchParams.get('id')?.replace(/^eq\./, '');
-      const mine = this.rows.filter((r) => r.owner === uid && (!idEq || r.id === idEq));
+      const ownerEq = u.searchParams.get('owner')?.replace(/^eq\./, '');
+      // Row security: your own rows, or every row for an admin (supabase/admin.sql).
+      const visible = this.rows.filter((r) => (r.owner === uid || admin) && (!idEq || r.id === idEq) && (!ownerEq || r.owner === ownerEq));
       if (method === 'GET') {
-        return { status: 200, body: [...mine].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((r) => ({ id: r.id, data: r.data })) };
+        const withOwner = (u.searchParams.get('select') ?? '').includes('owner');
+        return { status: 200, body: [...visible].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((r) => (withOwner ? { ...r } : { id: r.id, data: r.data })) };
       }
       if (method === 'POST') {
         const existing = this.rows.find((r) => r.id === body.id);
-        if (existing && existing.owner !== uid) return { status: 403, body: { code: '42501', message: 'new row violates row-level security policy for table "players"' } };
+        if (existing && existing.owner !== uid && !admin) return { status: 403, body: { code: '42501', message: 'new row violates row-level security policy for table "players"' } };
         if (existing) Object.assign(existing, { data: body.data, updated_at: body.updated_at });
         else this.rows.push({ id: body.id, owner: uid, data: body.data, updated_at: body.updated_at });
         return { status: 201 };
       }
-      if (method === 'DELETE') {
-        this.rows = this.rows.filter((r) => !mine.includes(r));
-        return { status: 204 };
+      if (method === 'PATCH') {
+        for (const r of visible) Object.assign(r, body);
+        return prefer.includes('return=representation') ? { status: 200, body: visible } : { status: 204 };
       }
+      if (method === 'DELETE') {
+        this.rows = this.rows.filter((r) => !visible.includes(r));
+        return prefer.includes('return=representation') ? { status: 200, body: visible } : { status: 204 };
+      }
+    }
+    if (p === '/rest/v1/rpc/is_admin') return uid ? { status: 200, body: admin } : denied;
+    if (p === '/rest/v1/rpc/admin_accounts') {
+      if (!admin) return { status: 403, body: { code: '42501', message: 'Only admins can list accounts.' } };
+      return {
+        status: 200,
+        body: [...this.users].map(([email, x]) => ({
+          id: x.id, email, created_at: '2026-10-20T00:00:00Z', last_sign_in_at: null,
+          players: this.rows.filter((r) => r.owner === x.id).length, admin: this.admins.has(x.id),
+        })),
+      };
+    }
+    if (p === '/rest/v1/site') {
+      const keyEq = u.searchParams.get('key')?.replace(/^eq\./, '');
+      if (method === 'GET') return { status: 200, body: [...this.site].filter(([k]) => !keyEq || k === keyEq).map(([key, value]) => ({ key, value })) };
+      if (!admin) return { status: 403, body: { code: '42501', message: 'new row violates row-level security policy for table "site"' } };
+      if (method === 'POST') this.site.set(body.key, body.value);
+      if (method === 'DELETE' && keyEq) this.site.delete(keyEq);
+      return { status: 201 };
+    }
+    if (p === '/rest/v1/admin_log') {
+      if (!admin) return method === 'GET' ? { status: 200, body: [] } : denied;
+      if (method === 'POST') {
+        this.log.unshift({ at: new Date().toISOString(), admin: uid, action: body.action, detail: body.detail });
+        return { status: 201 };
+      }
+      return { status: 200, body: this.log.slice(0, Number(u.searchParams.get('limit') ?? 20)) };
     }
     return { status: 404, body: { message: `no route ${method} ${p}` } };
   }

@@ -6,13 +6,14 @@ import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
 import {
-  LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
+  LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
   finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
 import { goOnline, initAccounts, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
+import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
 
@@ -80,6 +81,8 @@ const structureFor = (v: VariantId): Structure => {
 };
 
 const app = document.getElementById('app')!;
+/** The lobby message admins set from the developer console, for everyone. */
+let announcement = '';
 
 // ---------- setup screen ----------
 
@@ -114,7 +117,7 @@ function renderSetup() {
     <div class="lobby-top">${(() => {
       const n = takeNotice();
       return n ? `<p class="notice" role="status">${esc(n)}</p>` : '';
-    })()}${playerBadgeHtml()}</div>
+    })()}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}${consoleButtonHtml()}${playerBadgeHtml()}</div>
     <header class="hero">
       <div class="hero-text">
         <span class="eyebrow">Card room · open all night</span>
@@ -208,6 +211,8 @@ function renderSetup() {
   opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
   opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
   document.getElementById('open-profile')!.onclick = () => renderProfile(app, renderSetup);
+  bindConsoleButton();
+  void refreshConsoleAccess();
   const refillBtn = document.getElementById('refill');
   if (refillBtn) refillBtn.onclick = () => {
     refill(me);
@@ -242,7 +247,7 @@ function difficultyHint(d: DifficultyChoice): string {
 
 interface LogLine { text: string; kind: string; me: boolean }
 
-class Game {
+class Game implements DevGame {
   readonly setup: Setup;
   readonly table: Table;
   readonly bots = new Map<string, Bot>();
@@ -266,6 +271,10 @@ class Game {
   /** Tournament prize paid into the bank, once the player's finishing place is known. */
   private prize: number | null = null;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
+  // Developer console controls.
+  paused = false;
+  autopilot: Bot | null = null;
+  botDelay: number | null = null;
 
   constructor(s: Setup) {
     this.setup = s;
@@ -390,25 +399,42 @@ class Game {
   private schedule() {
     clearTimeout(this.timer);
     const hand = this.hand;
-    if (!hand || this.modal !== 'none') return;
+    if (!hand || this.modal !== 'none' || this.paused) return;
     const humanOut = this.spectating || this.humanIndex < 0 || hand.players[this.humanIndex].status === 'folded';
-    const base = BOT_DELAY[prefs.speed] * (humanOut ? 0.45 : 1);
+    const base = this.botDelay ?? BOT_DELAY[prefs.speed] * (humanOut ? 0.45 : 1);
     if (hand.isComplete) {
-      if (prefs.autoDeal || this.spectating) this.timer = window.setTimeout(() => this.dealNext(), Math.max(900, base * 3));
+      if (prefs.autoDeal || this.spectating || this.autopilot) this.timer = window.setTimeout(() => this.dealNext(), this.botDelay ?? Math.max(900, base * 3));
       return;
     }
-    if (hand.toAct === this.humanIndex) return;
+    if (hand.toAct === this.humanIndex && !this.autopilot) return;
     this.timer = window.setTimeout(() => this.botAct(), base);
+  }
+
+  refresh() {
+    this.render();
+    this.schedule();
+  }
+
+  step() {
+    const hand = this.hand;
+    if (!hand || this.modal !== 'none') return;
+    if (hand.isComplete) this.dealNext();
+    else this.botAct();
+  }
+
+  deal() {
+    if (this.hand?.isComplete && this.modal === 'none') this.dealNext();
   }
 
   private botAct() {
     const hand = this.hand;
     if (!hand || hand.isComplete || this.stopped) return;
     const seat = this.table.seatOf(hand.toAct);
-    const bot = this.bots.get(seat.id);
+    const bot = this.bots.get(seat.id) ?? (seat.isHuman ? this.autopilot : null);
     if (!bot) return;
     const action = bot.decide(buildView(hand, hand.toAct, this.table.stats));
     hand.act(hand.normalize(action));
+    if (seat.isHuman) this.selected.clear();
     this.sync();
   }
 
@@ -489,9 +515,10 @@ class Game {
       <header class="topbar">
         <div class="tb-game">
           <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
-          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}</span>
+          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
         </div>
         <div class="tb-actions">
+          ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 18h7"/></svg><span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
@@ -793,6 +820,7 @@ class Game {
       if (el) el.onclick = fn;
     };
     on('open-settings', () => this.openModal('settings'));
+    on('dev-toggle', toggleConsole);
     on('leave', () => this.openModal('leave'));
     const toggleLog = () => {
       this.logOpen = !this.logOpen;
@@ -986,6 +1014,31 @@ async function boot() {
     history.replaceState(null, '', location.href.split('#')[0]);
     const r = await auth.fromRedirect(hash).catch(() => null);
     if (r && 'type' in r && r.type === 'recovery') resetPassword = true;
+  }
+  initConsole({
+    game: () => game,
+    redraw: () => {
+      if (game) game.render();
+      else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+    },
+    reveal: (on) => {
+      if (on !== undefined && on !== prefs.reveal) {
+        prefs.reveal = on;
+        saveSettings();
+        game?.render();
+      }
+      return prefs.reveal;
+    },
+    announced: (text) => {
+      announcement = text;
+      if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+    },
+  }, auth);
+  if (auth) {
+    void readAnnouncement(auth).then((text) => {
+      announcement = text;
+      if (text && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+    });
   }
   const open = () => (auth?.current ? goOnline(renderSetup, app) : openPlayer(renderSetup, app));
   if (resetPassword) renderNewPassword(app, open);

@@ -118,6 +118,29 @@ export interface HandConfig {
   /** Index into players of the dealer button. */
   button: number;
   rng: Rng;
+  /** Testing: cards to deal on purpose instead of from the shuffle. */
+  rig?: Rig;
+}
+
+/** Cards fixed in advance (the developer console uses this to set up situations to test). */
+export interface Rig {
+  /** By player index: the first cards dealt to that player, in dealing order. Extra cards become draws. */
+  hole?: Record<number, Card[]>;
+  /** Community cards, in the order they come out. */
+  board?: Card[];
+}
+
+/** Why a rig can't be dealt with this deck (a repeated card, or one the short deck lacks), or null if it's fine. */
+export function rigProblem(rig: Rig, shortDeck: boolean, inDeck: readonly Card[] = fullDeck(shortDeck)): string | null {
+  const all = [...Object.values(rig.hole ?? {}).flat(), ...(rig.board ?? [])];
+  const seen = new Set<Card>();
+  const left = new Set(inDeck);
+  for (const c of all) {
+    if (seen.has(c)) return `${cardLabel(c)} is used twice`;
+    seen.add(c);
+    if (!left.has(c)) return shortDeck && rankOf(c) < 6 ? `${cardLabel(c)} isn't in the short deck` : `${cardLabel(c)} has already been dealt`;
+  }
+  return null;
 }
 
 export type HandPhase = 'betting' | 'draw' | 'complete';
@@ -150,6 +173,8 @@ export class Hand {
   private muck: Card[] = [];
   private drawQueue: number[] = [];
   private rng: Rng;
+  private rigHole = new Map<number, Card[]>();
+  private rigBoard: Card[] = [];
 
   constructor(cfg: HandConfig) {
     if (cfg.players.length < 2) throw new Error('A hand needs at least two players');
@@ -176,7 +201,42 @@ export class Hand {
       shown: false,
     }));
     this.deck = shuffle(fullDeck(cfg.variant.shortDeck), this.rng);
+    if (cfg.rig) {
+      const problem = rigProblem(cfg.rig, cfg.variant.shortDeck);
+      if (problem) throw new Error(problem);
+      this.takeFromDeck([...Object.values(cfg.rig.hole ?? {}).flat(), ...(cfg.rig.board ?? [])]);
+      for (const [i, cards] of Object.entries(cfg.rig.hole ?? {})) this.rigHole.set(Number(i), [...cards]);
+      this.rigBoard = [...(cfg.rig.board ?? [])];
+    }
     this.begin();
+  }
+
+  // ---------- testing ----------
+
+  /** The next cards the deck will give, top first (cards fixed with a rig come before these). */
+  upcoming(count = this.deck.length): Card[] {
+    return this.deck.slice(-count).reverse();
+  }
+
+  /** Cards fixed to come out next on the board, then the cards still undealt. For the developer console. */
+  get rigged(): { board: Card[]; hole: Map<number, Card[]> } {
+    return { board: [...this.rigBoard], hole: new Map([...this.rigHole].map(([i, c]) => [i, [...c]])) };
+  }
+
+  /** Fixes the board cards still to come (replacing any earlier choice). Throws if a card is already out. */
+  setBoard(cards: Card[]): void {
+    const pool = [...this.deck, ...this.rigBoard];
+    const problem = rigProblem({ board: cards }, this.variant.shortDeck, pool);
+    if (problem) throw new Error(problem);
+    this.deck.unshift(...this.rigBoard);
+    this.rigBoard = [];
+    this.takeFromDeck(cards);
+    this.rigBoard = [...cards];
+  }
+
+  private takeFromDeck(cards: Card[]) {
+    const out = new Set(cards);
+    this.deck = this.deck.filter((c) => !out.has(c));
   }
 
   // ---------- queries ----------
@@ -452,9 +512,14 @@ export class Hand {
     return this.deck.pop()!;
   }
 
+  private nextBoardCard(): Card {
+    return this.rigBoard.length ? this.rigBoard.shift()! : this.draw1();
+  }
+
   private dealTo(i: number, up: boolean) {
     const p = this.players[i];
-    p.cards.push(this.draw1());
+    const rigged = this.rigHole.get(i);
+    p.cards.push(rigged?.length ? rigged.shift()! : this.draw1());
     p.faceUp.push(up);
   }
 
@@ -468,7 +533,7 @@ export class Hand {
       } else {
         this.draw1(); // burn
         const count = this.street === 1 ? 3 : 1;
-        for (let k = 0; k < count; k++) this.board.push(this.draw1());
+        for (let k = 0; k < count; k++) this.board.push(this.nextBoardCard());
         const name = ['', 'Flop', 'Turn', 'River'][this.street];
         this.say('street', `${name}: ${this.board.map(cardLabel).join(' ')}`);
       }
@@ -488,7 +553,7 @@ export class Hand {
         for (const i of order) this.dealTo(i, true);
         this.say('street', `${['', 'Fourth', 'Fifth', 'Sixth'][s]} street`);
       } else if (this.deck.length < order.length) {
-        this.board.push(this.draw1());
+        this.board.push(this.nextBoardCard());
         this.say('street', `Seventh street: not enough cards, so ${cardLabel(this.board[0])} is dealt face up for everyone`);
       } else {
         for (const i of order) this.dealTo(i, false);

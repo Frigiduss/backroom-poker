@@ -38,3 +38,27 @@ one account from reading or changing another account's players.
 - The chip bank is kept by the browser, so a determined player could edit their own
   numbers. That only matters if bank sizes are ever compared between people, for
   example a leaderboard, which would need the bank rules to run on the server.
+
+## The developer console
+
+Admin accounts get a developer console in the game: press the **`** key (top left of the
+keyboard), or tap **>_ Console** in the lobby on a phone. It can change your bank and stats,
+show every card at the table, fix the next cards dealt, retune or pause the bots, let a bot
+play for you, and manage every account's players and the lobby announcement. Type `help`
+in it for the full list.
+
+To make your account an admin:
+
+1. Sign up in the game with your email, so the account exists.
+2. In Supabase, open **SQL Editor → New query** and paste everything from
+   [`admin.sql`](admin.sql).
+3. In the last lines, replace `YOUR-EMAIL@example.com` with the email you signed up with,
+   then click **Run**.
+4. Reload the game. The console button appears in the lobby.
+
+To add another admin later, run just the last statement of `admin.sql` with their email.
+To remove one: `delete from public.admins where user_id = (select id from auth.users where email = 'their@email');`
+
+Admin powers are checked by the database (row level security and the `is_admin()`
+function), not by the page, so nobody can turn the console's account powers on by editing
+the site. Every change made to a player from the console is written to the `admin_log` table.

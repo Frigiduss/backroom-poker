@@ -1069,3 +1069,64 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- developer console (admin accounts only) ---------- */
+.announce { background: rgba(111, 183, 234, .1); border-color: rgba(111, 183, 234, .4); }
+.dev-open {
+  font: 600 13px/1 var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: #8ff0b0; background: rgba(0, 0, 0, .45); border: 1px solid rgba(143, 240, 176, .35);
+  border-radius: 999px; padding: 9px 13px; cursor: pointer;
+}
+.dev-open:hover { border-color: #8ff0b0; }
+.dev-flag { color: #8ff0b0; }
+.dev-console {
+  --dev-fg: #d7f5df; --dev-dim: #7c9a86; --dev-acc: #8ff0b0; --dev-err: #ff8a7a; --dev-line: rgba(143, 240, 176, .16);
+  position: fixed; inset: 0 0 auto 0; z-index: 1000;
+  height: min(62vh, 560px); display: flex; flex-direction: column;
+  background: rgba(5, 10, 8, .96); color: var(--dev-fg);
+  border-bottom: 1px solid var(--dev-acc);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  animation: dev-drop .14s ease-out;
+  backdrop-filter: blur(6px);
+}
+@keyframes dev-drop { from { transform: translateY(-24px); opacity: 0; } }
+.dev-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--dev-line);
+}
+.dev-title { color: var(--dev-acc); font-weight: 700; letter-spacing: .02em; }
+.dev-who { color: var(--dev-dim); }
+.dev-quick { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+.dev-quick button, .dev-close {
+  font: inherit; color: var(--dev-fg); background: transparent; cursor: pointer;
+  border: 1px solid var(--dev-line); border-radius: 6px; padding: 2px 8px;
+}
+.dev-quick button:hover, .dev-close:hover { border-color: var(--dev-acc); color: var(--dev-acc); }
+.dev-out { flex: 1; overflow: auto; padding: 8px 14px; overscroll-behavior: contain; }
+.dev-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.dev-cmd { color: var(--dev-acc); margin-top: 6px; }
+.dev-cmd::before { content: '› '; }
+.dev-ok { color: #a8f7c2; }
+.dev-err { color: var(--dev-err); }
+.dev-dim, .dev-dim * { color: var(--dev-dim); }
+.dev-group { color: var(--dev-acc); font-weight: 700; margin-top: 8px; border: 0; padding: 0; }
+.dev-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 4px 0; white-space: nowrap; }
+.dev-table th { text-align: left; color: var(--dev-dim); font-weight: 600; padding: 2px 14px 2px 0; border-bottom: 1px solid var(--dev-line); }
+.dev-table td { padding: 2px 14px 2px 0; vertical-align: top; }
+.dev-card { display: inline-block; padding: 0 4px; border-radius: 3px; background: #f4efe3; color: #15110d; font-weight: 700; }
+.dev-card.s1, .dev-card.s2 { color: #c8283a; }
+.dev-tag { color: var(--ink); background: var(--dev-acc); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+.dev-pre { margin: 2px 0; white-space: pre-wrap; }
+.dev-prompt { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--dev-line); }
+.dev-prompt span { color: var(--dev-acc); font-weight: 700; }
+.dev-prompt input {
+  flex: 1; font: inherit; font-size: 14px; color: var(--dev-fg); background: transparent; border: 0; outline: none; caret-color: var(--dev-acc);
+}
+@media (max-width: 720px) {
+  .dev-console { height: 70vh; font-size: 12px; }
+  .dev-who { display: none; }
+  .dev-open span { display: none; }
+  .dev-close { margin-left: auto; }
+  .dev-quick { order: 3; width: 100%; margin-left: 0; }
+}
