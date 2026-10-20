@@ -1,18 +1,94 @@
 import {
-  AccountStore, NAME_MAX, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
-  canRefill, cleanName, createProfile, exportProfile, importProfile, refill,
+  AccountStore, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
+  canRefill, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable,
 } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { esc, fmt } from './dom';
 
 // ---------- the signed-in player ----------
 
+let local: LocalAccountStore;
+let auth: OnlineAuth | null = null;
+let storage: KeyValueStorage | null = null;
 let store: AccountStore;
 let current: Profile | null = null;
 let saving: Promise<void> = Promise.resolve();
+/** Why the last online save failed, shown on the lobby badge until a save succeeds. */
+let saveError = '';
+/** A one-off message for the lobby, such as falling back to this device's players. */
+let notice = '';
 
-export function initAccounts(s: AccountStore) {
-  store = s;
+/** Sets up where players are kept. `onlineAuth` is null when online accounts aren't configured. */
+export function initAccounts(localStore: LocalAccountStore, onlineAuth: OnlineAuth | null, kv: KeyValueStorage | null) {
+  local = localStore;
+  auth = onlineAuth;
+  storage = kv;
+  store = local;
+}
+
+/** Settings from before accounts existed, given to the first player created. */
+let welcomeSettings: Record<string, unknown> = {};
+export function setWelcomeSettings(settings: Record<string, unknown>) {
+  welcomeSettings = settings;
+}
+
+export const isOnline = (): boolean => store.kind === 'online';
+
+export function takeNotice(): string {
+  const n = notice;
+  notice = '';
+  return n;
+}
+
+/**
+ * Opens the last player used with the current store, or the welcome screen when there
+ * are none. Any chips left at a table by a closed tab are settled first.
+ */
+export async function openPlayer(onReady: () => void, app: HTMLElement) {
+  let players: Profile[];
+  try {
+    players = await store.list();
+  } catch (err) {
+    if (!isOnline()) throw err;
+    notice = `${(err as Error).message} You're playing with the players saved on this device.`;
+    store = local;
+    players = await store.list();
+  }
+  const id = await store.currentId();
+  const p = players.find((x) => x.id === id) ?? players.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  if (!p) {
+    current = null;
+    return renderWelcome(app, onReady);
+  }
+  await selectPlayer(p);
+  if (p.table) {
+    settleOpenTable(p);
+    await savePlayer();
+  }
+  onReady();
+}
+
+/**
+ * Switches to the signed-in account's players. A brand-new account gets copies of the
+ * players on this device, so nobody starts over when they first sign in.
+ */
+export async function goOnline(onReady: () => void, app: HTMLElement) {
+  if (!auth?.current) return openPlayer(onReady, app);
+  const online = new OnlineAccountStore(auth, storage);
+  store = online;
+  try {
+    const existing = await online.list();
+    if (!existing.length) {
+      for (const p of await local.list()) {
+        settleOpenTable(p);
+        await online.put({ ...p, id: newId() });
+      }
+    }
+  } catch (err) {
+    store = local;
+    notice = `${(err as Error).message} You're playing with the players saved on this device.`;
+  }
+  return openPlayer(onReady, app);
 }
 
 export function player(): Profile {
@@ -30,7 +106,12 @@ export async function selectPlayer(p: Profile | null) {
 export function savePlayer(): Promise<void> {
   if (!current) return saving;
   const snapshot = current;
-  saving = saving.then(() => store.put(snapshot)).catch(() => undefined);
+  const target = store;
+  saving = saving
+    .then(() => target.put(snapshot))
+    .then(() => (saveError = ''))
+    .catch((err) => (saveError = (err as Error).message || 'Not saved.'))
+    .then(() => undefined);
   return saving;
 }
 
@@ -44,7 +125,7 @@ export function playerBadgeHtml(): string {
   const p = player();
   return `<button type="button" class="player-badge" id="open-profile" title="Your profile and stats">
     ${avatarHtml(p)}
-    <span class="pb-text"><b>${esc(p.name)}</b><span>Bank <em>${fmt(p.bank)}</em></span></span>
+    <span class="pb-text"><b>${esc(p.name)}</b><span>Bank <em>${fmt(p.bank)}</em>${saveError ? ' · <i class="unsaved" title="' + esc(saveError) + '">not saved online</i>' : ''}</span></span>
     <span class="pb-more">Profile</span>
   </button>`;
 }
@@ -72,20 +153,25 @@ function download(name: string, text: string) {
 // ---------- first visit ----------
 
 /** Shown when there are no players yet. */
-export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedName = '', settings: Record<string, unknown> = {}) {
+export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedName = '', settings: Record<string, unknown> = welcomeSettings) {
   app.innerHTML = `
   <main class="lobby welcome">
     <section class="panel welcome-card">
       <span class="eyebrow">Back Room Poker</span>
+      ${(() => {
+        const n = takeNotice();
+        return n ? `<p class="notice" role="status">${esc(n)}</p>` : '';
+      })()}
       <h1>Who's playing?</h1>
       <p>Your player keeps a chip bank between games, tracks your record, and remembers your table settings. You start with <b>${fmt(STARTING_BANK)}</b> chips.</p>
       <form id="create-form" class="create-row">
         <input id="new-name" class="text-input" maxlength="${NAME_MAX}" placeholder="Your name" value="${esc(suggestedName)}" autocomplete="off" required>
         <button type="submit" class="btn btn-primary">Create player</button>
       </form>
-      <p class="fine">Players are saved in this browser. Have a backup file from another device? <label class="link-btn">Import it<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
+      <p class="fine">${isOnline() ? `Saved to your online account (${esc(auth?.current?.email ?? '')}).` : 'Players are saved in this browser.'} Have a backup file? <label class="link-btn">Import it<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
       <p class="form-error" id="form-error" role="alert"></p>
     </section>
+    ${accountPanelHtml('Already have an online account? Sign in to get your players back.')}
   </main>`;
   const input = document.getElementById('new-name') as HTMLInputElement;
   input.focus();
@@ -99,6 +185,7 @@ export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedNam
     onDone();
   };
   bindImport(onDone);
+  bindAccountPanel(app, onDone);
 }
 
 function bindImport(onDone: () => void) {
@@ -145,7 +232,7 @@ function statsHtml(p: Profile): string {
 /** Player profile: stats, rename, refill, backup, and switching between players on this device. */
 export async function renderProfile(app: HTMLElement, onBack: () => void) {
   const p = player();
-  const others = (await store.list()).filter((x) => x.id !== p.id).sort((a, b) => b.updatedAt - a.updatedAt);
+  const others = (await store.list().catch(() => [] as Profile[])).filter((x) => x.id !== p.id).sort((a, b) => b.updatedAt - a.updatedAt);
   const refillable = canRefill(p);
   app.innerHTML = `
   <main class="lobby profile-page">
@@ -179,18 +266,19 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
     </section>
 
     <section class="panel">
-      <h2 class="step">Players on this device</h2>
+      <h2 class="step">${isOnline() ? 'Players in your account' : 'Players on this device'}</h2>
       <div class="player-list">
         ${others.map((o) => `<button type="button" class="player-row" data-switch="${esc(o.id)}">${avatarHtml(o)}<span class="pr-name">${esc(o.name)}</span><span class="pr-bank">${fmt(o.bank)} chips</span><span class="pr-go">Switch</span></button>`).join('')}
-        ${others.length ? '' : '<p class="fine">Nobody else yet. Add a player for each person who plays on this device.</p>'}
+        ${others.length ? '' : `<p class="fine">Nobody else yet. Add a player for each person who plays${isOnline() ? '' : ' on this device'}.</p>`}
       </div>
       <form id="create-form" class="create-row">
         <input id="new-name" class="text-input" maxlength="${NAME_MAX}" placeholder="New player's name" autocomplete="off" required>
         <button type="submit" class="btn">Add player</button>
       </form>
-      <p class="fine">Players are saved in this browser only. Use a backup file to move one to another device. <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
+      <p class="fine">${isOnline() ? 'These players are saved online and open on any device where you sign in.' : 'Players are saved in this browser only. Sign in below, or use a backup file, to move them to another device.'} <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
       <p class="form-error" id="form-error" role="alert"></p>
     </section>
+    ${accountPanelHtml('Sign in to keep your players on every device you play on.')}
   </main>`;
 
   const rerender = () => renderProfile(app, onBack);
@@ -259,4 +347,139 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
     onBack();
   };
   bindImport(onBack);
+  bindAccountPanel(app, onBack);
+}
+
+// ---------- online account ----------
+
+function accountPanelHtml(pitch: string): string {
+  if (!auth) return '';
+  const s = auth.current;
+  if (s && isOnline()) {
+    return `<section class="panel account-panel">
+      <h2 class="step">Online account</h2>
+      <p>Signed in as <b>${esc(s.email)}</b>. Your players are saved online.</p>
+      <div class="row-btns"><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
+    </section>`;
+  }
+  if (s) {
+    return `<section class="panel account-panel">
+      <h2 class="step">Online account</h2>
+      <p>Signed in as <b>${esc(s.email)}</b>, but the account server couldn't be reached, so you're using this device's players.</p>
+      <div class="row-btns"><button type="button" class="btn btn-sm btn-primary" id="retry-online">Try again</button><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
+      <p class="form-error" id="account-error" role="alert"></p>
+    </section>`;
+  }
+  return `<section class="panel account-panel">
+    <h2 class="step">Online account</h2>
+    <p>${pitch}</p>
+    <form id="account-form" class="account-form">
+      <input id="acct-email" class="text-input" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="acct-pass" class="text-input" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6" required>
+      <div class="row-btns">
+        <button type="submit" class="btn btn-primary btn-sm" id="sign-in">Sign in</button>
+        <button type="button" class="btn btn-sm" id="sign-up">Create account</button>
+        <button type="button" class="link-btn plain" id="forgot">Forgot password?</button>
+      </div>
+    </form>
+    <p class="form-ok" id="account-ok" role="status"></p>
+    <p class="form-error" id="account-error" role="alert"></p>
+  </section>`;
+}
+
+/** Where links in account emails send people back to: this page, without any old hash. */
+const returnUrl = () => location.href.split('#')[0];
+
+function bindAccountPanel(app: HTMLElement, onReady: () => void) {
+  if (!auth) return;
+  const a = auth;
+  const err = document.getElementById('account-error');
+  const ok = document.getElementById('account-ok');
+  const say = (msg: string, good = false) => {
+    if (err) err.textContent = good ? '' : msg;
+    if (ok) ok.textContent = good ? msg : '';
+  };
+  const busy = async (fn: () => Promise<void>) => {
+    const btns = app.querySelectorAll<HTMLButtonElement>('.account-panel button');
+    btns.forEach((b) => (b.disabled = true));
+    try {
+      await fn();
+    } catch (e) {
+      say((e as Error).message);
+    } finally {
+      btns.forEach((b) => (b.disabled = false));
+    }
+  };
+
+  document.getElementById('sign-out')?.addEventListener('click', () => busy(async () => {
+    await savePlayer();
+    await a.signOut();
+    store = local;
+    saveError = '';
+    await openPlayer(onReady, app);
+  }));
+  document.getElementById('retry-online')?.addEventListener('click', () => busy(async () => {
+    await goOnline(onReady, app);
+    const n = takeNotice();
+    if (n) throw new Error(n);
+  }));
+
+  const form = document.getElementById('account-form') as HTMLFormElement | null;
+  if (!form) return;
+  const email = document.getElementById('acct-email') as HTMLInputElement;
+  const pass = document.getElementById('acct-pass') as HTMLInputElement;
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    busy(async () => {
+      await savePlayer();
+      await a.signIn(email.value.trim(), pass.value);
+      await goOnline(onReady, app);
+    });
+  };
+  document.getElementById('sign-up')!.onclick = () => {
+    if (!form.reportValidity()) return;
+    busy(async () => {
+      await savePlayer();
+      const session = await a.signUp(email.value.trim(), pass.value, returnUrl());
+      if (!session) return say(`Almost there: we sent a link to ${email.value.trim()}. Open it to finish creating your account.`, true);
+      await goOnline(onReady, app);
+    });
+  };
+  document.getElementById('forgot')!.onclick = () => {
+    if (!email.reportValidity()) return;
+    busy(async () => {
+      await a.sendPasswordReset(email.value.trim(), returnUrl());
+      say(`If there's an account for ${email.value.trim()}, a link to reset the password is on its way.`, true);
+    });
+  };
+}
+
+/** After a password-reset link: the person is signed in and picks a new password. */
+export function renderNewPassword(app: HTMLElement, onDone: () => void) {
+  if (!auth) return onDone();
+  const a = auth;
+  app.innerHTML = `
+  <main class="lobby welcome">
+    <section class="panel welcome-card">
+      <span class="eyebrow">Back Room Poker</span>
+      <h1>New password</h1>
+      <p>Choose a new password for ${esc(a.current?.email ?? 'your account')}.</p>
+      <form id="pw-form" class="create-row">
+        <input id="new-pass" class="text-input" type="password" minlength="6" placeholder="New password" autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary">Save password</button>
+      </form>
+      <p class="form-error" id="form-error" role="alert"></p>
+    </section>
+  </main>`;
+  const input = document.getElementById('new-pass') as HTMLInputElement;
+  input.focus();
+  document.getElementById('pw-form')!.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await a.setPassword(input.value);
+      onDone();
+    } catch (err) {
+      document.getElementById('form-error')!.textContent = (err as Error).message;
+    }
+  };
 }
