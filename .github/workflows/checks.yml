@@ -1,0 +1,42 @@
+# Runs on every pull request so broken code can't slip in:
+# type check, the test suite, a build, and a check that the committed build output
+# (dist/ and the bundled table server) matches the source.
+# To make this required before merging, see "Required checks" in README.md.
+name: Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the older run, which saves Actions minutes.
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Build output is up to date
+        run: |
+          if ! git diff --quiet -- dist supabase/functions; then
+            git diff --stat -- dist supabase/functions
+            echo "::error::The committed build output is out of date. Run 'npm run build' and commit dist/ and supabase/functions/poker-table/index.ts."
+            exit 1
+          fi
+      - name: Tests
+        run: npm test
