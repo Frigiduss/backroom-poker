@@ -9,6 +9,7 @@
 // never award itself an online achievement.
 import { Card, rankOf, suitOf } from '../engine/cards';
 import { Cat, categoryOf } from '../engine/evaluator';
+import { Round, handTotal } from '../engine/blackjack';
 import type { Hand } from '../engine/hand';
 import { Difficulty, Format } from '../engine/table';
 import { VARIANTS, VARIANT_ORDER, VariantId, showdownValue } from '../engine/variants';
@@ -18,16 +19,17 @@ export type Counters = Record<string, number>;
 export type Tier = 1 | 2 | 3 | 4;
 export const TIER_NAMES: Record<Tier, string> = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Diamond' };
 
-export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'online';
+export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'online';
 export const GROUP_NAMES: Record<AchievementGroup, string> = {
   career: 'Career',
   hands: 'Big hands',
   games: 'Games',
   formats: 'Cash and tournaments',
   bots: 'Bot hunting',
+  blackjack: 'Blackjack',
   online: 'Online with friends',
 };
-export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'online'];
+export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'online'];
 
 export interface Achievement {
   id: string;
@@ -46,7 +48,7 @@ export interface Achievement {
 }
 
 /** Counters that keep the best value seen rather than a running total. */
-const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB']);
+const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin']);
 export const isMaxCounter = (key: string): boolean => MAX_COUNTERS.has(key);
 export const isOnlineCounter = (key: string): boolean => key.startsWith('online.');
 
@@ -223,6 +225,39 @@ ladder('bots', 'beat.expertFull', [
 const gauntlet = (c: Counters) => (['beginner', 'easy', 'medium', 'hard', 'expert'] as Difficulty[]).filter((d) => n(c, `beat.${d}`) > 0).length;
 ladder('bots', gauntlet, [
   { id: 'gauntlet', name: 'The Gauntlet', desc: 'Win a tournament against every bot difficulty.', tier: 3, goal: 5, title: 'Gauntlet Runner' },
+]);
+
+// Blackjack against the dealer.
+ladder('blackjack', 'bj.hands', [
+  { id: 'bj-hands-25', name: 'Hit Me', desc: 'Play 25 hands of blackjack.', tier: 1, goal: 25 },
+  { id: 'bj-hands-500', name: 'Card Counter', desc: 'Play 500 hands of blackjack.', tier: 2, goal: 500, title: 'Card Counter' },
+  { id: 'bj-hands-5000', name: 'Pit Boss', desc: 'Play 5,000 hands of blackjack.', tier: 3, goal: 5000, title: 'Pit Boss' },
+]);
+ladder('blackjack', 'bj.naturals', [
+  { id: 'bj-natural-1', name: 'Natural', desc: 'Get dealt a blackjack.', tier: 1, goal: 1 },
+  { id: 'bj-natural-100', name: 'Twenty-One', desc: 'Get dealt 100 blackjacks.', tier: 2, goal: 100, title: 'Twenty-One' },
+]);
+ladder('blackjack', 'bj.doubleWins', [
+  { id: 'bj-double-1', name: 'Double Down', desc: 'Win a hand you doubled.', tier: 1, goal: 1 },
+  { id: 'bj-double-100', name: 'Double Trouble', desc: 'Win 100 hands you doubled.', tier: 2, goal: 100, title: 'Double Trouble' },
+]);
+ladder('blackjack', 'bj.splitSweeps', [
+  { id: 'bj-split-1', name: 'Split Decision', desc: 'Split a pair and win every hand.', tier: 1, goal: 1 },
+  { id: 'bj-split-25', name: 'Split Personality', desc: 'Split a pair and win every hand, 25 times.', tier: 3, goal: 25, title: 'Split Personality' },
+]);
+ladder('blackjack', 'bj.charlies', [
+  { id: 'bj-charlie', name: 'Five-Card Charlie', desc: 'Make 21 with five cards or more.', tier: 2, goal: 1 },
+]);
+ladder('blackjack', 'bj.insured', [
+  { id: 'bj-insured', name: 'Fully Insured', desc: 'Take insurance and see the dealer turn over blackjack.', tier: 1, goal: 1 },
+]);
+ladder('blackjack', 'bj.bestRun', [
+  { id: 'bj-run-5', name: 'Heater', desc: 'Win 5 blackjack hands in a row.', tier: 2, goal: 5 },
+  { id: 'bj-run-10', name: 'Hot Shoe', desc: 'Win 10 blackjack hands in a row.', tier: 3, goal: 10, title: 'Hot Shoe' },
+]);
+ladder('blackjack', 'bj.bigWin', [
+  { id: 'bj-win-1000', name: 'Paid Out', desc: 'Win 1,000 chips in one hand of blackjack.', tier: 1, goal: 1000 },
+  { id: 'bj-win-10000', name: 'Broke the Bank', desc: 'Win 10,000 chips in one hand of blackjack.', tier: 3, goal: 10_000, title: 'Bank Breaker' },
 ]);
 
 // Online with friends: credited by the table server only.
@@ -409,6 +444,34 @@ export function tournamentTally(f: TournamentFinish): Tally {
     add('online.tourneyWins');
     if ((f.friends ?? 0) > 0) add('online.friendTourneyWins');
   }
+  return t;
+}
+
+/**
+ * What a settled blackjack round adds to the record of the player in `seat`. `run` is their
+ * winning streak including this round.
+ */
+export function blackjackTally(round: Round, seat: number, run = 0): Tally {
+  const t = emptyTally();
+  const s = round.seats[seat];
+  if (!round.isComplete || !s) return t;
+  const add = (k: string, by = 1) => (t.sum[k] = (t.sum[k] ?? 0) + by);
+  const net = round.net(seat);
+  add('bj.hands');
+  add('bj.net', net);
+  if (net > 0) {
+    add('bj.wins');
+    t.max['bj.bigWin'] = net;
+  }
+  if (run > 0) t.max['bj.bestRun'] = run;
+  const won = (o: string | null) => o === 'win' || o === 'blackjack';
+  for (const h of s.hands) {
+    if (h.outcome === 'blackjack' || (h.outcome === 'push' && !h.split && h.cards.length === 2 && handTotal(h.cards).total === 21)) add('bj.naturals');
+    if (h.doubled && won(h.outcome)) add('bj.doubleWins');
+    if (h.cards.length >= 5 && handTotal(h.cards).total === 21) add('bj.charlies');
+  }
+  if (s.hands.length > 1 && s.hands.every((h) => won(h.outcome))) add('bj.splitSweeps');
+  if (s.insurance && round.dealer.length === 2 && handTotal(round.dealer).total === 21) add('bj.insured');
   return t;
 }
 
