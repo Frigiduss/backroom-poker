@@ -15,6 +15,7 @@ import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, o
 import { announce, checkAchievements, renderAchievements } from './achievements';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
+import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
@@ -24,6 +25,8 @@ type BlindSpeed = 'slow' | 'normal' | 'turbo';
 type Speed = 'relaxed' | 'normal' | 'fast';
 
 interface Setup {
+  /** Poker (the variant below) or blackjack. */
+  game: 'poker' | 'blackjack';
   variant: VariantId;
   structures: Partial<Record<VariantId, Structure>>;
   format: Format;
@@ -32,6 +35,7 @@ interface Setup {
   stackBB: number;
   blindSpeed: BlindSpeed;
   name: string;
+  bj: BjSetup;
 }
 
 interface Prefs {
@@ -48,7 +52,7 @@ interface Prefs {
 const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
-  variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You',
+  game: 'poker', bj: DEFAULT_BJ, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You',
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -59,6 +63,8 @@ function loadSettings(p: Profile) {
   setup = { ...DEFAULT_SETUP, ...(p.settings.setup as Partial<Setup> | undefined), name: p.name };
   prefs = { ...DEFAULT_PREFS, ...(p.settings.prefs as Partial<Prefs> | undefined) };
   if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
+  if (setup.game !== 'blackjack') setup.game = 'poker';
+  setup.bj = { ...DEFAULT_BJ, ...setup.bj };
   setVolume(prefs.volume, !prefs.sound);
 }
 
@@ -93,6 +99,8 @@ let awardsChecked = '';
 function renderSetup() {
   game?.stop();
   game = null;
+  blackjack?.stop();
+  blackjack = null;
   stopOnline();
   const me = player();
   loadSettings(me);
@@ -137,16 +145,21 @@ function renderSetup() {
         <div class="games">
           ${VARIANT_ORDER.map((id) => {
             const g = VARIANTS[id];
-            return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${id === setup.variant}">
+            return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${setup.game === 'poker' && id === setup.variant}">
               <span class="gt-head"><span class="name">${g.name}</span>${fan(g.holeCards)}</span>
               <span class="blurb">${g.blurb}</span>
               <span class="meta"><span>${familyName[g.family]}</span><span>${g.structures.join(' · ')}</span><span>${g.maxPlayers} max</span></span>
             </button>`;
           }).join('')}
+          <button type="button" class="game-tile bj-tile" data-blackjack aria-pressed="${setup.game === 'blackjack'}">
+            <span class="gt-head"><span class="name">Blackjack</span>${fan(2)}</span>
+            <span class="blurb">Beat the dealer to 21 without going over. Double, split and insure, and a blackjack pays 3 to 2.</span>
+            <span class="meta"><span>Casino</span><span>vs the dealer</span><span>6 decks</span></span>
+          </button>
         </div>
       </section>
 
-      <aside class="panel setup-card" aria-label="Your table">
+      ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
           <span class="eyebrow">Your table</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
@@ -193,7 +206,7 @@ function renderSetup() {
           ${!affordable && canRefill(me) ? '<button type="button" class="btn btn-lg" id="refill">Refill bank</button>' : ''}
           <button type="button" class="btn btn-primary btn-lg" id="deal" ${affordable ? '' : 'disabled'}>Deal me in</button>
         </div>
-      </aside>
+      </aside>`}
 
       ${friendsPanelHtml()}
     </div>
@@ -205,7 +218,12 @@ function renderSetup() {
     saveSettings();
     renderSetup();
   };
-  app.querySelectorAll<HTMLButtonElement>('[data-variant]').forEach((b) => (b.onclick = () => update(() => (setup.variant = b.dataset.variant as VariantId))));
+  app.querySelectorAll<HTMLButtonElement>('[data-variant]').forEach((b) => (b.onclick = () => update(() => {
+    setup.game = 'poker';
+    setup.variant = b.dataset.variant as VariantId;
+  })));
+  app.querySelectorAll<HTMLButtonElement>('[data-blackjack]').forEach((b) => (b.onclick = () => update(() => (setup.game = 'blackjack'))));
+  bindBjSetupCard(setup.bj, update);
   app.querySelectorAll<HTMLButtonElement>('[data-structure]').forEach((b) => (b.onclick = () => update(() => (setup.structures[setup.variant] = b.dataset.structure as Structure))));
   app.querySelectorAll<HTMLButtonElement>('[data-format]').forEach((b) => (b.onclick = () => update(() => {
     const prev = setup.format;
@@ -215,9 +233,11 @@ function renderSetup() {
   app.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach((b) => (b.onclick = () => update(() => (setup.difficulty = b.dataset.difficulty as DifficultyChoice))));
   app.querySelectorAll<HTMLButtonElement>('[data-stack]').forEach((b) => (b.onclick = () => update(() => (setup.stackBB = Number(b.dataset.stack)))));
   app.querySelectorAll<HTMLButtonElement>('[data-blinds]').forEach((b) => (b.onclick = () => update(() => (setup.blindSpeed = b.dataset.blinds as BlindSpeed))));
-  const opp = document.getElementById('opp') as HTMLInputElement;
-  opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
-  opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
+  const opp = document.getElementById('opp') as HTMLInputElement | null;
+  if (opp) {
+    opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
+    opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
+  }
   const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile));
   document.getElementById('open-profile')!.onclick = openProfile;
   bindFriendsPanel(() => ({
@@ -247,6 +267,11 @@ function renderSetup() {
   };
   document.getElementById('deal')!.onclick = () => {
     saveSettings();
+    if (setup.game === 'blackjack') {
+      blackjack = new BlackjackTable({ app, setup: setup.bj, prefs, save: saveSettings, leave: renderSetup });
+      blackjack.start();
+      return;
+    }
     const next = new Game(setup);
     if (!next.start()) return renderSetup();
     game = next;
@@ -1033,10 +1058,14 @@ function ordinal(n: number): string {
 }
 
 let game: Game | null = null;
+let blackjack: BlackjackTable | null = null;
 let resizeTimer: number | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(() => game?.render(), 150);
+  resizeTimer = window.setTimeout(() => {
+    game?.render();
+    blackjack?.render();
+  }, 150);
 });
 
 /** Opens the last player (online if signed in), or asks who's playing on a first visit. */
@@ -1077,6 +1106,7 @@ async function boot() {
     game: () => game,
     redraw: () => {
       if (game) game.render();
+      else if (blackjack) blackjack.render();
       else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     },
     reveal: (on) => {

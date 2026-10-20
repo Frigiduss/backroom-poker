@@ -404,8 +404,10 @@ function statsHtml(p: Profile): string {
     ['Peak bank', fmt(s.peakBank)],
     ['Favourite game', favName],
   ];
+  const c = p.achievements.counters;
+  if (c['bj.hands']) tiles.push(['Blackjack result', signed(c['bj.net'] ?? 0), `${fmt(c['bj.hands'])} hand${c['bj.hands'] === 1 ? '' : 's'} · ${fmt(c['bj.naturals'] ?? 0)} blackjack${c['bj.naturals'] === 1 ? '' : 's'}`]);
   return `<div class="stat-grid">${tiles
-    .map(([label, value, sub]) => `<div class="stat"><span class="sl">${label}</span><b class="${label === 'Cash game result' ? (s.cashNet > 0 ? 'up' : s.cashNet < 0 ? 'down' : '') : ''}">${value}</b>${sub ? `<span class="ss">${sub}</span>` : ''}</div>`)
+    .map(([label, value, sub]) => `<div class="stat"><span class="sl">${label}</span><b class="${label.endsWith(' result') ? (value.startsWith('+') ? 'up' : value.startsWith('-') ? 'down' : '') : ''}">${value}</b>${sub ? `<span class="ss">${sub}</span>` : ''}</div>`)
     .join('')}</div>`;
 }
 

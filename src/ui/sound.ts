@@ -1,6 +1,6 @@
 // Table sounds, synthesized with the Web Audio API so the game ships no audio files and works offline.
 
-export type SoundName = 'deal' | 'flip' | 'check' | 'chips' | 'allin' | 'fold' | 'win' | 'pot' | 'turn' | 'shuffle';
+export type SoundName = 'deal' | 'flip' | 'check' | 'chips' | 'allin' | 'fold' | 'win' | 'pot' | 'turn' | 'shuffle' | 'bust' | 'blackjack';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -116,6 +116,18 @@ const SOUNDS: Record<SoundName, (t: number) => void> = {
       tone(t + 0.1 + i * 0.09, f, 0.5, 0.16, 'triangle');
       tone(t + 0.1 + i * 0.09, f * 2, 0.3, 0.04, 'sine');
     });
+  },
+  bust: (t) => {
+    // A dull thud and a falling note.
+    tone(t, 196, 0.32, 0.18, 'triangle', 98);
+    hiss(t, 0.12, { freq: 400, type: 'lowpass', gain: 0.3 });
+  },
+  blackjack: (t) => {
+    [783.99, 1046.5, 1318.5, 1568].forEach((f, i) => {
+      tone(t + i * 0.06, f, 0.42, 0.13, 'triangle');
+      tone(t + i * 0.06, f * 2, 0.25, 0.035, 'sine');
+    });
+    for (let i = 0; i < 4; i++) chip(t + 0.3 + i * 0.05 + jitter(), 0.3);
   },
   turn: (t) => {
     tone(t, 880, 0.35, 0.12, 'sine');

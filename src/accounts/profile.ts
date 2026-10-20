@@ -243,6 +243,15 @@ export function settleOpenTable(p: Profile): void {
   else if (p.table) abandonTournament(p);
 }
 
+/**
+ * Blackjack plays straight from the bank: the table holds it as the player's stack and hands
+ * it back after every move, so wagers on a hand still in play are gone if the tab closes.
+ */
+export function setBlackjackBank(p: Profile, stack: number): void {
+  p.bank = Math.max(0, Math.floor(stack));
+  touch(p);
+}
+
 export const canRefill = (p: Profile): boolean => !p.table && p.bank < REFILL_BELOW;
 
 /** Tops a nearly empty bank back up to the starting amount. */
