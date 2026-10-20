@@ -15,6 +15,12 @@ export class FakeSupabase {
   admins = new Set<string>();
   site = new Map<string, unknown>();
   log: { at: string; admin: string; action: string; detail: unknown }[] = [];
+  /** daily_bonus rows by `owner/player`, as supabase/leaderboard.sql keeps them. Null until set up. */
+  bonus: Map<string, { last: number; streak: number }> | null = new Map();
+  /** Player ids an admin took off the leaderboard. */
+  hidden = new Set<string>();
+  /** The server's clock (epoch ms); defaults to the real time. */
+  now: number | null = null;
   /** Seconds a new access token lasts. */
   expiresIn = 3600;
   requireConfirm = false;
@@ -112,6 +118,43 @@ export class FakeSupabase {
           players: this.rows.filter((r) => r.owner === x.id).length, admin: this.admins.has(x.id),
         })),
       };
+    }
+    if (p === '/rest/v1/rpc/claim_daily_bonus' && this.bonus) {
+      if (!uid) return denied;
+      if (!this.rows.some((r) => r.id === body.p_player && r.owner === uid)) return { status: 403, body: { code: '42501', message: "That player isn't in your account." } };
+      const now = this.now ?? Date.now();
+      const key = `${uid}/${body.p_player}`;
+      const b = this.bonus.get(key);
+      if (b && b.last > now - 20 * 3_600_000) return { status: 200, body: { amount: 0, streak: b.streak, last: b.last } };
+      const day = b && b.last >= now - 48 * 3_600_000 ? b.streak + 1 : 1;
+      this.bonus.set(key, { last: now, streak: day });
+      return { status: 200, body: { amount: 1000 + 500 * (Math.min(day, 7) - 1), streak: day, last: now } };
+    }
+    if (p === '/rest/v1/rpc/leaderboard' && this.bonus) {
+      const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
+      type D = { name?: string; color?: string; title?: string; bank?: unknown; stats?: { hands?: unknown; biggestPot?: unknown }; settings?: { leaderboard?: unknown }; achievements?: { unlocked?: Record<string, unknown>; counters?: Record<string, unknown> } };
+      const scored = this.rows.map((r) => {
+        const d = r.data as D;
+        const value = body.p_board === 'bank' ? num(d.bank) : body.p_board === 'pot' ? num(d.stats?.biggestPot) : Object.keys(d.achievements?.unlocked ?? {}).length;
+        return { r, d, value };
+      }).filter(({ r, d, value }) => !this.hidden.has(r.id) && d.settings?.leaderboard !== false && num(d.stats?.hands) + num(d.achievements?.counters?.['bj.hands']) >= 10 && value > 0)
+        .sort((a, b) => b.value - a.value || a.r.id.localeCompare(b.r.id));
+      const limit = Math.min(Math.max(Number(body.p_limit ?? 25), 1), 100);
+      return {
+        status: 200,
+        body: scored.map((x, i) => ({ ...x, rank: scored.findIndex((y) => y.value === x.value) + 1, rn: i + 1 }))
+          .filter((x) => x.rn <= limit || x.r.owner === uid)
+          .map((x) => ({
+            rank: x.rank, name: x.d.name, color: x.d.color, value: x.value, mine: !!uid && x.r.owner === uid,
+            title: x.d.title && x.d.achievements?.unlocked && x.d.title in x.d.achievements.unlocked ? x.d.title : null,
+          })),
+      };
+    }
+    if (p === '/rest/v1/leaderboard_hidden') {
+      if (!admin) return denied;
+      if (method === 'POST') this.hidden.add(body.player_id);
+      if (method === 'DELETE') this.hidden.delete(u.searchParams.get('player_id')?.replace(/^eq\./, '') ?? '');
+      return { status: 201 };
     }
     if (p === '/rest/v1/site') {
       const keyEq = u.searchParams.get('key')?.replace(/^eq\./, '');

@@ -1,6 +1,7 @@
 import {
   ACHIEVEMENTS, Achievement, AccountStore, Counters, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
-  allCounters, canRefill, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable, takeUnlocks, titleFor,
+  BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable,
+  takeUnlocks, titleFor,
 } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { makeCard } from '../engine/cards';
@@ -35,6 +36,10 @@ export function setWelcomeSettings(settings: Record<string, unknown>) {
 }
 
 export const isOnline = (): boolean => store.kind === 'online';
+
+export function setNotice(text: string) {
+  notice = text;
+}
 
 export function takeNotice(): string {
   const n = notice;
@@ -140,6 +145,25 @@ export async function refreshAwards(): Promise<Achievement[]> {
 
 /** The current player's chosen title, if they still hold it. */
 export const currentTitle = (): string | null => (current ? titleFor(current.title, allCounters(current, serverAwards())) : null);
+
+/** Sign-in for reading the leaderboard, or null when online accounts aren't configured. */
+export const onlineAuth = (): OnlineAuth | null => auth;
+
+/**
+ * Collects the current player's daily bonus. Online players ask the server, which keeps the
+ * claim time; players on this device go by the browser's clock.
+ */
+export async function claimDailyBonus(): Promise<BonusClaim> {
+  const p = player();
+  let claim: BonusClaim;
+  if (store instanceof OnlineAccountStore && auth) {
+    claim = await claimOnlineBonus(auth, p.id);
+    if (current !== p) return claim;
+    applyBonus(p, claim);
+  } else claim = claimLocally(p);
+  await savePlayer();
+  return claim;
+}
 
 /** Saves the current player. Writes are queued so they land in order. */
 export function savePlayer(): Promise<void> {

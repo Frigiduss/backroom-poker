@@ -2,6 +2,7 @@
 // settings. Everything here is plain data and pure bookkeeping, so the same rules work with
 // browser storage today and an online backend later.
 import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
+import type { BonusRecord } from './bonus';
 
 export const STARTING_BANK = 10_000;
 /** A player whose bank (with nothing at a table) drops below this can refill it. */
@@ -64,6 +65,8 @@ export interface Profile {
   achievements: AchievementRecord;
   /** The achievement whose title shows next to the name, or null for none. */
   title: string | null;
+  /** The daily chip bonus: when it was last collected and the streak. */
+  bonus: BonusRecord;
 }
 
 export const emptyProfileStats = (bank = STARTING_BANK): ProfileStats => ({
@@ -94,6 +97,7 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     settings: opts.settings ?? {},
     achievements: { counters: {}, unlocked: {}, run: 0 },
     title: null,
+    bonus: { last: null, streak: 0 },
   };
 }
 
@@ -151,6 +155,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
     settings: r.settings && typeof r.settings === 'object' ? { ...r.settings } : {},
     achievements: normalizeAchievements(r.achievements, stats),
     title: typeof r.title === 'string' ? r.title : null,
+    bonus: { last: typeof r.bonus?.last === 'number' ? r.bonus.last : null, streak: Math.max(0, Math.floor(num(r.bonus?.streak, 0))) },
   };
 }
 

@@ -4,3 +4,5 @@ export * from './online';
 export * from './admin';
 export * from './achievements';
 export * from './looks';
+export * from './bonus';
+export * from './leaderboard';
