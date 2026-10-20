@@ -56,6 +56,16 @@ npm test           # rules tests + thousands of bot-vs-bot hands in every game
 npm run typecheck
 ```
 
+Every pull request runs the **Checks** workflow (`.github/workflows/checks.yml`): type check,
+build, a check that the committed `dist/` and `supabase/functions/poker-table/index.ts` match
+the source, and the full test suite (about 3 minutes).
+
+### Required checks
+
+To block merging until Checks passes: repo **Settings > Branches > Add branch ruleset** (or
+"Add classic branch protection rule") for `main`, turn on **Require status checks to pass**,
+and add the `checks` check.
+
 ## Layout
 
 - `src/engine/` – pure game logic with no browser code: cards, hand evaluator
