@@ -1,7 +1,7 @@
 // The browser's side of online tables: sends moves to the poker-table function and
 // watches the signed-in account's own view row for changes.
 import { OnlineAuth, OnlineError, restRequest } from '../accounts/online';
-import { Reply, Request, TableView } from './protocol';
+import { AdminReply, Reply, Request, TableView } from './protocol';
 
 type Fetch = typeof fetch;
 
@@ -30,6 +30,11 @@ export class TableClient {
     if (res.status === 404 && !('ok' in body)) throw new OnlineError("Online tables aren't switched on yet: the poker-table function isn't deployed on the server.", 404);
     if (!res.ok || !body.ok) throw new OnlineError(body.error ?? body.message ?? `The table server said no (${res.status}).`, res.status);
     return body as Reply;
+  }
+
+  /** Developer console requests ('admin' and 'tables'). The server refuses them unless the account is an admin. */
+  async admin(req: Extract<Request, { op: 'admin' | 'tables' }>): Promise<AdminReply> {
+    return (await this.send(req)) as unknown as AdminReply;
   }
 
   /** The newer view of a table, or null if nothing changed since `version`. */

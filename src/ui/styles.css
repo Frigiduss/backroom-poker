@@ -1277,3 +1277,4 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .seat.away .pod { opacity: .7; }
 .turn-clock { color: var(--gold-hi); }
 .acts.sending { opacity: .6; pointer-events: none; }
+.paused-tag { color: var(--gold-hi); }

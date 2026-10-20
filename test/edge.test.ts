@@ -9,6 +9,8 @@ type Handler = (req: Request) => Promise<Response>;
 const tables = new Map<string, { id: string; code: string; version: number; state: unknown; updated_at: string }>();
 const views = new Map<string, { version: number; view: unknown }>();
 const calls: string[] = [];
+const ADMIN = '11111111-2222-4333-8444-555555555555';
+const adminLog: { admin: string; action: string }[] = [];
 let n = 0;
 
 const reply = (status: number, body?: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status });
@@ -30,7 +32,7 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
   if (url.pathname === '/rest/v1/poker_tables') {
     if (method === 'GET') {
       const rows = [...tables.values()].filter((r) => (!eq('id') || r.id === eq('id')) && (!eq('code') || r.code === eq('code')));
-      return reply(200, rows.map(({ id, code, version, state }) => ({ id, code, version, state })));
+      return reply(200, rows.map(({ id, code, version, state, updated_at }) => ({ id, code, version, state, ...(q.get('select')?.includes('updated_at') ? { updated_at } : {}) })));
     }
     if (method === 'POST') {
       if ([...tables.values()].some((r) => r.code === body.code)) return reply(409, { code: '23505' });
@@ -49,6 +51,11 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
       return reply(204);
     }
   }
+  if (url.pathname === '/rest/v1/admins' && method === 'GET') return reply(200, eq('user_id') === ADMIN ? [{ user_id: ADMIN }] : []);
+  if (url.pathname === '/rest/v1/admin_log' && method === 'POST') {
+    adminLog.push(body);
+    return reply(201);
+  }
   if (url.pathname === '/rest/v1/rpc/put_poker_views' && method === 'POST') {
     for (const v of body.p_views) {
       const k = `${body.p_table}/${v.user_id}`;
@@ -63,8 +70,9 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
   return reply(404, { message: `unexpected ${method} ${url.pathname}` });
 }
 
+let handler: Handler | null = null;
 async function load(): Promise<Handler> {
-  let handler: Handler | null = null;
+  if (handler) return handler;
   (globalThis as Record<string, unknown>).Deno = {
     env: { get: (k: string) => ({ SUPABASE_URL: 'https://demo.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service-key' })[k] },
     serve: (h: Handler) => (handler = h),
@@ -101,4 +109,22 @@ test('the deployed function signs people in, makes a table and plays a hand over
   assert.ok(left.ok);
   assert.ok(!views.has(`${made.tableId}/bob`), "Bob's view is removed when he leaves");
   assert.ok(calls.includes('POST /rest/v1/rpc/put_poker_views'));
+});
+
+test('console commands over REST: admins only, checked on the server', async () => {
+  const h = await load();
+  const settings = { variant: 'holdem', structure: 'NL', format: 'cash', difficulty: 'easy', stackBB: 100, blindSpeed: 'normal', seats: 3 };
+  const made = await (await post(h, 'carol', { op: 'create', name: 'Carol', settings })).json();
+  await post(h, 'carol', { op: 'start', tableId: made.tableId });
+  const refused = await post(h, 'carol', { op: 'admin', code: made.code, command: { do: 'inspect' } });
+  assert.equal(refused.status, 403);
+  const seen = await (await post(h, ADMIN, { op: 'admin', code: made.code, command: { do: 'inspect' } })).json();
+  assert.ok(seen.ok, seen.error);
+  assert.equal(seen.table.code, made.code);
+  const paused = await (await post(h, ADMIN, { op: 'admin', tableId: made.tableId, command: { do: 'pause' } })).json();
+  assert.ok(paused.ok, paused.error);
+  assert.equal(adminLog.at(-1)?.admin, ADMIN);
+  const list = await (await post(h, ADMIN, { op: 'tables' })).json();
+  assert.ok(list.ok, list.error);
+  assert.ok(list.tables.some((t: { code: string; paused: boolean }) => t.code === made.code && t.paused));
 });

@@ -13,7 +13,7 @@ import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
 import { goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
-import { bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
+import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
@@ -1053,6 +1053,7 @@ async function boot() {
       }
       return prefs.reveal;
     },
+    onlineTable: activeTable,
     announced: (text) => {
       announcement = text;
       if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();

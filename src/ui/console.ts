@@ -2,13 +2,17 @@
 // It can edit the current player, look inside and steer the table (rig the deck, retune bots,
 // pause, autopilot), and manage every account's players through the admin rules in
 // supabase/admin.sql. It only appears after the database confirms the account is an admin,
-// and every change to another account is checked by the database again.
+// and every change to another account is checked by the database again. At an online table
+// the table commands go to the table server, which checks the account is an admin itself.
 import { Bot, STYLE_NAMES } from '../bots/bot';
-import { simulateEquity, specFromView } from '../bots/equity';
+import { simulateEquity } from '../bots/equity';
 import { buildView } from '../bots/view';
 import { Card, cardLabel, createRng, parseCard } from '../engine/cards';
 import { Hand, rigProblem } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table } from '../engine/table';
+import { VARIANTS, VariantDef } from '../engine/variants';
+import { TableClient } from '../online/client';
+import { AdminCommand, AdminTableInfo } from '../online/protocol';
 import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, cleanName, emptyProfileStats } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer } from './profiles';
@@ -39,6 +43,8 @@ export interface DevHooks {
   reveal(on?: boolean): boolean;
   /** Called after the console changes the lobby announcement. */
   announced(text: string): void;
+  /** The online table on screen, if any; table commands then go to the table server. */
+  onlineTable(): { tableId: string; code: string } | null;
 }
 
 type Out = (html: string, kind?: 'ok' | 'err' | 'dim' | 'cmd' | 'group') => void;
@@ -47,7 +53,7 @@ interface Command {
   name: string;
   usage: string;
   help: string;
-  group: 'Console' | 'Your player' | 'Table' | 'Accounts';
+  group: 'Console' | 'Your player' | 'Table' | 'Online tables' | 'Accounts';
   run(args: string[], out: Out): void | Promise<void>;
 }
 
@@ -63,11 +69,15 @@ let history: string[] = [];
 let historyAt = -1;
 /** The last player list fetched, so commands can refer to players by short id or name. */
 let known: AdminPlayer[] = [];
+let tables: TableClient | null = null;
+/** An online table picked with the table command, which table commands then act on. */
+let pinned: string | null = null;
 
 export function initConsole(h: DevHooks, a: OnlineAuth | null) {
   hooks = h;
   auth = a;
   admin = a ? new AdminApi(a) : null;
+  tables = a ? new TableClient(a) : null;
   try {
     history = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]');
   } catch {
@@ -200,6 +210,12 @@ export async function execute(line: string, out: Out = print): Promise<void> {
   const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
   if (!cmd) return out(`Unknown command <b>${esc(name)}</b>. Type <b>help</b> for the list.`, 'err');
   try {
+    // At an online table, table commands run on the table server instead of this page.
+    if (cmd.group === 'Table' && onlineTarget()) {
+      const remote = ONLINE_TABLE[cmd.name];
+      if (!remote) throw new UsageError(`${cmd.name} only works at your practice tables. At an online table, state shows every card.`);
+      return await remote(args, out);
+    }
     await cmd.run(args, out);
   } catch (err) {
     out(esc((err as Error).message || String(err)), 'err');
@@ -331,20 +347,134 @@ const ago = (iso: string | null): string => {
 };
 
 /** Each live player's real chance of winning, knowing every hand (no folds from here). */
-function trueEquity(hand: Hand): Map<number, number> {
+function equityOf(variant: VariantDef, players: { cards: Card[]; folded: boolean }[], board: Card[]): Map<number, number> {
   const res = new Map<number, number>();
-  const live = hand.inHand();
-  if (hand.isComplete || live.length < 2) return res;
-  const folded = hand.players.flatMap((p) => (p.status === 'folded' ? p.cards : []));
+  const live = players.map((p, i) => (p.folded ? -1 : i)).filter((i) => i >= 0);
+  if (live.length < 2) return res;
+  const stud = variant.family === 'stud';
+  const future = (cards: Card[]) => (stud ? Math.max(0, 7 - cards.length - board.length) : 0);
+  const dead = players.flatMap((p) => (p.folded ? p.cards : []));
   for (const i of live) {
-    const spec = specFromView(buildView(hand, i));
-    const others = live.filter((j) => j !== i);
-    spec.opponents = spec.opponents.map((o, k) => ({ ...o, known: [...hand.players[others[k]].cards], unknown: 0, range: undefined }));
-    spec.dead = [...spec.dead, ...folded];
+    const opponents = live.filter((j) => j !== i).map((j) => ({ known: [...players[j].cards], unknown: 0, future: future(players[j].cards) }));
+    const spec = { variant, mine: players[i].cards, myFuture: future(players[i].cards), opponents, board, boardFuture: variant.family === 'flop' ? 5 - board.length : 0, dead };
     res.set(i, simulateEquity(spec, { iterations: 2500, rng: createRng(), timeBudgetMs: 40 }));
   }
   return res;
 }
+
+function trueEquity(hand: Hand): Map<number, number> {
+  if (hand.isComplete) return new Map();
+  return equityOf(hand.variant, hand.players.map((p) => ({ cards: p.cards, folded: p.status === 'folded' })), hand.board);
+}
+
+// ---------- online tables ----------
+
+function onlineTarget(): { tableId?: string; code?: string } | null {
+  if (pinned) return { code: pinned };
+  const t = hooks.onlineTable();
+  return t ? { tableId: t.tableId } : null;
+}
+
+async function remote(command: AdminCommand, out?: Out): Promise<AdminTableInfo> {
+  const client = need(tables, 'Online tables are off.');
+  const r = await client.admin({ op: 'admin', ...need(onlineTarget(), 'No online table picked.'), command });
+  if (out && r.message) out(esc(r.message), 'ok');
+  return need(r.table, 'That table is gone.');
+}
+
+function remoteSeat(info: AdminTableInfo, ref: string | undefined): AdminTableInfo['seats'][number] {
+  const r = need(ref, 'Name a seat: its number from state or the start of a name.').toLowerCase();
+  if (r === 'me' || r === 'you') {
+    const mine = info.members.find((m) => m.userId === auth?.current?.userId)?.seat;
+    return need(info.seats.find((s) => s.id === mine), "You aren't seated at that table.");
+  }
+  if (/^\d+$/.test(r)) return need(info.seats[Number(r)], `There is no seat ${r}.`);
+  const hits = info.seats.filter((s) => s.id === r || s.name.toLowerCase().startsWith(r));
+  if (hits.length !== 1) throw new UsageError(hits.length ? `"${ref}" matches ${hits.map((s) => s.name).join(', ')}.` : `No seat called "${ref}".`);
+  return hits[0];
+}
+
+function printTable(info: AdminTableInfo, out: Out) {
+  const v = VARIANTS[info.settings.variant];
+  const h = info.hand;
+  out(`Online table <b>${esc(info.code)}</b> · <b>${esc(v.name)}</b> ${info.settings.structure} · ${info.phase} · hand ${info.handNumber}${info.settings.format !== 'cash' ? ` · level ${info.level + 1}` : ''}${h ? ` · ${h.complete ? 'finished' : `${h.phase}, street ${h.street + 1} of ${h.numStreets}`} · pot <b>${fmt(h.pot)}</b>` : ''}${info.paused ? ' · <b>paused</b>' : ''}`);
+  if (h) out(`Board ${cardsText(h.board)}${h.rigBoard.length ? ` · coming: ${cardsText(h.rigBoard)}` : ''}`);
+  const eq = h && !h.complete ? equityOf(v, h.players.map((p) => ({ cards: p.cards, folded: p.status === 'folded' })), h.board) : new Map<number, number>();
+  out(table(info.seats.map((seat, si) => {
+    const hi = h ? h.players.findIndex((p) => p.seat === seat.id) : -1;
+    const hp = hi >= 0 ? h!.players[hi] : null;
+    const member = info.members.find((m) => m.seat === seat.id);
+    const who = seat.isHuman ? `person${member?.away ? ' (away, bot playing)' : ''}${member?.host ? ', host' : ''}` : `${DIFFICULTY_NAMES[seat.difficulty ?? 'medium']} ${STYLE_NAMES[seat.style ?? 'balanced']}`;
+    return [
+      `${si}`, `${esc(seat.name)}${h?.toAct === seat.id ? ' ◀' : ''}`, who, hp ? hp.stack : seat.stack, hp ? hp.totalBet : 0,
+      hp ? hp.status : seat.busted ? 'out' : 'sitting out', hp ? cardsText(hp.cards) : '', eq.has(hi) ? `${Math.round(eq.get(hi)! * 100)}%` : '',
+    ];
+  }), ['#', 'Seat', 'Plays', 'Stack', 'In pot', 'Status', 'Cards', 'Wins']));
+  const watching = info.members.filter((m) => !m.seat && !m.left);
+  if (watching.length) out(`Waiting or watching: ${watching.map((m) => esc(m.name)).join(', ')}`, 'dim');
+  if (info.nextRig) out(`Next hand is rigged: ${Object.entries(info.nextRig.hole).map(([id, c]) => `${esc(info.seats.find((s) => s.id === id)?.name ?? id)} ${cardsText(c)}`).join(' · ')}${info.nextRig.board.length ? ` · board ${cardsText(info.nextRig.board)}` : ''}`, 'dim');
+}
+
+/** The table commands, as run on the table server for an online table. */
+const ONLINE_TABLE: Record<string, (args: string[], out: Out) => Promise<void>> = {
+  async state(_, out) {
+    printTable(await remote({ do: 'inspect' }), out);
+  },
+  async deck(args, out) {
+    const h = need((await remote({ do: 'inspect' })).hand, 'No hand dealt yet.');
+    if (h.rigBoard.length) out(`Board cards fixed to come: ${cardsText(h.rigBoard)}`);
+    out(`Next ${Math.min(16, Number(args[0]) || 12)}: ${cardsText(h.upcoming.slice(0, Math.min(16, Number(args[0]) || 12)))}`);
+  },
+  async board(args, out) {
+    const cards = args[0] === 'clear' ? [] : args.map(card);
+    if (!cards.length && args[0] !== 'clear') throw new UsageError('List cards, like board Ah Kh 2c, or board clear.');
+    await remote({ do: 'board', cards }, out);
+  },
+  async rig(args, out) {
+    if (args[0] === 'clear') return void (await remote({ do: 'unrig' }, out));
+    const seat = remoteSeat(await remote({ do: 'inspect' }), args[0]);
+    const cards = args.slice(1).map(card);
+    if (!cards.length) throw new UsageError('List the cards, like rig me As Ad.');
+    await remote({ do: 'rig', seat: seat.id, cards }, out);
+  },
+  async stack(args, out) {
+    const info = await remote({ do: 'inspect' });
+    const seat = remoteSeat(info, args[0]);
+    const hp = info.hand && !info.hand.complete ? info.hand.players.find((p) => p.seat === seat.id) : null;
+    await remote({ do: 'stack', seat: seat.id, amount: amount(args[1], hp ? hp.stack : seat.stack) }, out);
+  },
+  async bot(args, out) {
+    const seat = remoteSeat(await remote({ do: 'inspect' }), args[0]);
+    if (seat.isHuman) throw new UsageError(`${seat.name} is a person.`);
+    let difficulty: Difficulty | undefined;
+    let style: BotStyle | undefined;
+    for (const a of args.slice(1).map((x) => x.toLowerCase())) {
+      if ((DIFFICULTIES as string[]).includes(a)) difficulty = a as Difficulty;
+      else if (a in STYLE_NAMES) style = a as BotStyle;
+      else throw new UsageError(`"${a}" isn't a difficulty or a style.`);
+    }
+    if (!difficulty && !style) return out(`${esc(seat.name)} plays <b>${DIFFICULTY_NAMES[seat.difficulty ?? 'medium']} · ${STYLE_NAMES[seat.style ?? 'balanced']}</b>`);
+    await remote({ do: 'bot', seat: seat.id, difficulty, style }, out);
+  },
+  async pause(_, out) {
+    const info = await remote({ do: 'inspect' });
+    await remote({ do: info.paused ? 'resume' : 'pause' }, out);
+  },
+  async resume(_, out) {
+    await remote({ do: 'resume' }, out);
+  },
+  async step(_, out) {
+    await remote({ do: 'step' }, out);
+  },
+  async deal(_, out) {
+    await remote({ do: 'step' }, out);
+  },
+  async level(args, out) {
+    const n = Math.floor(Number(args[0]) || 0);
+    if (n < 1) throw new UsageError('Give a level number, like level 5.');
+    await remote({ do: 'level', level: n }, out);
+  },
+};
 
 // ---------- commands ----------
 
@@ -356,7 +486,8 @@ const COMMANDS: Command[] = [
         const c = need(COMMANDS.find((x) => x.name === args[0].toLowerCase()), `No command called ${args[0]}.`);
         return out(`<b>${esc(c.usage)}</b> · ${esc(c.help)}`);
       }
-      for (const g of ['Console', 'Your player', 'Table', 'Accounts'] as const) {
+      if (onlineTarget()) out('Table commands are going to an online table, where reveal, ask, autopilot and speed don\'t apply.', 'dim');
+      for (const g of ['Console', 'Your player', 'Table', 'Online tables', 'Accounts'] as const) {
         out(g, 'group');
         out(table(COMMANDS.filter((c) => c.group === g).map((c) => [`<b>${esc(c.usage)}</b>`, esc(c.help)]), ['Command', 'What it does']));
       }
@@ -619,6 +750,57 @@ const COMMANDS: Command[] = [
     name: 'deal', usage: 'deal', group: 'Table', help: 'Deals the next hand now, if this one is finished.',
     run() {
       currentGame().deal();
+    },
+  },
+
+  // Online tables
+  {
+    name: 'tables', usage: 'tables', group: 'Online tables', help: 'Every online table, newest first: code, game, who is there.',
+    async run(_, out) {
+      const r = await need(tables, 'Online tables are off.').admin({ op: 'tables' });
+      const list = r.tables ?? [];
+      if (!list.length) return out('No online tables right now.');
+      out(table(list.map((t) => [`<code>${esc(t.code)}</code>`, esc(t.game), t.phase + (t.paused ? ', paused' : ''), t.handNumber, esc(t.people.join(', ') || '–'), ago(t.updatedAt)]), ['Code', 'Game', 'State', 'Hand', 'People', 'Active']));
+      out('Use table CODE to point the table commands at one.', 'dim');
+    },
+  },
+  {
+    name: 'table', usage: 'table [code | off]', group: 'Online tables', help: 'Points the table commands (state, rig, stack, pause…) at an online table by its code, even one you aren\'t at. off goes back to the table on screen.',
+    async run(args, out) {
+      const code = (args[0] ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!code) {
+        const t = onlineTarget();
+        return out(t ? `Table commands go to online table <b>${esc(pinned ?? hooks.onlineTable()?.code ?? '')}</b>.` : 'Table commands go to the practice table on screen.');
+      }
+      if (code === 'OFF') {
+        pinned = null;
+        return out(hooks.onlineTable() ? 'Back to the online table on screen.' : 'Back to the practice table on screen.', 'ok');
+      }
+      pinned = code;
+      try {
+        printTable(await remote({ do: 'inspect' }), out);
+      } catch (err) {
+        pinned = null;
+        throw err;
+      }
+      out(`Table commands now go to <b>${esc(code)}</b>. table off to stop.`, 'ok');
+    },
+  },
+  {
+    name: 'kick', usage: 'kick <name>', group: 'Online tables', help: 'Takes a person off the online table; a bot plays their chips. They can join again with the code.',
+    async run(args, out) {
+      if (!onlineTarget()) throw new UsageError('Open an online table, or pick one with table CODE.');
+      await remote({ do: 'kick', member: need(args.join(' ') || null, 'Name the person.') }, out);
+    },
+  },
+  {
+    name: 'close', usage: 'close yes', group: 'Online tables', help: 'Deletes the online table for everyone at it. Add yes to confirm.',
+    async run(args, out) {
+      const t = need(onlineTarget(), 'Open an online table, or pick one with table CODE.');
+      if ((args[0] ?? '').toLowerCase() !== 'yes') return out(`This ends the game at ${esc(t.code ?? 'this table')} for everyone. Run <b>close yes</b> to go ahead.`, 'err');
+      const r = await need(tables, 'Online tables are off.').admin({ op: 'admin', ...t, command: { do: 'close' } });
+      pinned = null;
+      out(esc(r.message), 'ok');
     },
   },
 

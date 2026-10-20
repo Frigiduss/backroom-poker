@@ -63,6 +63,12 @@ Admin powers are checked by the database (row level security and the `is_admin()
 function), not by the page, so nobody can turn the console's account powers on by editing
 the site. Every change made to a player from the console is written to the `admin_log` table.
 
+The console also works at online tables. Open one and the table commands (`state`, `rig`,
+`board`, `stack`, `bot`, `pause`, `step`, `level`) go to the table server, or type `tables`
+to list every table and `table CODE` to work on one you aren't sitting at. `kick` and
+`close` remove a person or end a table. The table server looks the account up in the
+`admins` table itself before doing any of it, and every change goes in `admin_log`.
+
 ## Playing with friends (online tables)
 
 Signed-in players can make a private table, send its five-letter code (or invite link) to
