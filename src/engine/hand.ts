@@ -143,6 +143,17 @@ export function rigProblem(rig: Rig, shortDeck: boolean, inDeck: readonly Card[]
   return null;
 }
 
+/** One street still to be dealt, as Hand.coming() predicts it. */
+export interface ComingStreet {
+  name: string;
+  /** Community cards (flop games), or stud's shared last card when the deck runs short. */
+  board: Card[];
+  /** Stud: the card each player still in gets, by player index. */
+  players: { player: number; card: Card }[];
+  /** Draw games: the next cards off the deck, handed out in drawing order. */
+  draws: Card[];
+}
+
 export type HandPhase = 'betting' | 'draw' | 'complete';
 
 const FL_CAP = 4;
@@ -219,6 +230,46 @@ export class Hand {
   /** The next cards the deck will give, top first (cards fixed with a rig come before these). */
   upcoming(count = this.deck.length): Card[] {
     return this.deck.slice(-count).reverse();
+  }
+
+  /**
+   * What the rest of the hand will deal if nobody else folds, street by street: the board
+   * cards (burns skipped), each stud player's next card, or the cards waiting for the draw.
+   * For the developer console.
+   */
+  coming(): ComingStreet[] {
+    if (this.isComplete) return [];
+    const deck = this.upcoming();
+    let k = 0;
+    const fromDeck = (): Card | undefined => deck[k++];
+    const rigBoard = [...this.rigBoard];
+    const rigHole = new Map([...this.rigHole].map(([i, c]) => [i, [...c]]));
+    const nextBoard = () => (rigBoard.length ? rigBoard.shift() : fromDeck());
+    const out: ComingStreet[] = [];
+    const family = this.variant.family;
+    if (family === 'flop') {
+      for (let s = this.street + 1; s < this.numStreets; s++) {
+        fromDeck(); // burn
+        const board = Array.from({ length: s === 1 ? 3 : 1 }, nextBoard).filter((c): c is Card => c !== undefined);
+        out.push({ name: ['', 'Flop', 'Turn', 'River'][s] ?? `Street ${s + 1}`, board, players: [], draws: [] });
+      }
+    } else if (family === 'stud') {
+      const order = this.inHand();
+      for (let s = this.street + 1; s < this.numStreets; s++) {
+        const name = ['', 'Fourth street', 'Fifth street', 'Sixth street', 'Seventh street'][s] ?? `Street ${s + 1}`;
+        if (s === this.numStreets - 1 && deck.length - k < order.length) {
+          const c = nextBoard();
+          out.push({ name: `${name}, shared`, board: c === undefined ? [] : [c], players: [], draws: [] });
+          continue;
+        }
+        const players = order.map((i) => ({ player: i, card: rigHole.get(i)?.shift() ?? fromDeck() })).filter((x): x is { player: number; card: Card } => x.card !== undefined);
+        out.push({ name, board: [], players, draws: [] });
+      }
+    } else if (this.street === 0 || this.phase === 'draw') {
+      // Replacement cards come off the top in the order people draw.
+      out.push({ name: 'The draw', board: [], players: [], draws: deck.slice(0, 15) });
+    }
+    return out;
   }
 
   /** Cards fixed to come out next on the board, then the cards still undealt. For the developer console. */
