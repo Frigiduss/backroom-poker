@@ -160,9 +160,16 @@ export class OnlineAuth {
 
   /** A valid access token, refreshed when it is about to expire. Throws if signed out. */
   async token(): Promise<string> {
-    const s = this.session;
+    let s = this.session;
     if (!s) throw new OnlineError('You are signed out.', 401);
     if (s.expiresAt - Date.now() > 60_000) return s.accessToken;
+    // Another page on this site (the game, or the admin dashboard) may have refreshed this
+    // sign-in already, which used up the refresh token this page holds.
+    const stored = this.load();
+    if (stored && stored.userId === s.userId && stored.refreshToken !== s.refreshToken) {
+      this.session = s = stored;
+      if (s.expiresAt - Date.now() > 60_000) return s.accessToken;
+    }
     this.refreshing ??= this.refresh(s).finally(() => (this.refreshing = null));
     const next = await this.refreshing;
     if (!next) throw new OnlineError('Your sign-in expired. Sign in again.', 401);

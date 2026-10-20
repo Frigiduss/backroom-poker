@@ -1,5 +1,5 @@
-// Builds the browser game into dist/ (dist/index.html is fully self-contained) and the
-// online table server into supabase/functions/poker-table/index.ts,
+// Builds the browser game into dist/ (dist/index.html is fully self-contained), the admin
+// dashboard into dist/admin.html (published as admin/), and the online table server into supabase/functions/poker-table/index.ts,
 // opens the built game in the default browser with --open, serves it for development
 // with --serve, or runs the test suite with --test.
 import * as esbuild from 'esbuild';
@@ -31,8 +31,8 @@ function icons() {
     + `<link rel="apple-touch-icon" href="data:image/png;base64,${png}">`;
 }
 
-function page(js, css) {
-  const html = readFileSync(join(root, 'src/ui/index.html'), 'utf8');
+function page(js, css, template = 'src/ui/index.html') {
+  const html = readFileSync(join(root, template), 'utf8');
   return html
     .replace('<!--__ICONS__-->', icons)
     .replace('/*__CSS__*/', () => css)
@@ -55,7 +55,20 @@ async function buildOnce() {
     .replace(/<\/head>\s*<body>/, '')
     .replace(/<\/body>\s*<\/html>\s*$/, ''));
   console.log(`Built dist/index.html (${(html.length / 1024).toFixed(0)} KB)`);
+  await buildAdmin(css);
   await buildServer();
+}
+
+/** The admin dashboard: the developer console and live panels on a page of their own. */
+async function buildAdmin(gameCss) {
+  const result = await esbuild.build({
+    entryPoints: [join(root, 'src/admin/main.ts')],
+    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning',
+  });
+  const css = gameCss + readFileSync(join(root, 'src/admin/admin.css'), 'utf8');
+  const html = page(result.outputFiles[0].text, css, 'src/admin/index.html');
+  writeFileSync(join(dist, 'admin.html'), html);
+  console.log(`Built dist/admin.html (${(html.length / 1024).toFixed(0)} KB)`);
 }
 
 /** The online table server, as one file Supabase can deploy (or paste into its editor). */

@@ -56,6 +56,18 @@ test('the session survives a reload and refreshes when it expires', async () => 
   assert.ok(server.calls.some((c) => c.includes('grant_type=refresh_token')));
 });
 
+test('two pages on the site share one sign-in: a refresh by one does not sign the other out', async () => {
+  const { server, storage, auth } = setup();
+  server.expiresIn = 30;
+  await auth.signUp('x@example.com', 'secret1');
+  const dashboard = new OnlineAuth(config, storage, server.fetch);
+  await dashboard.token(); // uses up the refresh token the game page still holds
+  const store = new OnlineAccountStore(auth, storage, server.fetch);
+  await store.put(createProfile('X'));
+  assert.ok(auth.current, 'the game page is still signed in');
+  assert.ok(dashboard.current, 'the dashboard is still signed in');
+});
+
 test('a rejected refresh signs out; a network failure does not', async () => {
   const { server, auth, store } = setup();
   server.expiresIn = 30;

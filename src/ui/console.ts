@@ -48,6 +48,8 @@ export interface DevHooks {
   onlineTable(): { tableId: string; code: string; game?: 'poker' | 'blackjack' } | null;
   /** The practice blackjack table on screen, if any. */
   blackjack(): DevBlackjack | null;
+  /** Where the console runs: in the game (the default), or on the admin dashboard, which has no tables or players of its own. */
+  place?: 'game' | 'dashboard';
 }
 
 export type Out = (html: string, kind?: 'ok' | 'err' | 'dim' | 'cmd' | 'group') => void;
@@ -77,6 +79,10 @@ let tables: TableClient | null = null;
 let pinned: string | null = null;
 /** Whether the pinned table plays blackjack. */
 let pinnedBlackjack = false;
+/** Set when the console lives inside a page (the admin dashboard) instead of dropping down over the game. */
+let docked: HTMLElement | null = null;
+const GAME_QUICK = ['state', 'peek', 'reveal', 'pause', 'players', 'accounts', 'help'];
+const DASHBOARD_QUICK = ['tables', 'state', 'peek', 'pause', 'step', 'players', 'accounts', 'log', 'help'];
 
 export function initConsole(h: DevHooks, a: OnlineAuth | null) {
   hooks = h;
@@ -125,38 +131,73 @@ export function bindConsoleButton() {
 }
 
 export function toggleConsole() {
+  if (docked) return toggleFullScreen();
   if (root) closeConsole();
   else openConsole();
 }
 
 function closeConsole() {
+  if (docked) return;
   root?.remove();
   root = null;
 }
 
+/** On the dashboard, ` and the button switch the terminal between its panel and the whole window. */
+function toggleFullScreen(on?: boolean) {
+  if (!root) return;
+  const full = root.classList.toggle('dev-full', on);
+  const b = root.querySelector<HTMLButtonElement>('#dev-close');
+  if (b) {
+    b.textContent = full ? '⤡' : '⤢';
+    b.setAttribute('aria-label', full ? 'Shrink the terminal' : 'Make the terminal full screen');
+  }
+  root.querySelector<HTMLInputElement>('#dev-input')?.focus();
+}
+
+/**
+ * Puts the console inside `host` for good, as the admin dashboard's terminal. Call after
+ * refreshConsoleAccess() says the account is an admin.
+ */
+export function dockConsole(host: HTMLElement) {
+  if (!enabled) return;
+  root?.remove();
+  root = null;
+  docked = host;
+  openConsole();
+}
+
+/** Points the table commands at an online table, as `table CODE` does, without printing it. For the dashboard's buttons. */
+export function pinTable(code: string, blackjack: boolean) {
+  pinned = code;
+  pinnedBlackjack = blackjack;
+}
+
+/** The admin dashboard, relative to the game: admin/ on the published site, admin.html next to a local copy. */
+export const dashboardUrl = (): string => (/\.html?$/.test(location.pathname) ? 'admin.html' : 'admin/');
+
 function openConsole() {
   if (!enabled || root) return;
   root = document.createElement('section');
-  root.className = 'dev-console';
+  root.className = docked ? 'dev-console dev-docked' : 'dev-console';
   root.setAttribute('aria-label', 'Developer console');
   root.innerHTML = `
     <header class="dev-head">
-      <span class="dev-title">&gt;_ Developer console</span>
-      <span class="dev-who">${esc(auth?.current?.email ?? '')} · admin</span>
+      <span class="dev-title">&gt;_ ${docked ? 'Terminal' : 'Developer console'}</span>
+      <span class="dev-who">${esc(auth?.current?.email ?? '')} · admin${docked ? '' : ` · <a href="${dashboardUrl()}" target="_blank" rel="noopener">dashboard ↗</a>`}</span>
       <span class="dev-quick">
-        ${['state', 'peek', 'reveal', 'pause', 'players', 'accounts', 'help'].map((c) => `<button type="button" data-run="${c}">${c}</button>`).join('')}
+        ${(docked ? DASHBOARD_QUICK : GAME_QUICK).map((c) => `<button type="button" data-run="${c}">${c}</button>`).join('')}
       </span>
-      <button type="button" class="dev-close" id="dev-close" aria-label="Close console">✕</button>
+      <button type="button" class="dev-close" id="dev-close" aria-label="${docked ? 'Make the terminal full screen' : 'Close console'}">${docked ? '⤢' : '✕'}</button>
     </header>
     <div class="dev-out" id="dev-out" role="log" aria-live="polite"></div>
     <form class="dev-prompt" id="dev-form" autocomplete="off">
       <span aria-hidden="true">›</span>
       <input id="dev-input" spellcheck="false" autocapitalize="off" placeholder="Type a command, or help" aria-label="Console command">
     </form>`;
-  document.body.appendChild(root);
+  (docked ?? document.body).appendChild(root);
   const input = root.querySelector<HTMLInputElement>('#dev-input')!;
   const form = root.querySelector<HTMLFormElement>('#dev-form')!;
-  root.querySelector<HTMLButtonElement>('#dev-close')!.onclick = closeConsole;
+  root.querySelector<HTMLButtonElement>('#dev-close')!.onclick = () => (docked ? toggleFullScreen() : closeConsole());
   root.querySelectorAll<HTMLButtonElement>('[data-run]').forEach((b) => (b.onclick = () => {
     void execute(b.dataset.run!);
     input.focus();
@@ -181,12 +222,15 @@ function openConsole() {
       if (hits.length === 1) input.value = `${hits[0].name} `;
       else if (hits.length > 1) print(hits.map((c) => c.name).join('  '), 'dim');
     } else if (e.key === 'Escape') {
-      closeConsole();
+      if (docked) toggleFullScreen(false);
+      else closeConsole();
     }
     e.stopPropagation();
   };
-  print(`Signed in as <b>${esc(auth?.current?.email ?? '')}</b>. Type <b>help</b> for commands, Tab to complete, ↑ for history, \` to close.`, 'dim');
-  input.focus();
+  print(docked
+    ? `Signed in as <b>${esc(auth?.current?.email ?? '')}</b>. Type <b>help</b> for commands, Tab to complete, ↑ for history, \` for full screen. Start with <b>tables</b>, then <b>table CODE</b>.`
+    : `Signed in as <b>${esc(auth?.current?.email ?? '')}</b>. Type <b>help</b> for commands, Tab to complete, ↑ for history, \` to close.`, 'dim');
+  if (!docked) input.focus();
 }
 
 const print: Out = (html, kind) => {
@@ -199,6 +243,9 @@ const print: Out = (html, kind) => {
   while (out.childElementCount > 400) out.firstElementChild?.remove();
   out.scrollTop = out.scrollHeight;
 };
+
+/** Writes a line to the console, for the dashboard's own actions. */
+export const consolePrint: Out = (html, kind) => print(html, kind);
 
 /** Runs one command line. Exported for tests and the quick buttons. */
 export async function execute(line: string, out: Out = print): Promise<void> {
@@ -251,7 +298,15 @@ export function need<T>(x: T | null | undefined, msg: string): T {
 }
 
 function currentGame(): DevGame {
-  return need(hooks.game(), 'Start a game first: this command works at the table.');
+  return need(hooks.game(), hooks.place === 'dashboard'
+    ? 'Pick an online table first with table CODE (tables lists them). Practice tables only exist inside the game.'
+    : 'Start a game first: this command works at the table.');
+}
+
+/** The player open in the game. The dashboard has none: it edits players through the Accounts commands. */
+function myPlayer(): Profile {
+  if (hooks.place === 'dashboard') throw new UsageError('The dashboard has no player of its own. Use edit, inspect and players to change any player.');
+  return player();
 }
 
 function onlineAdmin(): AdminApi {
@@ -539,8 +594,9 @@ const COMMANDS: Command[] = [
   {
     name: 'whoami', usage: 'whoami', group: 'Console', help: 'Your account, and the player you are playing as.',
     run(_, out) {
-      const p = player();
       out(`Account <b>${esc(auth?.current?.email ?? '–')}</b> (${esc(auth?.current?.userId ?? '')}), admin.`);
+      if (hooks.place === 'dashboard') return out(pinned ? `Table commands go to online table <b>${esc(pinned)}</b>.` : 'On the dashboard. Pick a table with table CODE.', 'dim');
+      const p = player();
       out(`Playing as <b>${esc(p.name)}</b> (${shortId(p.id)}), bank ${fmt(p.bank)}${p.table ? `, ${fmt(p.table.paidIn)} at a ${p.table.kind} table` : ''}.`);
     },
   },
@@ -549,7 +605,7 @@ const COMMANDS: Command[] = [
   {
     name: 'bank', usage: 'bank [amount | +n | -n]', group: 'Your player', help: 'Shows or sets your chip bank. 2.5k and 1m work too.',
     async run(args, out) {
-      const p = player();
+      const p = myPlayer();
       if (!args[0]) return out(`Bank: <b>${fmt(p.bank)}</b>`);
       const before = p.bank;
       setBank(p, amount(args[0], p.bank));
@@ -562,7 +618,7 @@ const COMMANDS: Command[] = [
   {
     name: 'stat', usage: 'stat [name value]', group: 'Your player', help: 'Shows your lifetime stats, or sets one (like stat tournamentWins 12).',
     async run(args, out) {
-      const p = player();
+      const p = myPlayer();
       if (!args[0]) return out(table(STAT_FIELDS.map((k) => [k, p.stats[k] as number]), ['Stat', 'Value']));
       const f = setStat(p, args[0], args[1]);
       await savePlayer();
@@ -573,7 +629,7 @@ const COMMANDS: Command[] = [
   {
     name: 'resetstats', usage: 'resetstats', group: 'Your player', help: 'Wipes your lifetime stats (the bank stays).',
     async run(_, out) {
-      const p = player();
+      const p = myPlayer();
       resetStats(p);
       await savePlayer();
       hooks.redraw();
@@ -814,11 +870,11 @@ const COMMANDS: Command[] = [
       const code = (args[0] ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (!code) {
         const t = onlineTarget();
-        return out(t ? `Table commands go to online table <b>${esc(pinned ?? hooks.onlineTable()?.code ?? '')}</b>.` : 'Table commands go to the practice table on screen.');
+        return out(t ? `Table commands go to online table <b>${esc(pinned ?? hooks.onlineTable()?.code ?? '')}</b>.` : hooks.place === 'dashboard' ? 'No table picked. Run tables, then table CODE.' : 'Table commands go to the practice table on screen.');
       }
       if (code === 'OFF') {
         pinned = null;
-        return out(hooks.onlineTable() ? 'Back to the online table on screen.' : 'Back to the practice table on screen.', 'ok');
+        return out(hooks.place === 'dashboard' ? 'No table picked.' : hooks.onlineTable() ? 'Back to the online table on screen.' : 'Back to the practice table on screen.', 'ok');
       }
       pinned = code;
       try {
