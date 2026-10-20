@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Action } from '../src/engine/hand';
 import { VARIANTS, VARIANT_ORDER } from '../src/engine/variants';
-import { TableSettings, TableView } from '../src/online/protocol';
+import { AdminTableInfo, TableSettings, TableView } from '../src/online/protocol';
+import { parseCards } from '../src/engine/cards';
 import { BOT_GAP_MS, DEAL_DELAY_MS, StoredView, TURN_MS, TableDb, TableRow, TableState, handle, rebuild } from '../src/online/server';
 
 /** Keeps tables in memory, with the same compare-and-save rule as the real database. */
@@ -44,6 +45,17 @@ class MemoryDb implements TableDb {
     this.views.delete(`${tableId}/${userId}`);
   }
   async sweep() {}
+  admins = new Set<string>();
+  adminLog: { userId: string; action: string }[] = [];
+  async isAdmin(userId: string) {
+    return this.admins.has(userId);
+  }
+  async recent(limit: number) {
+    return [...this.rows.values()].slice(0, limit).map((r) => ({ ...structuredClone(r), updatedAt: '2026-10-20T00:00:00Z' }));
+  }
+  async logAdmin(userId: string, action: string) {
+    this.adminLog.push({ userId, action });
+  }
   view(tableId: string, userId: string): TableView {
     return this.views.get(`${tableId}/${userId}`)!.view;
   }
@@ -249,4 +261,99 @@ test('every game replays exactly from its saved state', async () => {
     const t = rebuild((await s.db.byId(body.tableId))!.state);
     assert.ok(t.handNumber >= 3, `${variant} played some hands`);
   }
+});
+
+// ---------- developer console at online tables ----------
+
+const admin = async (s: ReturnType<typeof setup>, user: string, req: Record<string, unknown>) => {
+  const out = await handle(s.db, user, req, { now: s.now, seed: () => 12345 });
+  return out as { status: number; body: { ok: boolean; error?: string; message: string; table: AdminTableInfo | null; tables?: unknown[] } };
+};
+
+async function startedTable(s: ReturnType<typeof setup>) {
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  return body;
+}
+
+test('only admin accounts can use console commands on a table', async () => {
+  const s = setup();
+  const body = await startedTable(s);
+  assert.equal((await admin(s, 'bob', { op: 'admin', code: body.code, command: { do: 'inspect' } })).status, 403);
+  assert.equal((await admin(s, 'bob', { op: 'tables' })).status, 403);
+  s.db.admins.add('fridge');
+  const r = await admin(s, 'fridge', { op: 'admin', code: body.code, command: { do: 'inspect' } });
+  assert.equal(r.status, 200, r.body.error);
+  assert.ok(r.body.table!.hand!.players.every((p) => p.cards.length === 2), 'an admin sees every card');
+  assert.equal(r.body.table!.hand!.upcoming.length, 16);
+  assert.equal(((await admin(s, 'fridge', { op: 'tables' })).body.tables ?? []).length, 1);
+  // Nobody else's view gains anything from the admin's look.
+  assert.ok(!/upcoming/.test(JSON.stringify(s.db.view(body.tableId, 'bob'))));
+});
+
+test('an admin can rig the next hand, fix the board, set stacks and swap bots, and it all replays', async () => {
+  const s = setup();
+  s.db.admins.add('fridge');
+  const body = await startedTable(s);
+  const cmd = (command: Record<string, unknown>) => admin(s, 'fridge', { op: 'admin', tableId: body.tableId, command });
+  const bobSeat = s.db.view(body.tableId, 'bob').mySeat!;
+  let r = await cmd({ do: 'rig', seat: bobSeat, cards: parseCards('As Ad') });
+  assert.equal(r.status, 200, r.body.error);
+  const spare = (await cmd({ do: 'inspect' })).body.table!.hand!.upcoming.slice(-3);
+  r = await cmd({ do: 'board', cards: spare });
+  assert.equal(r.status, 200, r.body.error);
+  assert.deepEqual(r.body.table!.hand!.rigBoard, spare);
+  assert.equal((await cmd({ do: 'rig', seat: 'alice', cards: parseCards('As 2c') })).status, 400, 'a card used twice is refused');
+  const bot = r.body.table!.seats.find((x) => !x.isHuman)!;
+  r = await cmd({ do: 'bot', seat: bot.id, difficulty: 'expert', style: 'aggressive' });
+  assert.equal(r.status, 200, r.body.error);
+  r = await cmd({ do: 'stack', seat: 'bob', amount: 12345 });
+  assert.equal(r.status, 200, r.body.error);
+
+  // Finish this hand and deal the next one with the rig.
+  for (let i = 0; i < 40 && (await admin(s, 'fridge', { op: 'admin', tableId: body.tableId, command: { do: 'inspect' } })).body.table!.handNumber < 2; i++) {
+    const turn = ['alice', 'bob'].find((u) => s.db.view(body.tableId, u).legal);
+    if (turn) await s.call(turn, { op: 'act', tableId: body.tableId, hand: s.db.view(body.tableId, turn).handNumber, action: { type: 'fold' } });
+    else await cmd({ do: 'step' });
+  }
+  const info = (await cmd({ do: 'inspect' })).body.table!;
+  assert.equal(info.handNumber, 2);
+  assert.deepEqual(info.hand!.players.find((p) => p.seat === bobSeat)!.cards, parseCards('As Ad'));
+  assert.equal(info.seats.find((x) => x.id === bot.id)!.difficulty, 'expert');
+  assert.equal(info.nextRig, null, 'a rig is used once');
+  assert.deepEqual(s.db.view(body.tableId, 'bob').hand!.players.find((p) => p.id === bobSeat)!.cards, parseCards('As Ad'));
+  // Board rig on hand 2, mid-hand, then check it survives a reload.
+  const later = info.hand!.upcoming.slice(-5);
+  r = await cmd({ do: 'board', cards: later });
+  assert.equal(r.status, 200, r.body.error);
+  const t = rebuild((await s.db.byId(body.tableId))!.state);
+  assert.deepEqual(t.hand!.rigged.board, later);
+  assert.ok(s.db.adminLog.length >= 5);
+});
+
+test('pausing stops the table, step moves it one bot at a time, kick and close work', async () => {
+  const s = setup({ seats: 4 });
+  s.db.admins.add('fridge');
+  const body = await startedTable(s);
+  const cmd = (command: Record<string, unknown>) => admin(s, 'fridge', { op: 'admin', tableId: body.tableId, command });
+  assert.equal((await cmd({ do: 'pause' })).status, 200);
+  assert.equal(s.db.view(body.tableId, 'alice').paused, true);
+  assert.equal(s.db.view(body.tableId, 'alice').tickAt, null);
+  const before = (await s.db.byId(body.tableId))!.version;
+  s.advance(60_000);
+  await s.call('alice', { op: 'tick', tableId: body.tableId, version: before });
+  assert.equal((await s.db.byId(body.tableId))!.version, before, 'nothing moves while paused');
+  const turn = ['alice', 'bob'].find((u) => s.db.view(body.tableId, u).legal);
+  if (turn) assert.equal((await s.call(turn, { op: 'act', tableId: body.tableId, hand: 1, action: { type: 'fold' } })).status, 409);
+  else assert.equal((await cmd({ do: 'step' })).status, 200);
+  assert.equal((await cmd({ do: 'resume' })).status, 200);
+  assert.equal(s.db.view(body.tableId, 'alice').paused, false);
+
+  const k = await cmd({ do: 'kick', member: 'bo' });
+  assert.equal(k.status, 200, k.body.error);
+  assert.ok(k.body.table!.members.find((m) => m.name === 'Bob')!.left);
+  const c = await cmd({ do: 'close' });
+  assert.equal(c.status, 200);
+  assert.equal(await s.db.byId(body.tableId), null);
 });
