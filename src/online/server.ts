@@ -11,11 +11,11 @@
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
-import { createRng, shuffle } from '../engine/cards';
-import { Action, Hand } from '../engine/hand';
+import { Card, createRng, shuffle } from '../engine/cards';
+import { Action, Hand, rigProblem } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
-import { BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
+import { AdminCommand, AdminReply, AdminTableInfo, AdminTableSummary, BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
 
 export const BIG_BLIND = 20;
 export const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
@@ -61,8 +61,8 @@ export interface TableState {
   members: Member[];
   config: TableConfig | null;
   checkpoint: Checkpoint | null;
-  /** The hand in play: dealt, then each action exactly as applied. */
-  events: ({ t: 'deal' } | { t: 'act'; a: Action })[];
+  /** The hand in play: dealt, then each action and console change exactly as applied. */
+  events: TableEvent[];
   away: Record<string, boolean>;
   timeouts: Record<string, number>;
   pendingRebuys: string[];
@@ -73,7 +73,23 @@ export interface TableState {
   lastStepAt: number;
   /** Seats a bot moved for in the hand in play (the person was away), which earn no achievements. */
   autoplayed?: string[];
+  /** Developer console: nothing moves on its own while paused. */
+  paused?: boolean;
+  /** Developer console: cards to deal next hand, by seat id. */
+  nextRig?: { hole: Record<string, Card[]>; board: Card[] } | null;
 }
+
+/** Changes an admin makes during a hand, replayed with the hand like any action. */
+export type AdminEdit =
+  | { t: 'stack'; seat: string; n: number }
+  | { t: 'bot'; seat: string; d: Difficulty; s: BotStyle }
+  | { t: 'level'; n: number };
+
+export type TableEvent =
+  | { t: 'deal'; rig?: { hole: Record<string, Card[]>; board: Card[] } | null }
+  | { t: 'act'; a: Action }
+  | { t: 'board'; cards: Card[] }
+  | AdminEdit;
 
 export interface TableRow {
   id: string;
@@ -119,6 +135,12 @@ export interface TableDb {
   awards(userId: string, playerId: string): Promise<AwardCounters>;
   /** Adds to players' online achievement records. */
   creditAwards(credits: AwardCredit[]): Promise<void>;
+  /** Whether this account is in the admins table (supabase/admin.sql). False if that isn't set up. */
+  isAdmin(userId: string): Promise<boolean>;
+  /** The most recently used tables, newest first. */
+  recent(limit: number): Promise<(TableRow & { updatedAt: string })[]>;
+  /** Records a developer console change in admin_log. Never throws. */
+  logAdmin(userId: string, action: string, detail: Record<string, unknown>): Promise<void>;
 }
 
 export class TableError extends Error {
@@ -164,7 +186,8 @@ const memberAt = (state: TableState, seatId: string): Member | undefined =>
 /** Achievements from a finished hand, and from any tournament places it decided. */
 function creditHand(state: TableState, t: Table, credits: AwardCredit[] | undefined) {
   const hand = t.hand;
-  if (!credits || !hand?.isComplete) return;
+  // A hand an admin rigged from the developer console proves nothing.
+  if (!credits || !hand?.isComplete || hand.wasRigged) return;
   const people = hand.players.map((_, i) => memberAt(state, t.handSeats[i]));
   const friends = people.flatMap((m, i) => (m ? [i] : []));
   people.forEach((m, i) => {
@@ -244,8 +267,12 @@ export function rebuild(state: TableState): Table {
   t.level = cp.level;
   t.rng.state = cp.rng;
   for (const e of state.events) {
-    if (e.t === 'deal') t.nextHand();
-    else t.hand!.act(e.a);
+    if (e.t === 'deal') {
+      t.nextRig = e.rig ?? null;
+      t.nextHand();
+    } else if (e.t === 'act') t.hand!.act(e.a);
+    else if (e.t === 'board') t.hand!.setBoard(e.cards);
+    else applyEdit(t, e);
   }
   if (t.hand?.isComplete) t.finishHand();
   return t;
@@ -310,8 +337,11 @@ function dealNext(state: TableState, t: Table, now: number, credits?: AwardCredi
   }
   if (t.liveSeats.length < 2) return false;
   state.checkpoint = snapshot(t);
-  state.events = [{ t: 'deal' }];
+  const rig = state.nextRig ?? null;
+  state.nextRig = null;
+  state.events = [rig ? { t: 'deal', rig } : { t: 'deal' }];
   state.autoplayed = [];
+  t.nextRig = rig;
   t.nextHand();
   state.turnStartedAt = now;
   state.handEndedAt = null;
@@ -342,7 +372,7 @@ const botFor = (seat: Seat, away: boolean): Bot => new Bot(away || !seat.difficu
 
 /** A move nobody is waiting on a person for: a bot's turn, a run-out clock, or the next deal. */
 export function autoStep(state: TableState, t: Table, now: number, credits?: AwardCredit[]): boolean {
-  if (state.phase !== 'playing') return false;
+  if (state.phase !== 'playing' || state.paused) return false;
   const hand = t.hand;
   if (!hand || hand.isComplete) {
     if (hand && now < (state.handEndedAt ?? 0) + DEAL_DELAY_MS) return false;
@@ -402,7 +432,7 @@ function handView(hand: Hand, me: number): HandView {
 
 /** When the server will next accept a tick, or null if it is waiting on a person. */
 function tickAt(state: TableState, t: Table | null, stalled: boolean): number | null {
-  if (state.phase !== 'playing' || !t || stalled) return null;
+  if (state.phase !== 'playing' || !t || stalled || state.paused) return null;
   const hand = t.hand;
   if (!hand || hand.isComplete) return (state.handEndedAt ?? 0) + DEAL_DELAY_MS;
   const seat = t.seatOf(hand.toAct);
@@ -440,11 +470,12 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     legal: myTurn ? hand!.legal() : null,
     stats: t ? clone(t.stats) : {},
     serverNow: now,
-    turnDeadline: humanTurn ? state.turnStartedAt + TURN_MS : null,
-    nextDealAt: hand?.isComplete && state.phase === 'playing' ? (state.handEndedAt ?? now) + DEAL_DELAY_MS : null,
+    turnDeadline: humanTurn && !state.paused ? state.turnStartedAt + TURN_MS : null,
+    nextDealAt: hand?.isComplete && state.phase === 'playing' && !state.paused ? (state.handEndedAt ?? now) + DEAL_DELAY_MS : null,
     tickAt: tickAt(state, t, stalled),
     rebuyPending: !!mySeat && state.pendingRebuys.includes(mySeat),
     stalled,
+    paused: !!state.paused,
   };
 }
 
@@ -463,6 +494,10 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
     const req = (raw ?? {}) as Request;
     if (req.op === 'create') return await create(db, userId, req, now(), seed);
     if (req.op === 'join') return await join(db, userId, req, now());
+    if (req.op === 'admin' || req.op === 'tables') {
+      if (!(await db.isAdmin(userId))) throw new TableError('Only admin accounts can do that.', 403);
+      return req.op === 'tables' ? await listTables(db) : await adminChange(db, userId, req, now);
+    }
     if (!['leave', 'start', 'act', 'tick', 'rebuy', 'back'].includes(req.op)) throw new TableError('Unknown request.');
     return await change(db, userId, req, now, seed);
   } catch (err) {
@@ -538,7 +573,7 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
   throw new TableError('The table is busy. Try again.', 503);
 }
 
-async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' }>, now: () => number, seed: () => number): Promise<Outcome> {
+async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'admin' | 'tables' }>, now: () => number, seed: () => number): Promise<Outcome> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await db.byId(String(req.tableId ?? ''));
     if (!row) throw new TableError('That table is gone.', 404);
@@ -561,6 +596,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
         t = rebuild(state);
         break;
       case 'act': {
+        if (state.paused) throw new TableError('The table is paused. Wait for it to carry on.', 409);
         const hand = t?.hand;
         if (!t || !hand || hand.isComplete || !m.seat || req.hand !== t.handNumber || t.handSeats[hand.toAct] !== m.seat) throw new TableError("It isn't your turn.", 409);
         delete state.away[m.seat];
@@ -609,6 +645,247 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
     const out = await publish(db, saved, state, t, at, userId, credits);
     if (req.op === 'leave') await db.dropView(row.id, userId);
     return out;
+  }
+  throw new TableError('The table is busy. Try again.', 503);
+}
+
+// ---------- developer console ----------
+
+/** Applies an admin change to the table (live, or while replaying the hand). */
+function applyEdit(t: Table, e: AdminEdit) {
+  if (e.t === 'level') {
+    t.level = Math.max(0, e.n);
+    return;
+  }
+  const seat = t.seats.find((x) => x.id === e.seat);
+  if (!seat) return;
+  if (e.t === 'bot') {
+    seat.difficulty = e.d;
+    seat.style = e.s;
+    return;
+  }
+  // A finished hand is settled first, so its result doesn't overwrite the new stack.
+  if (t.hand?.isComplete) t.finishHand();
+  const hi = t.handIndexOf(seat.id);
+  if (t.hand && !t.hand.isComplete && hi >= 0) t.hand.players[hi].stack = e.n;
+  seat.stack = e.n;
+  if (e.n > 0 && seat.busted) {
+    seat.busted = false;
+    seat.place = undefined;
+  }
+}
+
+function findSeat(t: Table, ref: unknown): Seat {
+  const r = String(ref ?? '').trim().toLowerCase();
+  const byId = t.seats.find((s) => s.id === r);
+  if (byId) return byId;
+  if (/^\d+$/.test(r) && t.seats[Number(r)]) return t.seats[Number(r)];
+  const hits = t.seats.filter((s) => s.name.toLowerCase().startsWith(r));
+  if (r && hits.length === 1) return hits[0];
+  throw new TableError(hits.length > 1 ? `"${ref}" matches ${hits.map((s) => s.name).join(', ')}.` : `No seat called "${ref}".`);
+}
+
+function checkCards(raw: unknown): Card[] {
+  if (!Array.isArray(raw)) throw new TableError('List the cards.');
+  return raw.map((c) => {
+    const n = Number(c);
+    if (!Number.isInteger(n) || n < 0 || n > 51) throw new TableError('That is not a card.');
+    return n;
+  });
+}
+
+export function adminInfo(row: { id: string; code: string; version: number }, state: TableState, t: Table | null): AdminTableInfo {
+  const hand = t?.hand ?? null;
+  return {
+    tableId: row.id,
+    code: row.code,
+    version: row.version,
+    phase: state.phase,
+    paused: !!state.paused,
+    settings: state.settings,
+    members: state.members.map((m) => ({ name: m.name, userId: m.userId, seat: m.seat, host: m.userId === state.host, left: m.left, away: !!(m.seat && state.away[m.seat]) })),
+    handNumber: t?.handNumber ?? 0,
+    level: t?.level ?? 0,
+    seats: (t?.seats ?? []).map((s) => ({ id: s.id, name: s.name, isHuman: s.isHuman, difficulty: s.difficulty, style: s.style, stack: s.stack, busted: s.busted })),
+    hand: hand && t
+      ? {
+        street: hand.street,
+        numStreets: hand.numStreets,
+        phase: hand.phase,
+        complete: hand.isComplete,
+        pot: hand.pot,
+        toAct: hand.isComplete || hand.toAct < 0 ? null : t.handSeats[hand.toAct],
+        board: [...hand.board],
+        players: hand.players.map((p, i) => ({ seat: t.handSeats[i], cards: [...p.cards], status: p.status, stack: p.stack, totalBet: p.totalBet })),
+        upcoming: hand.upcoming(16),
+        rigBoard: hand.rigged.board,
+      }
+      : null,
+    nextRig: state.nextRig ? clone(state.nextRig) : null,
+  };
+}
+
+async function listTables(db: TableDb): Promise<Outcome> {
+  const rows = await db.recent(50);
+  const tables: AdminTableSummary[] = rows.map((r) => ({
+    tableId: r.id,
+    code: r.code,
+    phase: r.state.phase,
+    game: `${r.state.settings.structure} ${VARIANTS[r.state.settings.variant]?.name ?? r.state.settings.variant}`,
+    people: r.state.members.filter((m) => !m.left).map((m) => m.name),
+    handNumber: r.state.checkpoint?.handNumber ?? 0,
+    paused: !!r.state.paused,
+    updatedAt: r.updatedAt,
+  }));
+  const body: AdminReply = { ok: true, message: `${tables.length} table${tables.length === 1 ? '' : 's'}.`, table: null, tables };
+  return { status: 200, body };
+}
+
+const DIFFS = new Set<string>(DIFFICULTIES);
+const STYLE_SET = new Set<string>(['balanced', 'tight', 'loose', 'aggressive', 'passive']);
+
+async function adminChange(db: TableDb, userId: string, req: Extract<Request, { op: 'admin' }>, now: () => number): Promise<Outcome> {
+  const cmd = (req.command ?? {}) as AdminCommand;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = req.tableId ? await db.byId(String(req.tableId)) : await db.byCode(findCode(req.code));
+    if (!row) throw new TableError('No table with that code.', 404);
+    const state = row.state;
+    const at = now();
+    const t = state.phase === 'lobby' ? null : rebuild(state);
+    const reply = (message: string, r: { id: string; code: string; version: number } = row, tb: Table | null = t): Outcome => {
+      const body: AdminReply = { ok: true, message, table: adminInfo(r, state, tb) };
+      return { status: 200, body };
+    };
+    if (cmd.do === 'inspect') return reply('');
+    if (cmd.do === 'close') {
+      await db.remove(row.id);
+      await db.logAdmin(userId, 'close table', { code: row.code });
+      const body: AdminReply = { ok: true, message: `Table ${row.code} closed.`, table: null };
+      return { status: 200, body };
+    }
+    if (!t || state.phase !== 'playing') throw new TableError(state.phase === 'lobby' ? "That table hasn't started yet." : 'That game is over.', 409);
+    const hand = t.hand;
+    const live = !!hand && !hand.isComplete;
+    let message: string;
+    let kicked: string | null = null;
+    switch (cmd.do) {
+      case 'rig': {
+        const seat = findSeat(t, cmd.seat);
+        const cards = checkCards(cmd.cards);
+        if (!cards.length) throw new TableError('List the cards.');
+        const rig = state.nextRig ?? { hole: {}, board: [] };
+        const hole = { ...rig.hole, [seat.id]: cards };
+        const problem = rigProblem({ hole: Object.fromEntries(Object.values(hole).map((c, i) => [i, c])), board: rig.board }, t.variant.shortDeck);
+        if (problem) throw new TableError(problem);
+        state.nextRig = { hole, board: rig.board };
+        message = `${seat.name} gets those cards next hand.`;
+        break;
+      }
+      case 'unrig':
+        state.nextRig = null;
+        message = 'Next hand deals from the shuffle.';
+        break;
+      case 'board': {
+        const cards = checkCards(cmd.cards);
+        if (t.variant.family !== 'flop') throw new TableError('Only community-card games have a board.');
+        if (live) {
+          try {
+            hand!.setBoard(cards);
+          } catch (err) {
+            throw new TableError((err as Error).message);
+          }
+          state.events.push({ t: 'board', cards });
+          message = cards.length ? 'Board fixed for the rest of this hand.' : 'Board back to the shuffle.';
+        } else {
+          const rig = state.nextRig ?? { hole: {}, board: [] };
+          const problem = rigProblem({ hole: Object.fromEntries(Object.values(rig.hole).map((c, i) => [i, c])), board: cards }, t.variant.shortDeck);
+          if (problem) throw new TableError(problem);
+          state.nextRig = { ...rig, board: cards };
+          message = cards.length ? "Next hand's board is fixed." : "Next hand's board back to the shuffle.";
+        }
+        break;
+      }
+      case 'stack': {
+        const seat = findSeat(t, cmd.seat);
+        const n = Math.max(0, Math.round(Number(cmd.amount)));
+        if (!Number.isFinite(n)) throw new TableError('Give an amount.');
+        const e: AdminEdit = { t: 'stack', seat: seat.id, n };
+        applyEdit(t, e);
+        state.events.push(e);
+        message = `${seat.name} now has ${n} chips.`;
+        break;
+      }
+      case 'bot': {
+        const seat = findSeat(t, cmd.seat);
+        if (seat.isHuman) throw new TableError(`${seat.name} is a person.`);
+        const d = (cmd.difficulty && DIFFS.has(cmd.difficulty) ? cmd.difficulty : seat.difficulty ?? 'medium') as Difficulty;
+        const st = (cmd.style && STYLE_SET.has(cmd.style) ? cmd.style : seat.style ?? 'balanced') as BotStyle;
+        const e: AdminEdit = { t: 'bot', seat: seat.id, d, s: st };
+        applyEdit(t, e);
+        state.events.push(e);
+        message = `${seat.name} plays ${d} ${st}.`;
+        break;
+      }
+      case 'level': {
+        const n = Math.floor(Number(cmd.level));
+        if (!t.isTournament) throw new TableError('Cash games have one blind level.');
+        if (!(n >= 1)) throw new TableError('Give a level number, like 5.');
+        const e: AdminEdit = { t: 'level', n: n - 1 };
+        applyEdit(t, e);
+        state.events.push(e);
+        message = `Blind level ${n} from the next hand.`;
+        break;
+      }
+      case 'pause':
+        state.paused = true;
+        message = 'Table paused.';
+        break;
+      case 'resume':
+        if (!state.paused) return reply('The table is already running.');
+        state.paused = false;
+        // Everyone gets a fresh clock.
+        state.turnStartedAt = at;
+        state.lastStepAt = at;
+        if (state.handEndedAt !== null) state.handEndedAt = at;
+        message = 'Table running again.';
+        break;
+      case 'step': {
+        if (live) {
+          const seat = t.seatOf(hand!.toAct);
+          if (seat.isHuman && !state.away[seat.id]) throw new TableError(`It's ${seat.name}'s turn, and they're a person.`);
+        }
+        const paused = state.paused;
+        state.paused = false;
+        state.lastStepAt = 0;
+        if (state.handEndedAt !== null) state.handEndedAt = 0;
+        const moved = autoStep(state, t, at);
+        state.paused = paused;
+        if (!moved) throw new TableError('Nothing to do: the table needs two players with chips.');
+        message = live ? 'One move made.' : 'Next hand dealt.';
+        break;
+      }
+      case 'kick': {
+        const r = String(cmd.member ?? '').trim().toLowerCase();
+        const hits = state.members.filter((m) => !m.left && m.name.toLowerCase().startsWith(r));
+        if (!r || hits.length !== 1) throw new TableError(hits.length ? `"${cmd.member}" matches ${hits.map((m) => m.name).join(', ')}.` : `Nobody called "${cmd.member}" is at the table.`);
+        const m = hits[0];
+        kicked = m.userId;
+        m.left = true;
+        if (m.seat) state.away[m.seat] = true;
+        state.pendingSits = state.pendingSits.filter((p) => p.userId !== m.userId);
+        if (state.host === m.userId) state.host = state.members.find((x) => !x.left)?.userId ?? state.host;
+        message = `${m.name} is off the table; a bot plays their chips.`;
+        break;
+      }
+      default:
+        throw new TableError('Unknown console command.');
+    }
+    if (!(await db.update(row.id, row.version, state))) continue;
+    const saved = { ...row, version: row.version + 1 };
+    await publish(db, saved, state, t, at, userId);
+    if (kicked) await db.dropView(row.id, kicked);
+    await db.logAdmin(userId, `table ${cmd.do}`, { code: row.code, ...(cmd as object) });
+    return reply(message, saved);
   }
   throw new TableError('The table is busy. Try again.', 503);
 }

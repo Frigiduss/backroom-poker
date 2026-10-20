@@ -38,7 +38,80 @@ export type Request =
   | { op: 'tick'; tableId: string; version: number }
   | { op: 'rebuy'; tableId: string }
   /** Take your seat back from the bot that played while you were away. */
-  | { op: 'back'; tableId: string };
+  | { op: 'back'; tableId: string }
+  /** Developer console: change or look inside any table. Only admin accounts (supabase/admin.sql). */
+  | { op: 'admin'; tableId?: string; code?: string; command: AdminCommand }
+  /** Developer console: the tables in play. Admins only. */
+  | { op: 'tables' };
+
+/** What an admin can do to a live table. Seats are named by id (p0), number (0) or name. */
+export type AdminCommand =
+  | { do: 'inspect' }
+  /** Deals a seat these cards next hand. */
+  | { do: 'rig'; seat: string; cards: Card[] }
+  | { do: 'unrig' }
+  /** The board cards still to come this hand; between hands, the next hand's board. */
+  | { do: 'board'; cards: Card[] }
+  | { do: 'stack'; seat: string; amount: number }
+  | { do: 'bot'; seat: string; difficulty?: Difficulty; style?: BotStyle }
+  | { do: 'pause' }
+  | { do: 'resume' }
+  /** Makes the next bot move or deal now. */
+  | { do: 'step' }
+  | { do: 'level'; level: number }
+  /** Removes a person from the table (a bot plays their chips). */
+  | { do: 'kick'; member: string }
+  /** Deletes the table for everyone. */
+  | { do: 'close' };
+
+/** Everything about a live table, every card included. Only ever sent to admins. */
+export interface AdminTableInfo {
+  tableId: string;
+  code: string;
+  version: number;
+  phase: 'lobby' | 'playing' | 'over';
+  paused: boolean;
+  settings: TableSettings;
+  members: { name: string; userId: string; seat: string | null; host: boolean; left: boolean; away: boolean }[];
+  handNumber: number;
+  level: number;
+  seats: { id: string; name: string; isHuman: boolean; difficulty?: Difficulty; style?: BotStyle; stack: number; busted: boolean }[];
+  hand: null | {
+    street: number;
+    numStreets: number;
+    phase: HandPhase;
+    complete: boolean;
+    pot: number;
+    /** Seat id of the player to act, or null. */
+    toAct: string | null;
+    board: Card[];
+    players: { seat: string; cards: Card[]; status: PlayerStatus; stack: number; totalBet: number }[];
+    /** Next cards off the deck, top first. */
+    upcoming: Card[];
+    /** Board cards fixed to come. */
+    rigBoard: Card[];
+  };
+  /** Cards fixed for the next hand, by seat id. */
+  nextRig: { hole: Record<string, Card[]>; board: Card[] } | null;
+}
+
+export interface AdminTableSummary {
+  tableId: string;
+  code: string;
+  phase: 'lobby' | 'playing' | 'over';
+  game: string;
+  people: string[];
+  handNumber: number;
+  paused: boolean;
+  updatedAt: string;
+}
+
+export interface AdminReply {
+  ok: true;
+  message: string;
+  table: AdminTableInfo | null;
+  tables?: AdminTableSummary[];
+}
 
 export interface Reply {
   ok: true;
@@ -145,6 +218,8 @@ export interface TableView {
   rebuyPending: boolean;
   /** Fewer than two players have chips, so the next hand waits. */
   stalled: boolean;
+  /** An admin has paused the table from the developer console. */
+  paused?: boolean;
 }
 
 export const TURN_SECONDS = 30;

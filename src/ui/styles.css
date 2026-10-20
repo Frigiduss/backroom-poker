@@ -1390,3 +1390,4 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 
 }
 .lvl.ttl { color: var(--gold-hi); border-color: rgba(230, 184, 92, .6); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paused-tag { color: var(--gold-hi); }

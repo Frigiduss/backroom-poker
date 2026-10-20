@@ -73,6 +73,25 @@ export class RestTableDb implements TableDb {
     await this.call(`poker_views?table_id=eq.${tableId}&user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE', prefer: 'return=minimal' });
   }
 
+  async isAdmin(userId: string): Promise<boolean> {
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) return false;
+    try {
+      const { data } = await this.call(`admins?select=user_id&user_id=eq.${userId}`);
+      return Array.isArray(data) && data.length === 1;
+    } catch {
+      return false; // admin.sql hasn't been run
+    }
+  }
+
+  async recent(limit: number): Promise<(TableRow & { updatedAt: string })[]> {
+    const { data } = await this.call(`poker_tables?select=id,code,version,state,updated_at&order=updated_at.desc&limit=${Math.max(1, Math.floor(limit))}`);
+    return (data as (TableRow & { updated_at: string })[]).map(({ updated_at, ...r }) => ({ ...r, updatedAt: updated_at }));
+  }
+
+  async logAdmin(userId: string, action: string, detail: Record<string, unknown>): Promise<void> {
+    await this.call('admin_log', { method: 'POST', body: { admin: userId, action, detail }, prefer: 'return=minimal' }).catch(() => undefined);
+  }
+
   async sweep(before: Date): Promise<void> {
     await this.call(`poker_tables?updated_at=lt.${encodeURIComponent(before.toISOString())}`, { method: 'DELETE', prefer: 'return=minimal' });
   }

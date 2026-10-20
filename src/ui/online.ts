@@ -14,6 +14,7 @@ import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../
 import { checkAchievements } from './achievements';
 import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
 import { SoundName, play } from './sound';
+import { consoleEnabled, toggleConsole } from './console';
 
 export interface TablePrefs {
   fourColor: boolean;
@@ -79,6 +80,9 @@ export function stopOnline() {
 }
 
 export const onlineActive = (): boolean => !!active;
+
+/** The online table on screen, for the developer console. */
+export const activeTable = (): { tableId: string; code: string } | null => (active ? active.where : null);
 
 // ---------- lobby panel ----------
 
@@ -209,6 +213,10 @@ class OnlineTable {
   constructor(view: TableView) {
     this.view = view;
     this.skew = Date.now() - view.serverNow;
+  }
+
+  get where(): { tableId: string; code: string } {
+    return { tableId: this.view.tableId, code: this.view.code };
   }
 
   start() {
@@ -424,9 +432,10 @@ class OnlineTable {
       <header class="topbar">
         <div class="tb-game">
           <span class="title">${STRUCTURE_NAMES[hand.structure]} ${variant.name}</span>
-          <span class="chip-info">${stakes} · Hand <b>${v.handNumber}</b>${level} · Table <b class="code-tag">${esc(v.code)}</b></span>
+          <span class="chip-info">${stakes} · Hand <b>${v.handNumber}</b>${level} · Table <b class="code-tag">${esc(v.code)}</b>${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
         </div>
         <div class="tb-actions">
+          ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
@@ -790,6 +799,7 @@ class OnlineTable {
     });
     on('confirm-leave', () => void this.leave());
     on('back-in', () => void this.send({ op: 'back', tableId: v.tableId }));
+    on('dev-toggle', toggleConsole);
     on('rebuy', () => void this.send({ op: 'rebuy', tableId: v.tableId }));
     on('do-fold', () => this.act({ type: 'fold' }));
     on('do-check', () => this.act({ type: 'check' }));
