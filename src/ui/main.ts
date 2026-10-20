@@ -4,7 +4,7 @@ import { buildView } from '../bots/view';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
-import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
+import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
   finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally,
@@ -15,6 +15,7 @@ import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, o
 import { announce, checkAchievements, renderAchievements } from './achievements';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
+import { bindGamePicker, gamePickerHtml } from './picker';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
@@ -116,7 +117,6 @@ function renderSetup() {
       .map(([val, label]) => `<button type="button" data-${name}="${val}" aria-pressed="${val === current}" ${disabled(val) ? 'disabled' : ''}>${label}</button>`)
       .join('')}</div>`;
 
-  const familyName = { flop: 'Community cards', draw: 'Draw', stud: 'Stud' } as const;
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
   const cost = entryCost(setup);
   const affordable = setup.practice || canAfford(me, cost);
@@ -130,7 +130,6 @@ function renderSetup() {
   const notice = takeNotice();
   // Every choice redraws the lobby; keep the setup card's options where they were scrolled to.
   const optionsScroll = app.querySelector('.setup-card .options')?.scrollTop ?? 0;
-  const fan = (n: number) => `<span class="hole" style="--n:${n};--s:${n > 4 ? 5 : n > 2 ? 7 : 9}px" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i};--k:${i - (n - 1) / 2}"></i>`).join('')}</span>`;
 
   app.innerHTML = `
   <main class="lobby">
@@ -144,24 +143,7 @@ function renderSetup() {
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
     <div class="lobby-grid">
-      <section class="panel games-panel">
-        <h2 class="step">Choose a game</h2>
-        <div class="games">
-          ${VARIANT_ORDER.map((id) => {
-            const g = VARIANTS[id];
-            return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${setup.game === 'poker' && id === setup.variant}">
-              <span class="gt-head"><span class="name">${g.name}</span>${fan(g.holeCards)}</span>
-              <span class="blurb">${g.blurb}</span>
-              <span class="meta"><span>${familyName[g.family]}</span><span>${g.structures.join(' · ')}</span><span>${g.maxPlayers} max</span></span>
-            </button>`;
-          }).join('')}
-          <button type="button" class="game-tile bj-tile" data-blackjack aria-pressed="${setup.game === 'blackjack'}">
-            <span class="gt-head"><span class="name">Blackjack</span>${fan(2)}</span>
-            <span class="blurb">Beat the dealer to 21 without going over. Double, split and insure, and a blackjack pays 3 to 2.</span>
-            <span class="meta"><span>Casino</span><span>vs the dealer</span><span>6 decks</span></span>
-          </button>
-        </div>
-      </section>
+      ${gamePickerHtml(setup.game === 'blackjack' ? 'blackjack' : setup.variant)}
 
       ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
@@ -227,11 +209,13 @@ function renderSetup() {
     saveSettings();
     renderSetup();
   };
-  app.querySelectorAll<HTMLButtonElement>('[data-variant]').forEach((b) => (b.onclick = () => update(() => {
-    setup.game = 'poker';
-    setup.variant = b.dataset.variant as VariantId;
-  })));
-  app.querySelectorAll<HTMLButtonElement>('[data-blackjack]').forEach((b) => (b.onclick = () => update(() => (setup.game = 'blackjack'))));
+  bindGamePicker((id) => update(() => {
+    if (id === 'blackjack') setup.game = 'blackjack';
+    else {
+      setup.game = 'poker';
+      setup.variant = id;
+    }
+  }));
   bindBjSetupCard(setup.bj, update);
   app.querySelectorAll<HTMLButtonElement>('[data-structure]').forEach((b) => (b.onclick = () => update(() => (setup.structures[setup.variant] = b.dataset.structure as Structure))));
   app.querySelectorAll<HTMLButtonElement>('[data-format]').forEach((b) => (b.onclick = () => update(() => {
