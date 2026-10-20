@@ -1094,6 +1094,23 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .myhand .meter { width: 70px; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, .1); overflow: hidden; }
 .myhand .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--good)); border-radius: inherit; }
 .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; margin-left: auto; }
+/* Practice tables: the coach's read sits on its own row above the hand and buttons. */
+.hint-panel {
+  order: -1; flex: 1 1 100%;
+  display: grid; gap: 3px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(111, 183, 234, .08);
+  border: 1px solid rgba(111, 183, 234, .3);
+  font-size: 13.5px;
+}
+.hint-panel .hp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hint-panel .eyebrow { color: #9fd0f2; font-size: 11px; }
+.hint-panel .hp-act { color: var(--text); font-size: 15px; margin-right: 4px; }
+.hint-panel .hp-head b { color: var(--text); }
+.hint-panel .hp-why { color: var(--muted); }
+.chip-info .practice-flag { color: #9fd0f2; }
+.practice-field { padding-top: 4px; border-top: 1px solid var(--line); }
 .act {
   border-radius: 12px;
   padding: 12px 20px;

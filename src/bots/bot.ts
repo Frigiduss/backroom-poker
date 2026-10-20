@@ -1,4 +1,4 @@
-import { Rng, createRng } from '../engine/cards';
+import { Rng, cardLabel, createRng } from '../engine/cards';
 import { Action } from '../engine/hand';
 import { BotStyle, Difficulty } from '../engine/table';
 import { chooseDiscards } from './draw';
@@ -61,7 +61,13 @@ export interface Decision {
   action: Action;
   /** Equity estimate behind the choice, for debugging and tests. */
   equity?: number;
+  /** Price of a call as a share of the final pot, when facing a bet. */
+  potOdds?: number;
+  /** One plain sentence on why, for practice hints and the console. */
+  reason?: string;
 }
+
+const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** A computer opponent. One instance per seat so it can remember things across hands. */
 export class Bot {
@@ -85,7 +91,16 @@ export class Bot {
 
   think(view: PlayerView): Decision {
     const L = view.legal;
-    if (L.kind === 'draw') return { action: { type: 'draw', discard: chooseDiscards(view.myCards, this.difficulty, this.rng) } };
+    if (L.kind === 'draw') {
+      const discard = chooseDiscards(view.myCards, this.difficulty, this.rng);
+      const keep = view.myCards.filter((_, i) => !discard.includes(i));
+      const reason = discard.length === 0
+        ? 'The hand is already made, so it stands pat.'
+        : keep.length === 0
+          ? 'Nothing worth keeping, so it draws a fresh hand.'
+          : `Keeps ${keep.map(cardLabel).join(' ')} and draws ${discard.length} to improve.`;
+      return { action: { type: 'draw', discard }, reason };
+    }
     if (L.kind !== 'bet') return { action: { type: 'check' } };
 
     const p = this.p;
@@ -111,18 +126,24 @@ export class Bot {
     const potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
     const lastStreet = view.street === view.numStreets - 1;
     const stackBB = (me.stack + me.streetBet) / Math.max(1, bb);
-    const decision = (action: Action): Decision => ({ action, equity });
+    const decision = (action: Action, reason: string): Decision => ({ action, equity, potOdds: toCall > 0 ? potOdds : undefined, reason });
+    const versus = `${pct(equity)} to win against ${nOpp} opponent${nOpp === 1 ? '' : 's'}`;
 
     // Stud bring-in: complete with a strong start, otherwise post the minimum.
     if (L.bringIn) {
-      return decision(L.raise && s > 0.25 - aggr * 0.15 ? { type: 'raise', to: L.minRaiseTo } : { type: 'bringin' });
+      return L.raise && s > 0.25 - aggr * 0.15
+        ? decision({ type: 'raise', to: L.minRaiseTo }, 'A strong start, so it completes the bet right away.')
+        : decision({ type: 'bringin' }, 'Not much to show yet, so it posts the minimum.');
     }
 
     // Short-stacked no-limit tournament play: all in or fold before the flop.
     if (p.pushFold && view.structure === 'NL' && v.family === 'flop' && view.street === 0 && stackBB < 11 && L.raise) {
       const need = 0.05 + stackBB * 0.012 + raisesFaced * 0.08 + m.tight;
-      if (s > need) return decision({ type: 'raise', to: L.maxRaiseTo });
-      return decision(L.check ? { type: 'check' } : toCall <= bb * 0.5 && equity > potOdds ? { type: 'call' } : { type: 'fold' });
+      const short = `With about ${Math.round(stackBB)} big blinds left it's all in or fold`;
+      if (s > need) return decision({ type: 'raise', to: L.maxRaiseTo }, `${short}, and this hand is good enough to shove.`);
+      if (L.check) return decision({ type: 'check' }, `${short}. This hand isn't worth the shove, and checking is free.`);
+      if (toCall <= bb * 0.5 && equity > potOdds) return decision({ type: 'call' }, `Completing is cheap and ${pct(equity)} beats the ${pct(potOdds)} price.`);
+      return decision({ type: 'fold' }, `${short}, and this hand isn't strong enough to shove.`);
     }
 
     const valueThr = 0.32 - aggr * 0.22 + m.tight + raisesFaced * 0.1;
@@ -131,37 +152,43 @@ export class Bot {
     // Before the flop in flop games, raising follows starting-hand charts by position.
     if (v.family === 'flop' && view.street === 0 && this.difficulty !== 'beginner') {
       const pre = this.preflop(view, raisesFaced, position, aggr);
-      if (pre) return decision(pre);
+      if (pre) return decision(pre.action, pre.reason!);
     }
 
     if (L.check) {
       if (L.raise && s > valueThr) {
-        if (s > 0.8 && !lastStreet && this.rng.next() < p.slowplay) return decision({ type: 'check' });
-        if (this.rng.next() < 0.35 + aggr * 0.65) return decision(this.betAction(view, s, false));
+        if (s > 0.8 && !lastStreet && this.rng.next() < p.slowplay) return decision({ type: 'check' }, `A monster (${versus}), so it checks to set a trap.`);
+        if (this.rng.next() < 0.35 + aggr * 0.65) return decision(this.betAction(view, s, false), `Ahead of the field (${versus}), so it bets for value.`);
+        return decision({ type: 'check' }, `Ahead (${versus}) but checks this time to stay hard to read.`);
       }
       const bluffSpot = nOpp <= 2 && view.street > 0 ? 1 : 0.4;
       if (L.raise && s < valueThr && this.rng.next() < bluffRate * bluffSpot * (0.6 + position)) {
-        return decision(this.betAction(view, 0.2, true));
+        return decision(this.betAction(view, 0.2, true), `A bluff: only ${versus}, but a bet can win the pot right now.`);
       }
-      return decision({ type: 'check' });
+      return decision({ type: 'check' }, `Only ${versus}. Not strong enough to bet, and checking is free.`);
     }
 
     // Facing a bet.
     let callThr = potOdds - p.callBias - m.callBias + this.opponentAdjust(view);
     if (toCall >= me.stack * 0.6 && p.sizing) callThr += 0.04; // big calls need a little extra
     const chartPreflop = v.family === 'flop' && view.street === 0 && this.difficulty !== 'beginner';
+    const price = `the call costs ${pct(potOdds)} of the pot`;
     if (L.raise && !chartPreflop && s > valueThr + 0.05 && this.rng.next() < 0.3 + aggr * 0.7) {
-      return decision(this.betAction(view, s, false));
+      return decision(this.betAction(view, s, false), `Well ahead (${versus}), so it raises for value.`);
     }
-    if (equity >= callThr) return decision({ type: 'call' });
+    if (equity >= callThr) {
+      return decision({ type: 'call' }, equity >= potOdds
+        ? `Calling pays: ${versus} and ${price}.`
+        : `Close: ${versus} and ${price}, but the chance to win more later makes it a call.`);
+    }
     if (L.raise && nOpp === 1 && raisesFaced <= 1 && this.rng.next() < bluffRate * 0.5 * (0.5 + position)) {
-      return decision(this.betAction(view, 0.2, true));
+      return decision(this.betAction(view, 0.2, true), `A bluff raise: behind (${versus}), but one opponent may give up.`);
     }
-    return decision({ type: 'fold' });
+    return decision({ type: 'fold' }, `Too expensive: ${versus} and ${price}.`);
   }
 
   /** Chart-style raising before the flop. Returns null to fall back to equity-based calling. */
-  private preflop(view: PlayerView, raisesFaced: number, position: number, aggr: number): Action | null {
+  private preflop(view: PlayerView, raisesFaced: number, position: number, aggr: number): Decision | null {
     const L = view.legal;
     if (L.kind !== 'bet' || !L.raise) return null;
     const v = view.variant;
@@ -173,13 +200,17 @@ export class Bot {
       let open = (0.1 + 0.3 * position) * (0.6 + aggr) - tight;
       if (players <= 3) open += 0.15;
       if (players === 2) open += 0.15;
-      if (pct >= 1 - open && this.rng.next() < 0.6 + aggr * 0.5) return this.betAction(view, pct, false);
+      const top = `a top ${Math.max(1, Math.round((1 - pct) * 100))}% starting hand`;
+      const seat = position > 0.7 ? 'late position' : position < 0.3 ? 'early position' : 'this seat';
+      if (pct >= 1 - open && this.rng.next() < 0.6 + aggr * 0.5) return { action: this.betAction(view, pct, false), reason: `It's ${top}, good enough to open from ${seat}.` };
       return null;
     }
     const reraise = (raisesFaced === 1 ? 0.045 : 0.018) * (0.6 + aggr) * (players === 2 ? 2 : 1) - tight * 0.2;
-    if (pct >= 1 - reraise) return this.betAction(view, pct, false);
+    if (pct >= 1 - reraise) return { action: this.betAction(view, pct, false), reason: 'A premium starting hand, so it re-raises the raiser.' };
     // An occasional light 3-bet from late position keeps strong bots hard to read.
-    if (raisesFaced === 1 && this.p.ranges && position > 0.7 && pct > 0.75 && this.rng.next() < this.p.bluff * 0.5) return this.betAction(view, 0.5, true);
+    if (raisesFaced === 1 && this.p.ranges && position > 0.7 && pct > 0.75 && this.rng.next() < this.p.bluff * 0.5) {
+      return { action: this.betAction(view, 0.5, true), reason: 'A light re-raise from late position, so the raiser can\'t read it as always strong.' };
+    }
     return null;
   }
 
