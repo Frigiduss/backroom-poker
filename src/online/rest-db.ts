@@ -1,6 +1,7 @@
 // TableDb on Supabase's REST API, used by the Edge Function with the project's service key.
 // The browser never uses this: it can't read poker_tables at all (supabase/multiplayer.sql).
-import { StoredView, TableDb, TableRow, TableState } from './server';
+import { Counters } from '../accounts/achievements';
+import { AwardCounters, AwardCredit, StoredView, TableDb, TableRow, TableState } from './server';
 
 type Fetch = typeof fetch;
 
@@ -93,5 +94,28 @@ export class RestTableDb implements TableDb {
 
   async sweep(before: Date): Promise<void> {
     await this.call(`poker_tables?updated_at=lt.${encodeURIComponent(before.toISOString())}`, { method: 'DELETE', prefer: 'return=minimal' });
+  }
+
+  async awards(userId: string, playerId: string): Promise<AwardCounters> {
+    const q = `owner=eq.${encodeURIComponent(userId)}`;
+    const id = encodeURIComponent(playerId);
+    const [server, profile] = await Promise.all([
+      // No player_awards table yet (supabase/achievements.sql not run) just means nothing credited.
+      this.call(`player_awards?select=counters&${q}&player_id=eq.${id}`).catch(() => ({ data: [] })),
+      this.call(`players?select=counters:data->achievements->counters&${q}&id=eq.${id}`),
+    ]);
+    const first = (d: unknown): Counters => {
+      const c = Array.isArray(d) ? (d[0] as { counters?: unknown } | undefined)?.counters : null;
+      return c && typeof c === 'object' ? (c as Counters) : {};
+    };
+    return { server: first(server.data), profile: first(profile.data) };
+  }
+
+  async creditAwards(credits: AwardCredit[]): Promise<void> {
+    if (!credits.length) return;
+    await this.call('rpc/credit_awards', {
+      method: 'POST',
+      body: { p_credits: credits.map((c) => ({ owner: c.userId, player_id: c.playerId, sum: c.tally.sum, max: c.tally.max })) },
+    });
   }
 }

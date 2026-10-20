@@ -10,8 +10,9 @@ import { Action, LegalActions } from '../engine/hand';
 import { DIFFICULTY_NAMES, FORMAT_NAMES } from '../engine/table';
 import { STRUCTURE_NAMES, VARIANTS, describeHolding } from '../engine/variants';
 import { TableClient } from '../online/client';
-import { HandView, TURN_SECONDS, TableSettings, TableView } from '../online/protocol';
-import { cardHtml, chipsHtml, esc, fmt } from './dom';
+import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../online/protocol';
+import { checkAchievements } from './achievements';
+import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
 import { SoundName, play } from './sound';
 import { consoleEnabled, toggleConsole } from './console';
 
@@ -108,7 +109,7 @@ export function friendsPanelHtml(): string {
 }
 
 /** Wires up the lobby panel. `pick` reads the table settings and name chosen in the lobby. */
-export function bindFriendsPanel(pick: () => { settings: TableSettings; name: string }) {
+export function bindFriendsPanel(pick: () => { settings: TableSettings; name: string } & PlayerTag) {
   if (!hooks?.auth) return;
   const err = (msg: string) => {
     const el = document.getElementById('friends-error');
@@ -131,18 +132,22 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
   if (signIn) signIn.onclick = () => hooks.signIn();
   const make = document.getElementById('make-table');
   if (make) make.onclick = () => go(async () => {
-    const { settings, name } = pick();
-    return (await client!.send({ op: 'create', name, settings })).view;
+    const { settings, name, playerId, title } = pick();
+    return (await client!.send({ op: 'create', name, settings, playerId, title })).view;
   });
   const form = document.getElementById('join-form') as HTMLFormElement | null;
   if (form) form.onsubmit = (e) => {
     e.preventDefault();
     const code = (document.getElementById('join-code') as HTMLInputElement).value.trim();
     if (!code) return err('Type the code your friend sent you.');
-    void go(async () => (await client!.send({ op: 'join', code, name: pick().name })).view);
+    const { name, playerId, title } = pick();
+    void go(async () => (await client!.send({ op: 'join', code, name, playerId, title })).view);
   };
   const resume = document.getElementById('resume-table');
-  if (resume && resumable) resume.onclick = () => go(async () => (await client!.send({ op: 'join', code: resumable!.code, name: pick().name })).view);
+  if (resume && resumable) resume.onclick = () => go(async () => {
+    const { name, playerId, title } = pick();
+    return (await client!.send({ op: 'join', code: resumable!.code, name, playerId, title })).view;
+  });
 
   if (signedIn() && !checkedResume) {
     checkedResume = true;
@@ -202,6 +207,8 @@ class OnlineTable {
   private copied = false;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
   private resizeHandler = () => this.render();
+  /** The last finished hand checked for achievements the server credited. */
+  private awardsHand = -1;
 
   constructor(view: TableView) {
     this.view = view;
@@ -268,6 +275,11 @@ class OnlineTable {
     this.absorbLog(true);
     this.render();
     this.schedule();
+    // The server counts achievements as each hand finishes; look for new ones then.
+    if (next.mySeat && next.hand?.result && next.handNumber !== this.awardsHand) {
+      this.awardsHand = next.handNumber;
+      void checkAchievements();
+    }
   }
 
   /**
@@ -460,7 +472,7 @@ class OnlineTable {
     const v = this.view;
     const s = v.settings;
     const seats: string[] = v.members.filter((m) => !m.left).map((m) =>
-      `<li class="filled"><span class="avatar lv-human">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="rs-name">${esc(m.name)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
+      `<li class="filled"><span class="avatar lv-human">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="rs-name">${esc(m.name)}${titleHtml(m.title)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
     const open = Math.max(0, s.seats - seats.length);
     for (let i = 0; i < open; i++) seats.push(`<li class="open"><span class="avatar lv-${s.difficulty === 'mixed' ? 'medium' : s.difficulty}">?</span><span class="rs-name">Open seat</span><span class="rs-tag">${s.difficulty === 'mixed' ? 'Bot' : `${DIFFICULTY_NAMES[s.difficulty]} bot`} if nobody joins</span></li>`);
     const link = `${location.origin}${location.pathname}?join=${v.code}`;
@@ -572,7 +584,8 @@ class OnlineTable {
       else if (hp.lastAction) bubble = `<span class="bubble a-${hp.lastAction.split(' ')[0].toLowerCase()}">${esc(hp.lastAction)}</span>`;
       const handName = res && winners.has(hi) && res.showdown && res.handNames[hi] ? `<span class="bubble handname">${esc(res.handNames[hi]!)}</span>` : '';
       const clock = hi >= 0 && hand.toAct === hi && !complete && v.turnDeadline ? `<span class="clock" title="Seconds left">${this.secondsLeft(v.turnDeadline)}</span>` : '';
-      const badge = seat.isHuman ? (isMe ? '' : `<span class="lvl lv-human">${seat.away ? 'Away' : 'Friend'}</span>`) : `<span class="lvl lv-${level}">${BOT_LABEL(seat.difficulty)}</span>`;
+      const badge = seat.isHuman
+        ? seat.away ? '<span class="lvl lv-human">Away</span>' : seat.title ? `<span class="lvl lv-human ttl" title="Title">${esc(seat.title)}</span>` : isMe ? '' : '<span class="lvl lv-human">Friend</span>' : `<span class="lvl lv-${level}">${BOT_LABEL(seat.difficulty)}</span>`;
       parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(seat.name)} · ${tag}">
@@ -752,7 +765,7 @@ class OnlineTable {
         <h2>${title}</h2>
         <p>${v.handNumber} hands played.</p>
         <table class="standings"><thead><tr><th>Place</th><th>Player</th><th></th></tr></thead><tbody>
-          ${ranked.map((s) => `<tr class="${s.you ? 'me' : ''}"><td>${s.place ? ordinal(s.place) : '–'}</td><td>${esc(s.name)}</td><td>${s.isHuman ? (s.you ? 'You' : 'Friend') : `${BOT_LABEL(s.difficulty)} bot`}</td></tr>`).join('')}
+          ${ranked.map((s) => `<tr class="${s.you ? 'me' : ''}"><td>${s.place ? ordinal(s.place) : '–'}</td><td>${esc(s.name)}${titleHtml(s.title)}</td><td>${s.isHuman ? (s.you ? 'You' : 'Friend') : `${BOT_LABEL(s.difficulty)} bot`}</td></tr>`).join('')}
         </tbody></table>
         <div class="row"><button type="button" class="btn btn-primary" id="confirm-leave">Back to menu</button></div>
       </div></div>`;

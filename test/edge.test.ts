@@ -9,6 +9,7 @@ type Handler = (req: Request) => Promise<Response>;
 const tables = new Map<string, { id: string; code: string; version: number; state: unknown; updated_at: string }>();
 const views = new Map<string, { version: number; view: unknown }>();
 const calls: string[] = [];
+const credited: { owner: string; player_id: string; sum: Record<string, number>; max: Record<string, number> }[] = [];
 const ADMIN = '11111111-2222-4333-8444-555555555555';
 const adminLog: { admin: string; action: string }[] = [];
 let n = 0;
@@ -63,6 +64,15 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
     }
     return reply(204);
   }
+  if (url.pathname === '/rest/v1/player_awards' && method === 'GET') return reply(200, []);
+  if (url.pathname === '/rest/v1/players' && method === 'GET') {
+    assert.equal(q.get('select'), 'counters:data->achievements->counters');
+    return reply(200, eq('owner') === 'alice' && eq('id') === 'pr_a' ? [{ counters: { hands: 1500 } }] : []);
+  }
+  if (url.pathname === '/rest/v1/rpc/credit_awards' && method === 'POST') {
+    credited.push(...body.p_credits);
+    return reply(204);
+  }
   if (url.pathname === '/rest/v1/poker_views' && method === 'DELETE') {
     views.delete(`${eq('table_id')}/${eq('user_id')}`);
     return reply(204);
@@ -94,13 +104,16 @@ test('the deployed function signs people in, makes a table and plays a hand over
   assert.equal((await post(h, null, { op: 'create' })).status, 401);
 
   const settings = { variant: 'holdem', structure: 'NL', format: 'cash', difficulty: 'easy', stackBB: 100, blindSpeed: 'normal', seats: 3 };
-  const made = await (await post(h, 'alice', { op: 'create', name: 'Alice', settings })).json();
+  const made = await (await post(h, 'alice', { op: 'create', name: 'Alice', settings, playerId: 'pr_a', title: 'hands-1000' })).json();
   assert.ok(made.ok, made.error);
-  const joined = await (await post(h, 'bob', { op: 'join', code: made.code, name: 'Bob' })).json();
+  assert.equal(made.view.members[0].title, 'Grinder', "Alice's title is checked against her saved player");
+  const joined = await (await post(h, 'bob', { op: 'join', code: made.code, name: 'Bob', playerId: 'pr_b', title: 'hands-1000' })).json();
+  assert.equal(joined.view.members[1].title, null, "Bob hasn't earned it");
   assert.ok(joined.ok, joined.error);
   const started = await (await post(h, 'alice', { op: 'start', tableId: made.tableId })).json();
   assert.ok(started.ok, started.error);
   assert.equal(started.view.phase, 'playing');
+  assert.deepEqual(credited.map((c) => [c.owner, c.player_id, c.sum['online.games']]), [['alice', 'pr_a', 1], ['bob', 'pr_b', 1]], 'starting a game with a friend is credited');
   assert.equal(views.size, 2, 'a view row for each person');
   const bobView = views.get(`${made.tableId}/bob`)!.view as { hand: { players: { id: string; cards: (number | null)[] }[] }; mySeat: string };
   for (const p of bobView.hand.players) assert.equal(p.cards.every((c) => c !== null), p.id === bobView.mySeat);

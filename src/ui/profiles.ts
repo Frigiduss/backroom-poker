@@ -1,10 +1,10 @@
 import {
-  AccountStore, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
-  canRefill, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable,
+  ACHIEVEMENTS, Achievement, AccountStore, Counters, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
+  allCounters, canRefill, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable, takeUnlocks, titleFor,
 } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { makeCard } from '../engine/cards';
-import { cardHtml, esc, fmt } from './dom';
+import { cardHtml, esc, fmt, titleHtml } from './dom';
 
 // ---------- the signed-in player ----------
 
@@ -103,6 +103,39 @@ export async function selectPlayer(p: Profile | null) {
   await store.setCurrentId(p?.id ?? null);
 }
 
+// ---------- achievements credited by the table server ----------
+
+let awards: Counters = {};
+let awardsFor = '';
+
+/** What the table server credited the current player for online play (empty offline). */
+export const serverAwards = (): Counters => (current && awardsFor === current.id ? awards : {});
+
+/**
+ * Fetches the current player's online progress, then marks and returns any achievements
+ * that are newly unlocked (online play, or anything else earned since the last look).
+ */
+export async function refreshAwards(): Promise<Achievement[]> {
+  const p = current;
+  if (!p) return [];
+  if (store instanceof OnlineAccountStore) {
+    try {
+      const got = await store.awards(p.id);
+      if (current !== p) return [];
+      awards = got;
+      awardsFor = p.id;
+    } catch {
+      /* offline for now: keep what we had */
+    }
+  }
+  const fresh = takeUnlocks(p, serverAwards());
+  if (fresh.length) await savePlayer();
+  return fresh;
+}
+
+/** The current player's chosen title, if they still hold it. */
+export const currentTitle = (): string | null => (current ? titleFor(current.title, allCounters(current, serverAwards())) : null);
+
 /** Saves the current player. Writes are queued so they land in order. */
 export function savePlayer(): Promise<void> {
   if (!current) return saving;
@@ -126,7 +159,7 @@ export function playerBadgeHtml(): string {
   const p = player();
   return `<button type="button" class="player-badge" id="open-profile" title="Your profile and stats">
     ${avatarHtml(p)}
-    <span class="pb-text"><b>${esc(p.name)}</b><span>Bank <em>${fmt(p.bank)}</em>${saveError ? ' · <i class="unsaved" title="' + esc(saveError) + '">not saved online</i>' : ''}</span></span>
+    <span class="pb-text"><b>${esc(p.name)}${titleHtml(currentTitle())}</b><span>Bank <em>${fmt(p.bank)}</em>${saveError ? ' · <i class="unsaved" title="' + esc(saveError) + '">not saved online</i>' : ''}</span></span>
     <span class="pb-more">Profile</span>
   </button>`;
 }
@@ -376,8 +409,19 @@ function statsHtml(p: Profile): string {
     .join('')}</div>`;
 }
 
+function achievementsStripHtml(p: Profile): string {
+  const c = allCounters(p, serverAwards());
+  const got = ACHIEVEMENTS.filter((a) => a.measure(c) >= a.goal).length;
+  return `<button type="button" class="ach-strip" id="open-achievements">
+    <span class="sl">Achievements</span>
+    <b>${got} <span>of ${ACHIEVEMENTS.length}</span></b>
+    <span class="bar" aria-hidden="true"><i style="width:${(got / ACHIEVEMENTS.length) * 100}%"></i></span>
+    <span class="pb-more">${p.title ? 'See all and titles' : 'See all · pick a title'}</span>
+  </button>`;
+}
+
 /** Player profile: stats, rename, refill, backup, and switching between players on this device. */
-export async function renderProfile(app: HTMLElement, onBack: () => void) {
+export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void) {
   const p = player();
   const others = (await store.list().catch(() => [] as Profile[])).filter((x) => x.id !== p.id).sort((a, b) => b.updatedAt - a.updatedAt);
   const refillable = canRefill(p);
@@ -394,6 +438,7 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
             <input id="rename" class="name-input" maxlength="${NAME_MAX}" value="${esc(p.name)}" aria-label="Player name" autocomplete="off">
             <button type="submit" class="btn btn-sm" id="rename-save" hidden>Save name</button>
           </form>
+          ${titleHtml(currentTitle(), 'big')}
           <span class="since">Playing since ${new Date(p.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
         </div>
         <div class="bank-box">
@@ -406,6 +451,7 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
         ${PROFILE_COLORS.map((c) => `<button type="button" class="swatch" data-color="${c}" style="--pfp:${c}" aria-pressed="${c === p.color}" aria-label="Colour ${c}"></button>`).join('')}
       </div>
       ${statsHtml(p)}
+      ${onAchievements ? achievementsStripHtml(p) : ''}
       <div class="profile-actions">
         <button type="button" class="btn btn-sm" id="export">Download backup</button>
         <button type="button" class="btn btn-sm danger" id="delete">Delete player</button>
@@ -428,8 +474,10 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
     ${accountPanelHtml()}
   </main>`;
 
-  const rerender = () => renderProfile(app, onBack);
+  const rerender = () => renderProfile(app, onBack, onAchievements);
   document.getElementById('back')!.onclick = onBack;
+  const achBtn = document.getElementById('open-achievements');
+  if (achBtn && onAchievements) achBtn.onclick = onAchievements;
 
   const rename = document.getElementById('rename') as HTMLInputElement;
   const renameSave = document.getElementById('rename-save')!;

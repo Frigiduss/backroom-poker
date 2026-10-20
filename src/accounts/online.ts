@@ -2,6 +2,7 @@
 // Supabase's REST endpoints directly with fetch, which keeps the game a small single file.
 // Each signed-in account can hold several players; every player is one row of the
 // `players` table (see supabase/setup.sql), readable and writable only by its owner.
+import { Counters } from './achievements';
 import { Profile, normalizeProfile } from './profile';
 import { AccountStore, KeyValueStorage } from './store';
 
@@ -259,6 +260,24 @@ export class OnlineAccountStore implements AccountStore {
 
   async remove(id: string): Promise<void> {
     await this.rest(`?${this.mine}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', prefer: 'return=minimal' });
+  }
+
+  /**
+   * Achievement progress the table server credited to a player for online play
+   * (supabase/achievements.sql). Empty when there is none, or before that setup is done.
+   */
+  async awards(playerId: string): Promise<Counters> {
+    let rows: { counters: Counters }[];
+    try {
+      rows = (await restRequest(this.auth, `player_awards?select=counters&${this.mine}&player_id=eq.${encodeURIComponent(playerId)}`, {}, this.fetchFn)) as { counters: Counters }[];
+    } catch (err) {
+      // 404: the table hasn't been made yet, which just means nothing was credited.
+      if (err instanceof OnlineError && err.status === 404) return {};
+      throw err;
+    }
+    const out: Counters = {};
+    for (const [k, v] of Object.entries(rows[0]?.counters ?? {})) if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    return out;
   }
 
   // The last player used is remembered per device and per account.
