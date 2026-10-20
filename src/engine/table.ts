@@ -1,5 +1,6 @@
 import { Rng, createRng } from './cards';
-import { ActionRecord, Hand, Stakes } from './hand';
+import { Card } from './cards';
+import { ActionRecord, Hand, Rig, Stakes } from './hand';
 import { Structure, VARIANTS, VariantDef, VariantId } from './variants';
 
 export type Format = 'cash' | 'sng' | 'headsup';
@@ -90,6 +91,8 @@ export class Table {
   /** Seat ids in the current hand, matching hand.players order. */
   handSeats: string[] = [];
   private settledHand: Hand | null = null;
+  /** Testing: cards to deal in the next hand, by seat id. Used once, then cleared. */
+  nextRig: { hole: Record<string, Card[]>; board: Card[] } | null = null;
 
   constructor(config: TableConfig) {
     this.config = config;
@@ -157,6 +160,13 @@ export class Table {
     this.handNumber++;
     this.handSeats = live.map((s) => s.id);
     const buttonId = this.seats[this.button].id;
+    let rig: Rig | undefined;
+    if (this.nextRig) {
+      const hole: Record<number, Card[]> = {};
+      for (const [id, cards] of Object.entries(this.nextRig.hole)) if (this.handSeats.includes(id)) hole[this.handSeats.indexOf(id)] = cards;
+      rig = { hole, board: this.nextRig.board };
+      this.nextRig = null;
+    }
     this.hand = new Hand({
       variant: this.variant,
       structure: this.config.structure,
@@ -164,6 +174,7 @@ export class Table {
       players: live.map((s) => ({ id: s.id, name: s.name, stack: s.stack })),
       button: this.handSeats.indexOf(buttonId),
       rng: this.rng,
+      rig,
     });
     return this.hand;
   }

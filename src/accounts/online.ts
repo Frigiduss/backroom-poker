@@ -181,6 +181,40 @@ export class OnlineAuth {
   }
 }
 
+export interface RestInit {
+  method?: string;
+  body?: unknown;
+  prefer?: string;
+  /** Read as a visitor with only the public key, without a signed-in account. */
+  anonymous?: boolean;
+}
+
+/** One call to the project's database API (`/rest/v1/<path>`), signed in unless `anonymous`. */
+export async function restRequest(auth: OnlineAuth, path: string, init: RestInit = {}, fetchFn: Fetch = (...a) => fetch(...a)): Promise<unknown> {
+  const token = init.anonymous ? auth.config.anonKey : await auth.token();
+  let res: Response;
+  try {
+    res = await fetchFn(`${auth.config.url}/rest/v1/${path}`, {
+      method: init.method ?? 'GET',
+      headers: {
+        apikey: auth.config.anonKey,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.prefer ? { Prefer: init.prefer } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch {
+    throw new OnlineError("Can't reach the account server.");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new OnlineError(friendly(res.status, body as Record<string, unknown>), res.status);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
 interface PlayerRow {
   id: string;
   data: unknown;
@@ -196,38 +230,22 @@ export class OnlineAccountStore implements AccountStore {
     return this.auth.current?.email ?? '';
   }
 
-  private async rest(query: string, init: { method?: string; body?: unknown; prefer?: string } = {}): Promise<unknown> {
-    const token = await this.auth.token();
-    let res: Response;
-    try {
-      res = await this.fetchFn(`${this.auth.config.url}/rest/v1/players${query}`, {
-        method: init.method ?? 'GET',
-        headers: {
-          apikey: this.auth.config.anonKey,
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...(init.prefer ? { Prefer: init.prefer } : {}),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
-    } catch {
-      throw new OnlineError("Can't reach the account server.");
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new OnlineError(friendly(res.status, body as Record<string, unknown>), res.status);
-    }
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
+  private rest(query: string, init: RestInit = {}): Promise<unknown> {
+    return restRequest(this.auth, `players${query}`, init, this.fetchFn);
+  }
+
+  // Always filter by owner: an admin account can read every account's rows (supabase/admin.sql).
+  private get mine(): string {
+    return `owner=eq.${encodeURIComponent(this.auth.current?.userId ?? '')}`;
   }
 
   async list(): Promise<Profile[]> {
-    const rows = (await this.rest('?select=id,data&order=updated_at.desc')) as PlayerRow[];
+    const rows = (await this.rest(`?select=id,data&${this.mine}&order=updated_at.desc`)) as PlayerRow[];
     return rows.map((r) => normalizeProfile({ ...(r.data as object), id: r.id })).filter((p): p is Profile => !!p);
   }
 
   async get(id: string): Promise<Profile | null> {
-    const rows = (await this.rest(`?select=id,data&id=eq.${encodeURIComponent(id)}`)) as PlayerRow[];
+    const rows = (await this.rest(`?select=id,data&${this.mine}&id=eq.${encodeURIComponent(id)}`)) as PlayerRow[];
     return rows[0] ? normalizeProfile({ ...(rows[0].data as object), id: rows[0].id }) : null;
   }
 
@@ -240,7 +258,7 @@ export class OnlineAccountStore implements AccountStore {
   }
 
   async remove(id: string): Promise<void> {
-    await this.rest(`?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', prefer: 'return=minimal' });
+    await this.rest(`?${this.mine}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', prefer: 'return=minimal' });
   }
 
   // The last player used is remembered per device and per account.
