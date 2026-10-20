@@ -103,7 +103,7 @@ export function friendsPanelHtml(): string {
     : `<p>Sign in to an online account to make a table and invite friends with a code.</p>
       <div class="friends-actions"><button type="button" class="btn btn-primary" id="friends-sign-in">Sign in to play online</button></div>`;
   return `<section class="panel friends-panel">
-    <h2 class="step"><span>3</span>Play with friends</h2>
+    <h2 class="step">Play with friends</h2>
     ${body}
   </section>`;
 }

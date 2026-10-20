@@ -1,7 +1,7 @@
 import { Bot, STYLE_NAMES } from '../bots/bot';
 import { simulateEquity, specFromView } from '../bots/equity';
 import { buildView } from '../bots/view';
-import { createRng, makeCard, shuffle } from '../engine/cards';
+import { createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VARIANT_ORDER, VariantId, describeHolding } from '../engine/variants';
@@ -107,8 +107,6 @@ function renderSetup() {
       .join('')}</div>`;
 
   const familyName = { flop: 'Community cards', draw: 'Draw', stud: 'Stud' } as const;
-  const minis = (n: number) => Array.from({ length: n }, (_, i) => `<span style="--k:${i - (n - 1) / 2}"></span>`).join('');
-  const heroCards = [makeCard(14, 3), makeCard(13, 2), makeCard(12, 0), makeCard(11, 1), makeCard(10, 3)];
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
   const cost = entryCost(setup);
   const affordable = canAfford(me, cost);
@@ -117,87 +115,90 @@ function renderSetup() {
     ? `Buy-in <b>${fmt(cost)}</b> from your bank of ${fmt(me.bank)}`
     : `Entry <b>${fmt(cost)}</b> · first place wins ${fmt(prizeFor(1, field))}`;
 
+  const notice = takeNotice();
+  // Every choice redraws the lobby; keep the setup card's options where they were scrolled to.
+  const optionsScroll = app.querySelector('.setup-card .options')?.scrollTop ?? 0;
+  const fan = (n: number) => `<span class="hole" style="--n:${n};--s:${n > 4 ? 5 : n > 2 ? 7 : 9}px" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i};--k:${i - (n - 1) / 2}"></i>`).join('')}</span>`;
+
   app.innerHTML = `
   <main class="lobby">
-    <div class="lobby-top">${(() => {
-      const n = takeNotice();
-      return n ? `<p class="notice" role="status">${esc(n)}</p>` : '';
-    })()}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}${consoleButtonHtml()}${playerBadgeHtml()}</div>
-    <header class="hero">
-      <div class="hero-text">
+    <header class="lobby-head">
+      <div class="brand">
         <span class="eyebrow">Card room · open all night</span>
         <h1>Back Room <em>Poker</em></h1>
-        <p>Pick a game, choose your opponents, and take a seat. Bots range from first-timers to sharks that read your betting.</p>
       </div>
-      <div class="hero-fan" aria-hidden="true">${heroCards.map((c, i) => cardHtml(c, '').replace('class="card', `style="--k:${i - 2}" class="card`)).join('')}</div>
+      <div class="lobby-top">${consoleButtonHtml()}${playerBadgeHtml()}</div>
     </header>
+    ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
-    <section class="panel">
-      <h2 class="step"><span>1</span>Choose a game</h2>
-      <div class="games">
-        ${VARIANT_ORDER.map((id) => {
-          const g = VARIANTS[id];
-          return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${id === setup.variant}">
-            <span class="minis" aria-hidden="true">${minis(g.holeCards)}</span>
-            <span class="name">${g.name}</span>
-            <span class="blurb">${g.blurb}</span>
-            <span class="meta"><span>${familyName[g.family]}</span><span>${g.structures.map((st) => st).join(' · ')}</span><span>${g.maxPlayers} max</span></span>
-          </button>`;
-        }).join('')}
-      </div>
-    </section>
+    <div class="lobby-grid">
+      <section class="panel games-panel">
+        <h2 class="step">Choose a game</h2>
+        <div class="games">
+          ${VARIANT_ORDER.map((id) => {
+            const g = VARIANTS[id];
+            return `<button type="button" class="game-tile" data-variant="${id}" aria-pressed="${id === setup.variant}">
+              <span class="gt-head"><span class="name">${g.name}</span>${fan(g.holeCards)}</span>
+              <span class="blurb">${g.blurb}</span>
+              <span class="meta"><span>${familyName[g.family]}</span><span>${g.structures.join(' · ')}</span><span>${g.maxPlayers} max</span></span>
+            </button>`;
+          }).join('')}
+        </div>
+      </section>
 
-    <section class="panel">
-      <h2 class="step"><span>2</span>Set the table</h2>
-      <div class="options">
-        <div class="field">
-          <span class="flabel">Format</span>
-          ${seg('format', (Object.keys(FORMAT_NAMES) as Format[]).map((f) => [f, FORMAT_NAMES[f].replace(' tournament', '')]), setup.format)}
-          <span class="hint">${
-            setup.format === 'cash'
-              ? 'Blinds stay put. Bots who go broke buy back in, and so can you.'
-              : setup.format === 'sng'
-                ? 'Everyone starts equal, blinds rise, last player with chips wins.'
-                : 'One opponent, rising blinds, play until someone has every chip.'
-          }</span>
+      <aside class="panel setup-card" aria-label="Your table">
+        <div class="ticket">
+          <span class="eyebrow">Your table</span>
+          <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
+          <span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
         </div>
-        <div class="field">
-          <span class="flabel">Bot difficulty</span>
-          ${seg('difficulty', [...DIFFICULTIES.map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty)}
-          <span class="hint">${difficultyHint(setup.difficulty)}</span>
+        <div class="options">
+          <div class="field">
+            <span class="flabel">Format</span>
+            ${seg('format', (Object.keys(FORMAT_NAMES) as Format[]).map((f) => [f, FORMAT_NAMES[f].replace(' tournament', '')]), setup.format)}
+            <span class="hint">${
+              setup.format === 'cash'
+                ? 'Blinds stay put. Bots who go broke buy back in, and so can you.'
+                : setup.format === 'sng'
+                  ? 'Everyone starts equal, blinds rise, last player with chips wins.'
+                  : 'One opponent, rising blinds, play until someone has every chip.'
+            }</span>
+          </div>
+          <div class="field">
+            <span class="flabel">Bot difficulty</span>
+            ${seg('difficulty', [...DIFFICULTIES.map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty).replace('class="seg"', 'class="seg seg-3"')}
+            <span class="hint">${difficultyHint(setup.difficulty)}</span>
+          </div>
+          <div class="field">
+            <label for="opp">Opponents <output id="opp-out">${setup.opponents}</output></label>
+            <input id="opp" class="slider" type="range" min="1" max="${maxOpp}" value="${setup.opponents}" ${setup.format === 'headsup' ? 'disabled' : ''}>
+            <span class="hint">${setup.format === 'headsup' ? 'Heads-up is always one on one.' : `${v.name} seats up to ${v.maxPlayers}.`}</span>
+          </div>
+          <div class="field">
+            <span class="flabel">Betting</span>
+            ${seg('structure', (['NL', 'PL', 'FL'] as Structure[]).map((st) => [st, STRUCTURE_NAMES[st]]), struct, (st) => !v.structures.includes(st))}
+          </div>
+          <div class="field">
+            <span class="flabel">Starting stack</span>
+            ${seg('stack', [['50', '50 BB'], ['100', '100 BB'], ['200', '200 BB']], String(setup.stackBB) as '50' | '100' | '200')}
+          </div>
+          ${setup.format === 'cash' ? '' : `<div class="field">
+            <span class="flabel">Blind levels</span>
+            ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed)}
+            <span class="hint">Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.</span>
+          </div>`}
         </div>
-        <div class="field">
-          <label for="opp">Opponents <output id="opp-out">${setup.opponents}</output></label>
-          <input id="opp" class="slider" type="range" min="1" max="${maxOpp}" value="${setup.opponents}" ${setup.format === 'headsup' ? 'disabled' : ''}>
-          <span class="hint">${setup.format === 'headsup' ? 'Heads-up is always one on one.' : `${v.name} seats up to ${v.maxPlayers}.`}</span>
+        <div class="deal-box">
+          <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? costLine : `You need ${fmt(cost)} chips and your bank has ${fmt(me.bank)}.${setup.format === 'cash' && setup.stackBB > 50 && canAfford(me, 50 * BIG_BLIND) ? ' Try a smaller starting stack.' : ''}`}</span>
+          ${!affordable && canRefill(me) ? '<button type="button" class="btn btn-lg" id="refill">Refill bank</button>' : ''}
+          <button type="button" class="btn btn-primary btn-lg" id="deal" ${affordable ? '' : 'disabled'}>Deal me in</button>
         </div>
-        <div class="field">
-          <span class="flabel">Betting</span>
-          ${seg('structure', (['NL', 'PL', 'FL'] as Structure[]).map((st) => [st, STRUCTURE_NAMES[st]]), struct, (st) => !v.structures.includes(st))}
-        </div>
-        <div class="field">
-          <span class="flabel">Starting stack</span>
-          ${seg('stack', [['50', '50 BB'], ['100', '100 BB'], ['200', '200 BB']], String(setup.stackBB) as '50' | '100' | '200')}
-        </div>
-        <div class="field">
-          <span class="flabel">Blind levels</span>
-          ${seg('blinds', [['slow', 'Slow'], ['normal', 'Normal'], ['turbo', 'Turbo']], setup.blindSpeed, () => setup.format === 'cash')}
-          <span class="hint">${setup.format === 'cash' ? 'Only used in tournaments.' : `Blinds go up every ${HANDS_PER_LEVEL[setup.blindSpeed]} hands.`}</span>
-        </div>
-      </div>
-    </section>
+      </aside>
 
-    ${friendsPanelHtml()}
-
-    <div class="cta-bar">
-      <div class="summary-line"><b>${STRUCTURE_NAMES[struct]} ${v.name}</b><span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
-        <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? costLine : `You need ${fmt(cost)} chips and your bank has ${fmt(me.bank)}.${setup.format === 'cash' && setup.stackBB > 50 && canAfford(me, 50 * BIG_BLIND) ? ' Try a smaller starting stack.' : ''}`}</span></div>
-      <div class="cta-buttons">
-        ${!affordable && canRefill(me) ? '<button type="button" class="btn btn-lg" id="refill">Refill bank</button>' : ''}
-        <button type="button" class="btn btn-primary btn-lg" id="deal" ${affordable ? '' : 'disabled'}>Deal me in</button>
-      </div>
+      ${friendsPanelHtml()}
     </div>
   </main>`;
+  app.querySelector('.setup-card .options')!.scrollTop = optionsScroll;
 
   const update = (fn: () => void) => {
     fn();

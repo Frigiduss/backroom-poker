@@ -1,5 +1,5 @@
 /* Back Room Poker: a dim card room lit by one lamp over the table.
-   Lobby: hero, game picker and table options on dark panels with a sticky "Deal me in" bar.
+   Lobby: game picker on the left, the table setup card with "Deal me in" pinned on the right.
    Play: a racetrack table (leather rail, wood trim, emerald felt) with seats around the rail,
    the board and pot in the middle and a floating action dock along the bottom. */
 :root {
@@ -117,43 +117,48 @@ kbd {
 /* ---------- Lobby ---------- */
 .lobby {
   width: 100%;
-  max-width: 1120px;
+  max-width: 1200px;
   margin: 0 auto;
   display: grid;
-  gap: 20px;
-  padding-block: 28px 0;
+  align-content: start;
+  gap: 18px;
+  padding-block: 18px 40px;
 }
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.lobby-head {
+  display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 8px 4px 4px;
+  justify-content: space-between;
+  gap: 14px 20px;
+  flex-wrap: wrap;
+  padding: 0 4px 14px;
+  border-bottom: 1px solid var(--line);
 }
+.brand { display: grid; gap: 4px; }
 .eyebrow {
   font-family: var(--label);
   text-transform: uppercase;
   letter-spacing: .22em;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--gold);
 }
-.hero h1 {
+.brand h1 {
   font-family: var(--display);
   font-weight: 700;
-  font-size: clamp(40px, 7vw, 76px);
-  line-height: .98;
-  margin: 8px 0 12px;
+  font-size: clamp(32px, 4vw, 44px);
+  line-height: 1;
+  margin: 0;
   letter-spacing: -.01em;
-  text-wrap: balance;
 }
-.hero h1 em {
+.brand h1 em, .ticket b em {
   font-style: italic;
   background: linear-gradient(180deg, var(--gold-hi), var(--gold) 60%, #b9852f);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
-.hero p { margin: 0; color: var(--muted); max-width: 46ch; font-size: 16.5px; }
+.notices { display: grid; gap: 8px; }
+.notices .notice { margin: 0; }
+/* The sign-in screen's card fan. */
 .hero-fan {
   --cw: clamp(58px, 7vw, 84px);
   position: relative;
@@ -172,6 +177,24 @@ kbd {
   box-shadow: 0 10px 24px rgba(0, 0, 0, .5);
 }
 @keyframes fan-in { from { opacity: 0; transform: rotate(0) translateY(30px); } }
+
+/* Games and friends on the left, the table setup and "Deal me in" pinned on the right. */
+.lobby-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "games setup" "friends setup";
+  gap: 18px;
+  align-items: start;
+}
+.games-panel { grid-area: games; }
+.setup-card { grid-area: setup; }
+.lobby-grid > .friends-panel { grid-area: friends; }
+/* On wide screens the setup card stays in view, and on short ones its options scroll so "Deal me in" stays on screen (134px is the header above it). */
+@media (min-width: 981px) {
+  .setup-card { position: sticky; top: 16px; max-height: max(480px, calc(100vh - 134px)); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .setup-card .options { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+}
 
 .panel {
   background: linear-gradient(180deg, rgba(24, 35, 30, .82), rgba(15, 22, 19, .82));
@@ -197,92 +220,120 @@ kbd {
 }
 .games {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
 }
 .game-tile {
   position: relative;
   text-align: left;
   border: 1px solid var(--line);
-  background: linear-gradient(165deg, #1b2a22, #121b17);
+  background: linear-gradient(165deg, #1a271f, #111914);
   border-radius: 14px;
-  padding: 16px 16px 14px;
-  display: grid;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  transition: border-color .15s, transform .15s, box-shadow .15s;
+  transition: border-color .15s, transform .15s, box-shadow .15s, background .15s;
 }
 .game-tile:hover { border-color: var(--line-2); transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, .35); }
 .game-tile[aria-pressed="true"] {
   border-color: var(--gold);
-  background: linear-gradient(165deg, #1f3a2c, #13241b);
-  box-shadow: 0 0 0 1px var(--gold), 0 12px 30px rgba(230, 184, 92, .12);
+  background: linear-gradient(165deg, #21402f, #132519);
+  box-shadow: inset 0 0 0 1px var(--gold), 0 12px 30px rgba(230, 184, 92, .12);
 }
-.game-tile[aria-pressed="true"]::after {
-  content: '✓';
-  position: absolute; top: 12px; right: 12px;
-  width: 22px; height: 22px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: var(--gold); color: var(--ink); font-weight: 700; font-size: 13px;
-}
-.game-tile .name { font-family: var(--display); font-size: 21px; font-weight: 700; }
-.game-tile .blurb { color: var(--muted); font-size: 13.5px; }
-.game-tile .meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.gt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.game-tile .name { font-family: var(--display); font-size: 19px; font-weight: 700; line-height: 1.15; }
+.game-tile .blurb { color: var(--muted); font-size: 13px; line-height: 1.38; flex: 1; }
+.game-tile .meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
 .game-tile .meta span {
-  font-family: var(--label); letter-spacing: .06em; text-transform: uppercase; font-size: 11.5px;
+  font-family: var(--label); letter-spacing: .06em; text-transform: uppercase; font-size: 11px;
   color: var(--muted); background: rgba(255, 255, 255, .05); border-radius: 999px; padding: 2px 8px;
 }
-.minis { position: relative; height: 30px; display: block; margin: 0 0 4px 8px; }
-.minis span {
-  position: absolute; left: calc(var(--k) * 9px + 20px); bottom: 0;
-  width: 18px; height: 26px; border-radius: 3px;
-  background: repeating-linear-gradient(45deg, var(--back-a) 0 3px, var(--back-b) 3px 6px);
+.game-tile[aria-pressed="true"] .meta span { color: var(--gold-hi); background: rgba(230, 184, 92, .12); }
+/* Face-down hole cards: one for each card the game deals you, always the same size. */
+.hole { position: relative; flex: none; width: calc(16px + (var(--n) - 1) * var(--s)); height: 26px; margin: 2px 4px 0 0; }
+.hole i {
+  position: absolute; left: calc(var(--i) * var(--s)); bottom: 0;
+  width: 16px; height: 23px; border-radius: 3px;
+  background: repeating-linear-gradient(45deg, var(--back-a) 0 2.5px, var(--back-b) 2.5px 5px);
   border: 1.5px solid var(--ivory);
-  transform-origin: 50% 130%;
-  transform: rotate(calc(var(--k) * 8deg));
-  box-shadow: 0 2px 4px rgba(0, 0, 0, .4);
+  transform-origin: 50% 140%;
+  transform: rotate(calc(var(--k) * 5deg));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .45);
 }
-.game-tile[aria-pressed="true"] .minis span { background: linear-gradient(160deg, var(--ivory), var(--ivory-2)); }
+.game-tile[aria-pressed="true"] .hole i { border-color: var(--gold-hi); }
 
+@media (max-width: 980px) {
+  .lobby-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "games" "setup" "friends"; }
+}
+
+/* The table setup card. */
+.setup-card { padding: 0; overflow: hidden; display: grid; }
+.ticket {
+  display: grid;
+  gap: 3px;
+  padding: 16px 20px 14px;
+  background:
+    radial-gradient(ellipse 90% 120% at 30% 0%, rgba(255, 255, 255, .08), transparent 60%),
+    linear-gradient(160deg, var(--felt-hi), var(--felt) 55%, var(--felt-deep));
+  border-bottom: 1px solid rgba(230, 184, 92, .3);
+}
+.ticket b { font-family: var(--display); font-size: 23px; line-height: 1.12; }
+.ticket > span:last-child { color: rgba(241, 244, 239, .78); font-size: 14px; }
+.ticket .eyebrow { color: var(--gold-hi); font-size: 11.5px; }
 .options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 22px 28px;
+  gap: 15px;
+  padding: 16px 20px 18px;
 }
-.field { display: grid; gap: 9px; min-width: 0; align-content: start; }
+.field { display: grid; gap: 7px; min-width: 0; align-content: start; }
 .field > label, .field > .flabel {
-  font-family: var(--label); text-transform: uppercase; letter-spacing: .12em; font-size: 13px; color: var(--muted);
+  font-family: var(--label); text-transform: uppercase; letter-spacing: .12em; font-size: 12.5px; color: var(--muted);
   display: flex; align-items: center; justify-content: space-between;
 }
 .field output { font-family: var(--body); font-size: 15px; font-weight: 700; color: var(--gold); letter-spacing: 0; }
-.field .hint { color: var(--faint); font-size: 13px; }
+.field .hint { color: var(--faint); font-size: 12.5px; line-height: 1.35; }
+.field input[type="range"].slider { margin: 6px 0 2px; }
+.deal-box {
+  display: grid;
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--line);
+  background: rgba(0, 0, 0, .22);
+}
+.deal-box .cost { color: var(--muted); font-size: 14px; text-align: center; }
+.deal-box .cost b { color: var(--gold); }
+.deal-box .cost.short { color: var(--bad); }
+.deal-box .btn-lg { width: 100%; }
 .seg {
-  display: flex; flex-wrap: wrap; gap: 4px;
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px;
   background: rgba(0, 0, 0, .28);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 4px;
 }
+.seg.seg-3 { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .seg button {
-  flex: 1 1 auto;
   border: 0;
   background: transparent;
   border-radius: 8px;
-  padding: 7px 12px;
+  padding: 8px 6px;
   font-size: 14px;
   color: var(--muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background .15s, color .15s;
 }
-.seg button:hover:not(:disabled) { color: var(--text); background: rgba(255, 255, 255, .05); }
+.seg button:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--text); background: rgba(255, 255, 255, .05); }
 .seg button[aria-pressed="true"] {
   background: linear-gradient(180deg, var(--gold-hi), var(--gold));
   color: var(--ink);
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
 }
-.seg button:disabled { opacity: .3; cursor: not-allowed; }
+.seg button:disabled { opacity: .3; cursor: not-allowed; text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, .3); }
 .text-input {
   background: rgba(0, 0, 0, .28);
   border: 1px solid var(--line-2);
@@ -315,28 +366,6 @@ input[type="range"]::-moz-range-thumb {
 }
 input[type="range"]:disabled { opacity: .35; }
 
-.cta-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 20px;
-  flex-wrap: wrap;
-  margin: 0 -16px;
-  padding: 14px max(16px, calc((100% - 1120px) / 2 + 16px)) calc(14px + env(safe-area-inset-bottom, 0px));
-  background: rgba(10, 15, 12, .94);
-  border-top: 1px solid var(--line);
-  box-shadow: 0 -12px 30px rgba(0, 0, 0, .45);
-  backdrop-filter: blur(8px);
-}
-.summary-line { display: grid; gap: 1px; min-width: 0; }
-.summary-line b { font-family: var(--display); font-size: 20px; }
-.summary-line span { color: var(--muted); font-size: 14px; }
-.summary-line .cost b { font-family: var(--body); font-size: inherit; color: var(--gold); }
-.summary-line .cost.short { color: var(--bad); }
-.cta-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
 .btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); transform: none; }
 .btn-sm { padding: 7px 13px; font-size: 14px; border-radius: 9px; }
 .btn.danger { color: var(--bad); }
@@ -354,7 +383,7 @@ input[type="range"]:disabled { opacity: .35; }
   box-shadow: 0 0 0 2px rgba(0, 0, 0, .35), 0 4px 10px rgba(0, 0, 0, .4);
 }
 .pfp.lg { width: 72px; height: 72px; font-size: 34px; }
-.lobby-top { display: flex; justify-content: flex-end; margin-bottom: -8px; }
+.lobby-top { display: flex; justify-content: flex-end; }
 .player-badge {
   display: flex; align-items: center; gap: 10px;
   border: 1px solid var(--line-2);
@@ -1123,16 +1152,16 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   }
 }
 @media (max-width: 720px) {
-  .hero { grid-template-columns: 1fr; }
-  .hero-fan { justify-self: center; margin: 4px 0 8px; --cw: 58px; }
   .panel { padding: 16px; }
   .games { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .game-tile { padding: 12px 12px 10px; gap: 4px; }
-  .game-tile .name { font-size: 17px; }
+  .game-tile { padding: 11px 11px 10px; gap: 5px; }
+  .gt-head { flex-direction: column-reverse; gap: 6px; }
+  .hole { margin: 0 0 0 3px; }
+  .game-tile .name { font-size: 16.5px; }
   .game-tile .blurb { font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .game-tile .meta span:not(:first-child) { display: none; }
-  .minis { transform: scale(.8); transform-origin: left bottom; margin-bottom: 0; }
-  .game-tile[aria-pressed="true"]::after { top: 8px; right: 8px; }
+  .setup-card { padding: 0; }
+  .ticket, .options, .deal-box { padding-inline: 16px; }
   .icon-btn span { display: none; }
   .icon-btn { padding: 8px; }
   .topbar .title { font-size: 17px; }
@@ -1155,7 +1184,6 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   .sizer input[type="number"] { width: 82px; }
   .preset { padding: 5px 9px; }
   .actionbar .status { text-align: left; }
-  .cta-bar .btn-lg { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
