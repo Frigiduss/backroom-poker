@@ -247,6 +247,8 @@ function renderSetup() {
     settings: {
       variant: setup.variant, structure: struct, format: setup.format, difficulty: setup.difficulty,
       stackBB: setup.stackBB, blindSpeed: setup.blindSpeed, seats: setup.format === 'headsup' ? 2 : setup.opponents + 1,
+      // A blackjack table takes the limits and bots from the blackjack card.
+      ...(setup.game === 'blackjack' ? { game: 'blackjack' as const, bjLimits: setup.bj.limits, bots: setup.bj.bots } : {}),
     },
   }));
   bindConsoleButton();
@@ -1118,6 +1120,7 @@ async function boot() {
       return prefs.reveal;
     },
     onlineTable: activeTable,
+    blackjack: () => blackjack?.dev ?? null,
     announced: (text) => {
       announcement = text;
       if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();

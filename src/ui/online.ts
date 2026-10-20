@@ -15,6 +15,8 @@ import { checkAchievements } from './achievements';
 import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
 import { SoundName, play } from './sound';
 import { consoleEnabled, toggleConsole } from './console';
+import { BjScreen } from './online-blackjack';
+import { BJ_RULES_LINE, limitText } from './blackjack';
 
 export interface TablePrefs {
   fourColor: boolean;
@@ -82,7 +84,7 @@ export function stopOnline() {
 export const onlineActive = (): boolean => !!active;
 
 /** The online table on screen, for the developer console. */
-export const activeTable = (): { tableId: string; code: string } | null => (active ? active.where : null);
+export const activeTable = (): { tableId: string; code: string; game: 'poker' | 'blackjack' } | null => (active ? active.where : null);
 
 // ---------- lobby panel ----------
 
@@ -167,6 +169,7 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
 }
 
 function gameName(s: TableSettings): string {
+  if (s.game === 'blackjack') return 'Blackjack';
   return `${STRUCTURE_NAMES[s.structure]} ${VARIANTS[s.variant].name}`;
 }
 
@@ -209,14 +212,25 @@ class OnlineTable {
   private resizeHandler = () => this.render();
   /** The last finished hand checked for achievements the server credited. */
   private awardsHand = -1;
+  /** Draws a blackjack table, when this is one. */
+  private readonly bj = new BjScreen({
+    move: (move, amount) => {
+      const v = this.view;
+      if (v.bj) void this.send({ op: 'bj', tableId: v.tableId, round: v.bj.roundNumber, move, amount });
+    },
+    rebuy: () => void this.send({ op: 'rebuy', tableId: this.view.tableId }),
+    back: () => void this.send({ op: 'back', tableId: this.view.tableId }),
+    sending: () => this.sending,
+    secondsLeft: (at) => this.secondsLeft(at),
+  });
 
   constructor(view: TableView) {
     this.view = view;
     this.skew = Date.now() - view.serverNow;
   }
 
-  get where(): { tableId: string; code: string } {
-    return { tableId: this.view.tableId, code: this.view.code };
+  get where(): { tableId: string; code: string; game: 'poker' | 'blackjack' } {
+    return { tableId: this.view.tableId, code: this.view.code, game: this.view.settings.game ?? 'poker' };
   }
 
   start() {
@@ -278,6 +292,11 @@ class OnlineTable {
     // The server counts achievements as each hand finishes; look for new ones then.
     if (next.mySeat && next.hand?.result && next.handNumber !== this.awardsHand) {
       this.awardsHand = next.handNumber;
+      void checkAchievements();
+    }
+    const round = next.bj?.round;
+    if (next.mySeat && round?.phase === 'done' && next.bj!.roundNumber !== this.awardsHand) {
+      this.awardsHand = next.bj!.roundNumber;
       void checkAchievements();
     }
   }
@@ -361,6 +380,7 @@ class OnlineTable {
 
   private absorbLog(withSound: boolean) {
     const v = this.view;
+    if (v.bj) return this.bj.absorb(v, withSound && hooks.prefs().sound);
     const hand = v.hand;
     if (!hand) return;
     if (this.logHand !== v.handNumber) {
@@ -411,6 +431,7 @@ class OnlineTable {
     if (this.stopped) return;
     const v = this.view;
     if (v.phase === 'lobby') return this.renderRoom();
+    if (v.bj) return this.renderBlackjack();
     const hand = v.hand;
     if (!hand) return this.renderRoom();
     const variant = VARIANTS[hand.variant];
@@ -455,6 +476,39 @@ class OnlineTable {
     this.bind();
   }
 
+  /** The top bar, shared by poker and blackjack. */
+  private topbarHtml(title: string, info: string, log: boolean): string {
+    const v = this.view;
+    const prefs = hooks.prefs();
+    const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+    return `<header class="topbar">
+        <div class="tb-game">
+          <span class="title">${title}</span>
+          <span class="chip-info">${info} · Table <b class="code-tag">${esc(v.code)}</b>${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
+        </div>
+        <div class="tb-actions">
+          ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
+          ${log ? `<button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>` : ''}
+          <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
+          <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
+        </div>
+      </header>`;
+  }
+
+  private renderBlackjack() {
+    const v = this.view;
+    hooks.app.innerHTML = `
+    <div class="game bj online ${hooks.prefs().fourColor ? 'four-color' : ''}">
+      ${this.topbarHtml('Blackjack', this.bj.title(v.bj!), false)}
+      ${this.problem ? `<p class="net-problem" role="status">${esc(this.problem)}</p>` : ''}
+      <div class="table-wrap">${this.bj.feltHtml(v)}</div>
+      <div class="actionbar">${this.bj.actionsHtml(v)}</div>
+    </div>
+    ${this.modalHtml()}`;
+    this.bind();
+    this.bj.bind(v, () => this.render());
+  }
+
   private secondsLeft(at: number | null): number {
     return at === null ? 0 : Math.max(0, Math.ceil((at + this.skew - Date.now()) / 1000));
   }
@@ -473,15 +527,17 @@ class OnlineTable {
     const s = v.settings;
     const seats: string[] = v.members.filter((m) => !m.left).map((m) =>
       `<li class="filled"><span class="avatar lv-human">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="rs-name">${esc(m.name)}${titleHtml(m.title)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
-    const open = Math.max(0, s.seats - seats.length);
-    for (let i = 0; i < open; i++) seats.push(`<li class="open"><span class="avatar lv-${s.difficulty === 'mixed' ? 'medium' : s.difficulty}">?</span><span class="rs-name">Open seat</span><span class="rs-tag">${s.difficulty === 'mixed' ? 'Bot' : `${DIFFICULTY_NAMES[s.difficulty]} bot`} if nobody joins</span></li>`);
+    const bj = s.game === 'blackjack';
+    const open = bj ? Math.min(s.bots ?? 0, Math.max(0, s.seats - seats.length)) : Math.max(0, s.seats - seats.length);
+    if (bj) for (let i = 0; i < open; i++) seats.push('<li class="open"><span class="avatar lv-medium">?</span><span class="rs-name">Bot</span><span class="rs-tag">Plays by the book</span></li>');
+    else for (let i = 0; i < open; i++) seats.push(`<li class="open"><span class="avatar lv-${s.difficulty === 'mixed' ? 'medium' : s.difficulty}">?</span><span class="rs-name">Open seat</span><span class="rs-tag">${s.difficulty === 'mixed' ? 'Bot' : `${DIFFICULTY_NAMES[s.difficulty]} bot`} if nobody joins</span></li>`);
     const link = `${location.origin}${location.pathname}?join=${v.code}`;
     hooks.app.innerHTML = `
     <main class="lobby room">
       <section class="panel room-card">
         <span class="eyebrow">Private table</span>
         <h1>${esc(gameName(s))}</h1>
-        <p class="room-meta">${FORMAT_NAMES[s.format]} · ${s.seats} seats · ${s.stackBB} big blind stacks${s.format === 'cash' ? '' : ` · ${s.blindSpeed} blinds`}</p>
+        <p class="room-meta">${bj ? `Limits ${limitText(s.bjLimits ?? 'low')} · up to ${s.seats} spots · ${BJ_RULES_LINE}` : `${FORMAT_NAMES[s.format]} · ${s.seats} seats · ${s.stackBB} big blind stacks${s.format === 'cash' ? '' : ` · ${s.blindSpeed} blinds`}`}</p>
         <div class="room-code-box">
           <span class="sl">Table code</span>
           <span class="room-code" aria-label="Table code ${esc(v.code.split('').join(' '))}">${esc(v.code)}</span>
@@ -752,11 +808,11 @@ class OnlineTable {
       const tourney = v.handsUntilNextLevel !== null;
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>Leave the table?</h2>
-        <p>${v.phase === 'over' ? 'You go back to the game menu.' : `A bot plays your seat while you're gone. Come back any time with the code <b>${esc(v.code)}</b>${tourney ? '.' : ' and your chips will be waiting.'}`}</p>
+        <p>${v.bj ? `Your chips stay in your spot. Come back any time with the code <b>${esc(v.code)}</b>.` : v.phase === 'over' ? 'You go back to the game menu.' : `A bot plays your seat while you're gone. Come back any time with the code <b>${esc(v.code)}</b>${tourney ? '.' : ' and your chips will be waiting.'}`}</p>
         <div class="row"><button type="button" class="btn" id="close-modal">Keep playing</button><button type="button" class="btn btn-primary" id="confirm-leave">Leave</button></div>
       </div></div>`;
     }
-    if (v.phase === 'over') {
+    if (v.phase === 'over' && !v.bj) {
       const me = v.seats.find((s) => s.you);
       const ranked = [...v.seats].sort((a, b) => (a.place ?? 1) - (b.place ?? 1) || b.stack - a.stack);
       const winner = ranked[0];
@@ -865,6 +921,10 @@ class OnlineTable {
       }
     };
     const k = e.key.toLowerCase();
+    if (this.view.bj && k !== 'm') {
+      if (this.bj.key(k)) e.preventDefault();
+      return;
+    }
     if (k === 'f') click('do-fold');
     else if (k === 'c' || k === 'k') click(document.getElementById('do-check') ? 'do-check' : 'do-call');
     else if (k === 'r') click('do-raise');
