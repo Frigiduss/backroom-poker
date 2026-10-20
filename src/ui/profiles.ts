@@ -3,7 +3,8 @@ import {
   canRefill, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable,
 } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
-import { esc, fmt } from './dom';
+import { makeCard } from '../engine/cards';
+import { cardHtml, esc, fmt } from './dom';
 
 // ---------- the signed-in player ----------
 
@@ -150,42 +151,178 @@ function download(name: string, text: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ---------- first visit ----------
+// ---------- sign in, sign up, pick a name ----------
 
-/** Shown when there are no players yet. */
-export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedName = '', settings: Record<string, unknown> = welcomeSettings) {
-  app.innerHTML = `
-  <main class="lobby welcome">
-    <section class="panel welcome-card">
-      <span class="eyebrow">Back Room Poker</span>
-      ${(() => {
-        const n = takeNotice();
-        return n ? `<p class="notice" role="status">${esc(n)}</p>` : '';
-      })()}
-      <h1>Who's playing?</h1>
-      <p>Your player keeps a chip bank between games, tracks your record, and remembers your table settings. You start with <b>${fmt(STARTING_BANK)}</b> chips.</p>
-      <form id="create-form" class="create-row">
-        <input id="new-name" class="text-input" maxlength="${NAME_MAX}" placeholder="Your name" value="${esc(suggestedName)}" autocomplete="off" required>
-        <button type="submit" class="btn btn-primary">Create player</button>
-      </form>
-      <p class="fine">${isOnline() ? `Saved to your online account (${esc(auth?.current?.email ?? '')}).` : 'Players are saved in this browser.'} Have a backup file? <label class="link-btn">Import it<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
-      <p class="form-error" id="form-error" role="alert"></p>
+/** Where links in account emails send people back to: this page, without any old hash. */
+const returnUrl = () => location.href.split('#')[0];
+
+/** The email typed last, kept when switching between signing in and signing up. */
+let lastEmail = '';
+
+/** Full-screen layout shared by the sign-in, name and password screens: the brand on one side, a card on the other. */
+function authShell(card: string, tagline: string): string {
+  const fan = [makeCard(14, 3), makeCard(14, 2), makeCard(13, 1), makeCard(13, 0), makeCard(12, 3)]
+    .map((c, i) => cardHtml(c, '').replace('class="card', `style="--k:${i - 2}" class="card`))
+    .join('');
+  const n = takeNotice();
+  return `<main class="auth">
+    <section class="auth-brand">
+      <span class="eyebrow">Card room · open all night</span>
+      <h1>Back Room <em>Poker</em></h1>
+      <p>${tagline}</p>
+      <div class="hero-fan auth-fan" aria-hidden="true">${fan}</div>
     </section>
-    ${accountPanelHtml('Already have an online account? Sign in to get your players back.')}
+    <section class="auth-card">
+      ${n ? `<p class="notice" role="status">${esc(n)}</p>` : ''}
+      ${card}
+    </section>
   </main>`;
+}
+
+/** Runs an account action with the card's buttons disabled, showing any error under the form. */
+async function busy(app: HTMLElement, fn: () => Promise<void>) {
+  const btns = app.querySelectorAll<HTMLButtonElement>('.auth-card button, .account-panel button');
+  btns.forEach((b) => (b.disabled = true));
+  const err = document.getElementById('auth-error') ?? document.getElementById('form-error');
+  if (err) err.textContent = '';
+  try {
+    await fn();
+  } catch (e) {
+    if (err?.isConnected) err.textContent = (e as Error).message;
+  } finally {
+    btns.forEach((b) => (b.disabled = false));
+  }
+}
+
+/** The first screen when online accounts are on: sign in, or create an account. */
+export function renderAuth(app: HTMLElement, onReady: () => void, mode: 'signin' | 'signup' = 'signin', message = '') {
+  if (!auth) return void openPlayer(onReady, app);
+  const a = auth;
+  const signup = mode === 'signup';
+  app.innerHTML = authShell(`
+    <div class="seg auth-tabs" role="group" aria-label="Sign in or create an account">
+      <button type="button" data-mode="signin" aria-pressed="${!signup}">Sign in</button>
+      <button type="button" data-mode="signup" aria-pressed="${signup}">Create account</button>
+    </div>
+    <div class="auth-head">
+      <h2>${signup ? 'Take a seat' : 'Welcome back'}</h2>
+      <p class="auth-sub">${signup
+        ? `New players start with <b>${fmt(STARTING_BANK)}</b> chips. Your bank and record follow you to any device.`
+        : 'Sign in to pick up your chips and stats where you left them.'}</p>
+    </div>
+    <form id="auth-form" class="auth-form">
+      <label class="auth-field"><span>Email</span>
+        <input id="auth-email" class="text-input" type="email" autocomplete="email" value="${esc(lastEmail)}" required>
+      </label>
+      <label class="auth-field"><span>Password</span>
+        <span class="pw-wrap">
+          <input id="auth-pass" class="text-input" type="password" minlength="6" autocomplete="${signup ? 'new-password' : 'current-password'}" ${signup ? 'placeholder="At least 6 characters"' : ''} required>
+          <button type="button" class="pw-show" id="pw-show" aria-pressed="false">Show</button>
+        </span>
+      </label>
+      <button type="submit" class="btn btn-primary btn-lg auth-go">${signup ? 'Create account' : 'Sign in'}</button>
+    </form>
+    ${signup ? '' : '<button type="button" class="link-btn plain auth-forgot" id="forgot">Forgot your password?</button>'}
+    <p class="form-ok" id="auth-ok" role="status">${esc(message)}</p>
+    <p class="form-error" id="auth-error" role="alert"></p>
+    <div class="auth-alt"><span>or</span></div>
+    <button type="button" class="btn auth-offline" id="play-offline">Play offline on this device</button>
+  `, 'Pull up a chair. Eight games, five kinds of bots, and a chip bank that follows you from table to table.');
+
+  const email = document.getElementById('auth-email') as HTMLInputElement;
+  const pass = document.getElementById('auth-pass') as HTMLInputElement;
+  (lastEmail ? pass : email).focus();
+  email.oninput = () => (lastEmail = email.value.trim());
+
+  app.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => (b.onclick = () => renderAuth(app, onReady, b.dataset.mode as 'signin' | 'signup')));
+  const show = document.getElementById('pw-show') as HTMLButtonElement;
+  show.onclick = () => {
+    const on = pass.type === 'password';
+    pass.type = on ? 'text' : 'password';
+    show.textContent = on ? 'Hide' : 'Show';
+    show.setAttribute('aria-pressed', String(on));
+  };
+
+  document.getElementById('auth-form')!.onsubmit = (e) => {
+    e.preventDefault();
+    const addr = email.value.trim();
+    lastEmail = addr;
+    busy(app, async () => {
+      if (signup) {
+        const session = await a.signUp(addr, pass.value, returnUrl());
+        if (!session) return renderAuth(app, onReady, 'signin', `Almost there. We sent a link to ${addr}: open it, then sign in here.`);
+      } else {
+        await a.signIn(addr, pass.value);
+      }
+      await goOnline(onReady, app);
+    });
+  };
+  document.getElementById('forgot')?.addEventListener('click', () => {
+    const addr = email.value.trim();
+    if (!addr || !email.checkValidity()) {
+      document.getElementById('auth-error')!.textContent = 'Type your email above first, then click this again.';
+      email.focus();
+      return;
+    }
+    busy(app, async () => {
+      await a.sendPasswordReset(addr, returnUrl());
+      document.getElementById('auth-ok')!.textContent = `If there's an account for ${addr}, a link to reset the password is on its way.`;
+    });
+  });
+  document.getElementById('play-offline')!.onclick = () => {
+    store = local;
+    void openPlayer(onReady, app);
+  };
+}
+
+/** Shown when there are no players yet: a new account (or this device) picks a name and colour. */
+export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedName = '', settings: Record<string, unknown> = welcomeSettings) {
+  let color = PROFILE_COLORS[0];
+  const signedIn = isOnline() && auth?.current;
+  app.innerHTML = authShell(`
+    <div class="auth-head">
+      <h2>Pick your name</h2>
+      <p class="auth-sub">It's what the table calls you. You start with <b>${fmt(STARTING_BANK)}</b> chips.</p>
+    </div>
+    <form id="create-form" class="auth-form">
+      <div class="name-row">
+        <span class="pfp lg" id="name-pfp" style="--pfp:${color}" aria-hidden="true">${esc((suggestedName || '?').slice(0, 1).toUpperCase())}</span>
+        <input id="new-name" class="text-input name-big" maxlength="${NAME_MAX}" placeholder="Your name" value="${esc(suggestedName)}" autocomplete="nickname" aria-label="Your name" required>
+      </div>
+      <div class="colors" role="group" aria-label="Badge colour">
+        ${PROFILE_COLORS.map((c) => `<button type="button" class="swatch" data-color="${c}" style="--pfp:${c}" aria-pressed="${c === color}" aria-label="Colour ${c}"></button>`).join('')}
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg auth-go">Deal me in</button>
+    </form>
+    <p class="form-error" id="form-error" role="alert"></p>
+    <p class="fine auth-foot">${signedIn
+      ? `Signed in as <b>${esc(auth!.current!.email)}</b>. <button type="button" class="link-btn plain" id="not-you">Not you?</button>`
+      : `Saved in this browser only.${auth ? ' <button type="button" class="link-btn plain" id="to-auth">Sign in instead</button> ·' : ''} <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label>`}</p>
+  `, 'One last thing before the cards come out.');
+
   const input = document.getElementById('new-name') as HTMLInputElement;
+  const pfp = document.getElementById('name-pfp')!;
   input.focus();
-  document.getElementById('create-form')!.onsubmit = async (e) => {
+  input.oninput = () => (pfp.textContent = (cleanName(input.value) || '?').slice(0, 1).toUpperCase());
+  app.querySelectorAll<HTMLButtonElement>('[data-color]').forEach((b) => (b.onclick = () => {
+    color = b.dataset.color!;
+    pfp.style.setProperty('--pfp', color);
+    app.querySelectorAll<HTMLButtonElement>('[data-color]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  document.getElementById('create-form')!.onsubmit = (e) => {
     e.preventDefault();
     const name = cleanName(input.value);
     if (!name) return;
-    const p = createProfile(name, { color: PROFILE_COLORS[0], settings });
-    await store.put(p);
-    await selectPlayer(p);
-    onDone();
+    busy(app, async () => {
+      const p = createProfile(name, { color, settings });
+      await store.put(p);
+      await selectPlayer(p);
+      onDone();
+    });
   };
+  document.getElementById('not-you')?.addEventListener('click', () => busy(app, () => signOutTo(app, onDone)));
+  document.getElementById('to-auth')?.addEventListener('click', () => renderAuth(app, onDone));
   bindImport(onDone);
-  bindAccountPanel(app, onDone);
 }
 
 function bindImport(onDone: () => void) {
@@ -203,6 +340,16 @@ function bindImport(onDone: () => void) {
       document.getElementById('form-error')!.textContent = (err as Error).message;
     }
   };
+}
+
+/** Signs out and goes back to the sign-in screen. */
+async function signOutTo(app: HTMLElement, onReady: () => void) {
+  await savePlayer();
+  await auth?.signOut();
+  store = local;
+  current = null;
+  saveError = '';
+  renderAuth(app, onReady);
 }
 
 // ---------- profile screen ----------
@@ -278,7 +425,7 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
       <p class="fine">${isOnline() ? 'These players are saved online and open on any device where you sign in.' : 'Players are saved in this browser only. Sign in below, or use a backup file, to move them to another device.'} <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
       <p class="form-error" id="form-error" role="alert"></p>
     </section>
-    ${accountPanelHtml('Sign in to keep your players on every device you play on.')}
+    ${accountPanelHtml()}
   </main>`;
 
   const rerender = () => renderProfile(app, onBack);
@@ -350,9 +497,9 @@ export async function renderProfile(app: HTMLElement, onBack: () => void) {
   bindAccountPanel(app, onBack);
 }
 
-// ---------- online account ----------
+// ---------- online account (profile page) ----------
 
-function accountPanelHtml(pitch: string): string {
+function accountPanelHtml(): string {
   if (!auth) return '';
   const s = auth.current;
   if (s && isOnline()) {
@@ -367,119 +514,51 @@ function accountPanelHtml(pitch: string): string {
       <h2 class="step">Online account</h2>
       <p>Signed in as <b>${esc(s.email)}</b>, but the account server couldn't be reached, so you're using this device's players.</p>
       <div class="row-btns"><button type="button" class="btn btn-sm btn-primary" id="retry-online">Try again</button><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
-      <p class="form-error" id="account-error" role="alert"></p>
+      <p class="form-error" id="form-error" role="alert"></p>
     </section>`;
   }
   return `<section class="panel account-panel">
     <h2 class="step">Online account</h2>
-    <p>${pitch}</p>
-    <form id="account-form" class="account-form">
-      <input id="acct-email" class="text-input" type="email" placeholder="Email" autocomplete="email" required>
-      <input id="acct-pass" class="text-input" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6" required>
-      <div class="row-btns">
-        <button type="submit" class="btn btn-primary btn-sm" id="sign-in">Sign in</button>
-        <button type="button" class="btn btn-sm" id="sign-up">Create account</button>
-        <button type="button" class="link-btn plain" id="forgot">Forgot password?</button>
-      </div>
-    </form>
-    <p class="form-ok" id="account-ok" role="status"></p>
-    <p class="form-error" id="account-error" role="alert"></p>
+    <p>You're playing offline. Sign in to keep your players on every device; the ones on this device come with you into a new account.</p>
+    <div class="row-btns"><button type="button" class="btn btn-sm btn-primary" id="go-auth">Sign in or create an account</button></div>
   </section>`;
 }
 
-/** Where links in account emails send people back to: this page, without any old hash. */
-const returnUrl = () => location.href.split('#')[0];
-
 function bindAccountPanel(app: HTMLElement, onReady: () => void) {
   if (!auth) return;
-  const a = auth;
-  const err = document.getElementById('account-error');
-  const ok = document.getElementById('account-ok');
-  const say = (msg: string, good = false) => {
-    if (err) err.textContent = good ? '' : msg;
-    if (ok) ok.textContent = good ? msg : '';
-  };
-  const busy = async (fn: () => Promise<void>) => {
-    const btns = app.querySelectorAll<HTMLButtonElement>('.account-panel button');
-    btns.forEach((b) => (b.disabled = true));
-    try {
-      await fn();
-    } catch (e) {
-      say((e as Error).message);
-    } finally {
-      btns.forEach((b) => (b.disabled = false));
-    }
-  };
-
-  document.getElementById('sign-out')?.addEventListener('click', () => busy(async () => {
-    await savePlayer();
-    await a.signOut();
-    store = local;
-    saveError = '';
-    await openPlayer(onReady, app);
-  }));
-  document.getElementById('retry-online')?.addEventListener('click', () => busy(async () => {
+  document.getElementById('sign-out')?.addEventListener('click', () => busy(app, () => signOutTo(app, onReady)));
+  document.getElementById('go-auth')?.addEventListener('click', () => renderAuth(app, onReady));
+  document.getElementById('retry-online')?.addEventListener('click', () => busy(app, async () => {
     await goOnline(onReady, app);
     const n = takeNotice();
     if (n) throw new Error(n);
   }));
-
-  const form = document.getElementById('account-form') as HTMLFormElement | null;
-  if (!form) return;
-  const email = document.getElementById('acct-email') as HTMLInputElement;
-  const pass = document.getElementById('acct-pass') as HTMLInputElement;
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    busy(async () => {
-      await savePlayer();
-      await a.signIn(email.value.trim(), pass.value);
-      await goOnline(onReady, app);
-    });
-  };
-  document.getElementById('sign-up')!.onclick = () => {
-    if (!form.reportValidity()) return;
-    busy(async () => {
-      await savePlayer();
-      const session = await a.signUp(email.value.trim(), pass.value, returnUrl());
-      if (!session) return say(`Almost there: we sent a link to ${email.value.trim()}. Open it to finish creating your account.`, true);
-      await goOnline(onReady, app);
-    });
-  };
-  document.getElementById('forgot')!.onclick = () => {
-    if (!email.reportValidity()) return;
-    busy(async () => {
-      await a.sendPasswordReset(email.value.trim(), returnUrl());
-      say(`If there's an account for ${email.value.trim()}, a link to reset the password is on its way.`, true);
-    });
-  };
 }
 
 /** After a password-reset link: the person is signed in and picks a new password. */
 export function renderNewPassword(app: HTMLElement, onDone: () => void) {
   if (!auth) return onDone();
   const a = auth;
-  app.innerHTML = `
-  <main class="lobby welcome">
-    <section class="panel welcome-card">
-      <span class="eyebrow">Back Room Poker</span>
-      <h1>New password</h1>
-      <p>Choose a new password for ${esc(a.current?.email ?? 'your account')}.</p>
-      <form id="pw-form" class="create-row">
-        <input id="new-pass" class="text-input" type="password" minlength="6" placeholder="New password" autocomplete="new-password" required>
-        <button type="submit" class="btn btn-primary">Save password</button>
-      </form>
-      <p class="form-error" id="form-error" role="alert"></p>
-    </section>
-  </main>`;
+  app.innerHTML = authShell(`
+    <div class="auth-head">
+      <h2>New password</h2>
+      <p class="auth-sub">Choose a new password for <b>${esc(a.current?.email ?? 'your account')}</b>.</p>
+    </div>
+    <form id="pw-form" class="auth-form">
+      <label class="auth-field"><span>New password</span>
+        <input id="new-pass" class="text-input" type="password" minlength="6" placeholder="At least 6 characters" autocomplete="new-password" required>
+      </label>
+      <button type="submit" class="btn btn-primary btn-lg auth-go">Save and play</button>
+    </form>
+    <p class="form-error" id="auth-error" role="alert"></p>
+  `, 'Locked out? Not for long.');
   const input = document.getElementById('new-pass') as HTMLInputElement;
   input.focus();
-  document.getElementById('pw-form')!.onsubmit = async (e) => {
+  document.getElementById('pw-form')!.onsubmit = (e) => {
     e.preventDefault();
-    try {
+    busy(app, async () => {
       await a.setPassword(input.value);
       onDone();
-    } catch (err) {
-      document.getElementById('form-error')!.textContent = (err as Error).message;
-    }
+    });
   };
 }

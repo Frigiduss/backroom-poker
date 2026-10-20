@@ -11,7 +11,7 @@ import {
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
-import { goOnline, initAccounts, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
+import { goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 import { bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
@@ -1020,7 +1020,7 @@ async function boot() {
     app,
     auth,
     lobby: renderSetup,
-    signIn: () => renderProfile(app, renderSetup),
+    signIn: () => renderAuth(app, renderSetup),
     prefs: () => prefs,
     toggleSound: () => {
       prefs.sound = !prefs.sound;
@@ -1043,7 +1043,7 @@ async function boot() {
     game: () => game,
     redraw: () => {
       if (game) game.render();
-      else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+      else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     },
     reveal: (on) => {
       if (on !== undefined && on !== prefs.reveal) {
@@ -1055,16 +1055,17 @@ async function boot() {
     },
     announced: (text) => {
       announcement = text;
-      if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+      if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     },
   }, auth);
   if (auth) {
     void readAnnouncement(auth).then((text) => {
       announcement = text;
-      if (text && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome)')) renderSetup();
+      if (text && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     });
   }
-  const open = () => (auth?.current ? goOnline(renderSetup, app) : openPlayer(renderSetup, app));
+  // With online accounts on, everyone starts at the sign-in screen unless already signed in.
+  const open = () => (auth?.current ? goOnline(renderSetup, app) : auth ? renderAuth(app, renderSetup) : openPlayer(renderSetup, app));
   if (resetPassword) renderNewPassword(app, open);
   else await open();
 }
