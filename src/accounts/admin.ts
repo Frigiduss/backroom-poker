@@ -85,6 +85,15 @@ export class AdminApi {
     if (!rows?.length) throw new OnlineError('That player is gone, or this account is not an admin.', 404);
   }
 
+  /** Takes a player off the leaderboard (or puts them back). Their own setting can't undo it. */
+  async setLeaderboardHidden(playerId: string, hidden: boolean): Promise<void> {
+    if (hidden) {
+      await this.call('leaderboard_hidden?on_conflict=player_id', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { player_id: playerId } });
+    } else {
+      await this.call(`leaderboard_hidden?player_id=eq.${encodeURIComponent(playerId)}`, { method: 'DELETE', prefer: 'return=minimal' });
+    }
+  }
+
   /** The lobby announcement everyone sees. Readable without signing in. */
   async announcement(): Promise<string> {
     return readAnnouncement(this.auth, this.fetchFn);
