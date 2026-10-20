@@ -1,5 +1,5 @@
 import { Bot, Decision, STYLE_NAMES } from '../bots/bot';
-import { simulateEquity, specFromView } from '../bots/equity';
+import { specFromView } from '../bots/equity';
 import { buildView } from '../bots/view';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
@@ -18,6 +18,7 @@ import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOn
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
+import { equity, think } from './thinker';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
@@ -317,6 +318,8 @@ class Game implements DevGame {
   private hintKey = '';
   private hint: Decision | null = null;
   private turnCue = '';
+  /** The turn a bot is working out right now, so a re-render doesn't ask twice. */
+  private thinking = '';
   private stopped = false;
   /** The player whose bank pays for this game. */
   private readonly profile = player();
@@ -512,10 +515,19 @@ class Game implements DevGame {
     const seat = this.table.seatOf(hand.toAct);
     const bot = this.bots.get(seat.id) ?? (seat.isHuman ? this.autopilot : null);
     if (!bot) return;
-    const action = bot.decide(buildView(hand, hand.toAct, this.table.stats));
-    hand.act(hand.normalize(action));
-    if (seat.isHuman) this.selected.clear();
-    this.sync();
+    const turn = () => `${this.table.handNumber}|${hand.actions.length}|${hand.phase}|${hand.toAct}`;
+    const asked = turn();
+    if (this.thinking === asked) return;
+    this.thinking = asked;
+    think(bot, buildView(hand, hand.toAct, this.table.stats)).then((d) => {
+      if (this.thinking !== asked) return;
+      this.thinking = '';
+      // Something moved the game on while the bot thought (a console command, leaving): ask again.
+      if (this.stopped || this.hand !== hand || hand.isComplete || turn() !== asked) return this.schedule();
+      hand.act(hand.normalize(d.action));
+      if (seat.isHuman) this.selected.clear();
+      this.sync();
+    });
   }
 
   private humanAct(a: Action) {
@@ -751,7 +763,11 @@ class Game implements DevGame {
         const opts = hand.variant.family === 'draw' && hand.phase === 'draw' && this.selected.size
           ? { keep: p.cards.filter((_, k) => !this.selected.has(k)) }
           : {};
-        this.oddsValue = simulateEquity(specFromView(view, opts), { iterations: 1500, rng: createRng(), timeBudgetMs: 60 });
+        equity(specFromView(view, opts), 1500, 60).then((x) => {
+          if (this.oddsKey !== key) return;
+          this.oddsValue = x;
+          this.render();
+        });
       }
       if (this.oddsValue !== null) {
         const pct = Math.round(this.oddsValue * 100);
@@ -769,10 +785,15 @@ class Game implements DevGame {
     const key = `${this.table.handNumber}|${hand.actions.length}|${hand.phase}|${hand.street}`;
     if (key !== this.hintKey) {
       this.hintKey = key;
-      this.hint = this.coach.think(buildView(hand, hi, this.table.stats));
+      this.hint = null;
+      think(this.coach, buildView(hand, hi, this.table.stats)).then((d) => {
+        if (this.hintKey !== key) return;
+        this.hint = d;
+        this.render();
+      });
     }
     const d = this.hint;
-    if (!d) return '';
+    if (!d) return '<div class="hint-panel" role="note" aria-label="Practice hint"><span class="hp-head"><span class="eyebrow">Hard bot is thinking…</span></span></div>';
     const a = d.action;
     const cards = hand.players[hi].cards;
     const L = hand.legal();

@@ -13,12 +13,35 @@ const dist = join(root, 'dist');
 const args = process.argv.slice(2);
 mkdirSync(dist, { recursive: true });
 
+/**
+ * Resolves `import source from 'virtual:bot-worker'` to the bot worker (src/bots/worker.ts),
+ * bundled on its own and handed over as a string, so the page can start it from a Blob
+ * and still ship as one file.
+ */
+const botWorker = {
+  name: 'bot-worker',
+  setup(build) {
+    build.onResolve({ filter: /^virtual:bot-worker$/ }, () => ({ path: 'bot-worker', namespace: 'bot-worker' }));
+    build.onLoad({ filter: /.*/, namespace: 'bot-worker' }, async () => {
+      const result = await esbuild.build({
+        entryPoints: [join(root, 'src/bots/worker.ts')],
+        bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, metafile: true, absWorkingDir: root, logLevel: 'warning',
+      });
+      return {
+        contents: `export default ${JSON.stringify(result.outputFiles[0].text)};`,
+        loader: 'js',
+        watchFiles: Object.keys(result.metafile.inputs).map((f) => join(root, f)),
+      };
+    });
+  },
+};
+
 async function bundleTests() {
   const out = join(root, '.test-build');
   const files = readdirSync(join(root, 'test')).filter((f) => f.endsWith('.test.ts'));
   await esbuild.build({
     entryPoints: files.map((f) => join(root, 'test', f)),
-    bundle: true, platform: 'node', format: 'esm', outdir: out, logLevel: 'warning',
+    bundle: true, platform: 'node', format: 'esm', outdir: out, logLevel: 'warning', plugins: [botWorker],
   });
   execFileSync(process.execPath, ['--test', ...files.map((f) => join(out, f.replace(/\.ts$/, '.js')))], { stdio: 'inherit' });
 }
@@ -42,7 +65,7 @@ function page(js, css, template = 'src/ui/index.html') {
 async function buildOnce() {
   const result = await esbuild.build({
     entryPoints: [join(root, 'src/ui/main.ts')],
-    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning',
+    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker],
   });
   const js = result.outputFiles[0].text;
   const css = readFileSync(join(root, 'src/ui/styles.css'), 'utf8');
@@ -63,7 +86,7 @@ async function buildOnce() {
 async function buildAdmin(gameCss) {
   const result = await esbuild.build({
     entryPoints: [join(root, 'src/admin/main.ts')],
-    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning',
+    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker],
   });
   const css = gameCss + readFileSync(join(root, 'src/admin/admin.css'), 'utf8');
   const html = page(result.outputFiles[0].text, css, 'src/admin/index.html');
@@ -89,7 +112,7 @@ if (args.includes('--test')) {
 } else if (args.includes('--serve')) {
   const ctx = await esbuild.context({
     entryPoints: [join(root, 'src/ui/main.ts')], bundle: true, format: 'iife', sourcemap: true,
-    outdir: join(dist, 'dev'), entryNames: 'game', logLevel: 'info',
+    outdir: join(dist, 'dev'), entryNames: 'game', logLevel: 'info', plugins: [botWorker],
   });
   await ctx.watch();
   writeFileSync(join(dist, 'dev', 'index.html'), readFileSync(join(root, 'src/ui/index.html'), 'utf8').replace('<!--__ICONS__-->', icons).replace('/*__CSS__*/', '').replace('</head>', '<link rel="stylesheet" href="styles.css"></head>'));
