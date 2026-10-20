@@ -13,6 +13,7 @@ import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
 import { goOnline, initAccounts, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, takeNotice } from './profiles';
 import { SoundName, play, setVolume } from './sound';
+import { bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
@@ -89,6 +90,7 @@ let announcement = '';
 function renderSetup() {
   game?.stop();
   game = null;
+  stopOnline();
   const me = player();
   loadSettings(me);
   const v = VARIANTS[setup.variant];
@@ -182,6 +184,8 @@ function renderSetup() {
       </div>
     </section>
 
+    ${friendsPanelHtml()}
+
     <div class="cta-bar">
       <div class="summary-line"><b>${STRUCTURE_NAMES[struct]} ${v.name}</b><span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
         <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? costLine : `You need ${fmt(cost)} chips and your bank has ${fmt(me.bank)}.${setup.format === 'cash' && setup.stackBB > 50 && canAfford(me, 50 * BIG_BLIND) ? ' Try a smaller starting stack.' : ''}`}</span></div>
@@ -211,6 +215,13 @@ function renderSetup() {
   opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
   opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
   document.getElementById('open-profile')!.onclick = () => renderProfile(app, renderSetup);
+  bindFriendsPanel(() => ({
+    name: me.name,
+    settings: {
+      variant: setup.variant, structure: struct, format: setup.format, difficulty: setup.difficulty,
+      stackBB: setup.stackBB, blindSpeed: setup.blindSpeed, seats: setup.format === 'headsup' ? 2 : setup.opponents + 1,
+    },
+  }));
   bindConsoleButton();
   void refreshConsoleAccess();
   const refillBtn = document.getElementById('refill');
@@ -1005,6 +1016,19 @@ async function boot() {
   const local = new LocalAccountStore(storage);
   const auth = onlineEnabled(ONLINE) ? new OnlineAuth(ONLINE, storage) : null;
   initAccounts(local, auth, storage);
+  initOnlinePlay({
+    app,
+    auth,
+    lobby: renderSetup,
+    signIn: () => renderProfile(app, renderSetup),
+    prefs: () => prefs,
+    toggleSound: () => {
+      prefs.sound = !prefs.sound;
+      saveSettings();
+      setVolume(prefs.volume, !prefs.sound);
+      play('chips');
+    },
+  });
   await migrateLegacySettings(local);
 
   // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.

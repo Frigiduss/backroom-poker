@@ -1,4 +1,4 @@
-import { Rng, createRng } from './cards';
+import { SeededRng, createRng } from './cards';
 import { Card } from './cards';
 import { ActionRecord, Hand, Rig, Stakes } from './hand';
 import { Structure, VARIANTS, VariantDef, VariantId } from './variants';
@@ -82,7 +82,7 @@ export class Table {
   readonly variant: VariantDef;
   readonly seats: Seat[];
   readonly stats: Record<string, PlayerStats> = {};
-  readonly rng: Rng;
+  readonly rng: SeededRng;
   hand: Hand | null = null;
   /** Seat index of the dealer button. */
   button = -1;

@@ -1,0 +1,6 @@
+# Settings the Supabase CLI reads when deploying the poker-table function.
+project_id = "yqvizfunfdxtlozvtqfs"
+
+[functions.poker-table]
+# The function checks each player's sign-in itself (src/online/edge.ts).
+verify_jwt = false

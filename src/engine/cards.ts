@@ -49,10 +49,21 @@ export interface Rng {
   next(): number;
 }
 
+/** An Rng whose position can be saved and restored, so a shuffle can be replayed exactly. */
+export interface SeededRng extends Rng {
+  state: number;
+}
+
 /** Small, fast, seedable PRNG (mulberry32). */
-export function createRng(seed: number = (Math.random() * 2 ** 32) >>> 0): Rng {
+export function createRng(seed: number = (Math.random() * 2 ** 32) >>> 0): SeededRng {
   let a = seed >>> 0;
   return {
+    get state() {
+      return a;
+    },
+    set state(v: number) {
+      a = v >>> 0;
+    },
     next() {
       a = (a + 0x6d2b79f5) >>> 0;
       let t = a;
