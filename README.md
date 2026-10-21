@@ -1,6 +1,6 @@
 # Back Room Poker
 
-Poker and blackjack in your browser, against computer opponents or with friends online.
+Poker, blackjack, roulette and baccarat in your browser, against computer opponents or with friends online.
 
 **Play now:** https://frigiduss.github.io/backroom-poker/ (nothing to install, no account needed)
 
@@ -11,6 +11,9 @@ Poker and blackjack in your browser, against computer opponents or with friends 
   picker groups them into Hold'em & Omaha, Stud and Draw tabs, each with an example hand.
 - **Blackjack** against the dealer: six decks, dealer stands on all 17s, blackjack pays
   3 to 2, with double, split and insurance. Play it solo or at an online table with friends.
+- **Roulette** on a European (single zero) or American (double zero) wheel, with every
+  standard inside and outside bet, and **baccarat** (punto banco: Player, Banker, Tie and
+  pair bets). Both are you against the house, in the Casino tab next to blackjack.
 - **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
   heads-up duel.
 - **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
@@ -46,6 +49,7 @@ Online tables use table chips, so your bank isn't at stake there.
 
 Poker: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
 Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
+Roulette and baccarat: `1`–`3` pick a chip, `U` undo, `C` clear, `R` rebet, `Space` spin or deal.
 
 ## Install it as an app
 
@@ -98,7 +102,8 @@ conflict over it. The deploy workflows build everything from source.
 - `src/engine/`: pure game logic, no browser code. Cards, hand evaluator (high, ace-to-five
   low, Omaha, short deck), variants, a `Hand` state machine (blinds, antes, stud bring-in,
   draws, NL/PL/FL betting, side pots, hi-lo splits), a `Table` (button, blind levels, busts,
-  rebuys) and `blackjack.ts` (shoe, dealer, splits, doubles, insurance, basic strategy).
+  rebuys), `blackjack.ts` (shoe, dealer, splits, doubles, insurance, basic strategy),
+  `roulette.ts` (wheels, layout bets, payouts) and `baccarat.ts` (drawing rules, payouts).
 - `src/bots/`: bot opponents. Bots only see a `PlayerView` (what that seat may know).
   Decisions use Monte Carlo equity, pot odds, position, starting-hand charts and, at
   Hard/Expert, opponent ranges; Expert also adapts to each player's tendencies. `persona.ts`

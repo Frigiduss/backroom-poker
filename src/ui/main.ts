@@ -20,6 +20,9 @@ import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOn
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
+import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './roulette';
+import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './baccarat';
+import { HouseGame, isHouseGame } from './picker';
 import { equity, think } from './thinker';
 import { avatarHtml, botTitle, floatOver } from './talk';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
@@ -31,8 +34,8 @@ type BlindSpeed = 'slow' | 'normal' | 'turbo';
 type Speed = 'relaxed' | 'normal' | 'fast';
 
 interface Setup {
-  /** Poker (the variant below) or blackjack. */
-  game: 'poker' | 'blackjack';
+  /** Poker (the variant below) or a game against the house. */
+  game: 'poker' | HouseGame;
   variant: VariantId;
   structures: Partial<Record<VariantId, Structure>>;
   format: Format;
@@ -42,6 +45,8 @@ interface Setup {
   blindSpeed: BlindSpeed;
   name: string;
   bj: BjSetup;
+  rl: RlSetup;
+  bac: BacSetup;
   /** Free table with a coach: hints on every decision, no bank, stats or achievements. */
   practice: boolean;
 }
@@ -62,7 +67,7 @@ interface Prefs {
 const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
-  game: 'poker', bj: DEFAULT_BJ, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
+  game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -73,8 +78,10 @@ function loadSettings(p: Profile) {
   setup = { ...DEFAULT_SETUP, ...(p.settings.setup as Partial<Setup> | undefined), name: p.name };
   prefs = { ...DEFAULT_PREFS, ...(p.settings.prefs as Partial<Prefs> | undefined) };
   if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
-  if (setup.game !== 'blackjack') setup.game = 'poker';
+  if (!isHouseGame(setup.game)) setup.game = 'poker';
   setup.bj = { ...DEFAULT_BJ, ...setup.bj };
+  setup.rl = { ...DEFAULT_RL, ...setup.rl };
+  setup.bac = { ...DEFAULT_BAC, ...setup.bac };
   setVolume(prefs.volume, !prefs.sound);
 }
 
@@ -109,6 +116,8 @@ function renderSetup() {
   game = null;
   blackjack?.stop();
   blackjack = null;
+  house?.stop();
+  house = null;
   stopOnline();
   const me = player();
   loadSettings(me);
@@ -148,9 +157,11 @@ function renderSetup() {
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
     <div class="lobby-grid">
-      ${gamePickerHtml(setup.game === 'blackjack' ? 'blackjack' : setup.variant)}
+      ${gamePickerHtml(setup.game === 'poker' ? setup.variant : setup.game)}
 
-      ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
+      ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me))
+        : setup.game === 'roulette' ? rlSetupCardHtml(setup.rl, me.bank, canRefill(me))
+        : setup.game === 'baccarat' ? bacSetupCardHtml(setup.bac, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
           <span class="eyebrow">${setup.practice ? 'Your practice table' : 'Your table'}</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
@@ -204,7 +215,7 @@ function renderSetup() {
         </div>
       </aside>`}
 
-      ${friendsPanelHtml()}
+      ${friendsPanelHtml(setup.game === 'roulette' ? 'Roulette' : setup.game === 'baccarat' ? 'Baccarat' : undefined)}
     </div>
   </main>`;
   app.querySelector('.setup-card .options')!.scrollTop = optionsScroll;
@@ -215,13 +226,15 @@ function renderSetup() {
     renderSetup();
   };
   bindGamePicker((id) => update(() => {
-    if (id === 'blackjack') setup.game = 'blackjack';
+    if (isHouseGame(id)) setup.game = id;
     else {
       setup.game = 'poker';
       setup.variant = id;
     }
   }));
   bindBjSetupCard(setup.bj, update);
+  bindRlSetupCard(setup.rl, update);
+  bindBacSetupCard(setup.bac, update);
   app.querySelectorAll<HTMLButtonElement>('[data-structure]').forEach((b) => (b.onclick = () => update(() => (setup.structures[setup.variant] = b.dataset.structure as Structure))));
   app.querySelectorAll<HTMLButtonElement>('[data-format]').forEach((b) => (b.onclick = () => update(() => {
     const prev = setup.format;
@@ -272,6 +285,12 @@ function renderSetup() {
     if (setup.game === 'blackjack') {
       blackjack = new BlackjackTable({ app, setup: setup.bj, prefs, save: saveSettings, leave: renderSetup });
       blackjack.start();
+      return;
+    }
+    if (setup.game === 'roulette' || setup.game === 'baccarat') {
+      const hooks = { app, prefs, save: saveSettings, leave: renderSetup };
+      house = setup.game === 'roulette' ? new RouletteTable({ ...hooks, setup: setup.rl }) : new BaccaratTable({ ...hooks, setup: setup.bac });
+      house.start();
       return;
     }
     const next = new Game(setup);
@@ -1201,12 +1220,14 @@ function ordinal(n: number): string {
 
 let game: Game | null = null;
 let blackjack: BlackjackTable | null = null;
+let house: RouletteTable | BaccaratTable | null = null;
 let resizeTimer: number | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
     game?.render();
     blackjack?.render();
+    house?.render();
   }, 150);
 });
 
@@ -1249,6 +1270,7 @@ async function boot() {
     redraw: () => {
       if (game) game.render();
       else if (blackjack) blackjack.render();
+      else if (house) house.render();
       else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     },
     reveal: (on) => {
