@@ -81,10 +81,10 @@ class MemoryDb implements TableDb {
 
 const SETTINGS: TableSettings = { variant: 'holdem', structure: 'NL', format: 'cash', difficulty: 'easy', stackBB: 100, blindSpeed: 'normal', seats: 4 };
 
-function setup(settings: Partial<TableSettings> = {}) {
+function setup(settings: Partial<TableSettings> = {}, seed: (() => number) | null = () => 12345) {
   const db = new MemoryDb();
   let clock = 1_000_000;
-  const opts = { now: () => clock, seed: () => 12345 };
+  const opts = { now: () => clock, seed: seed ?? undefined };
   const call = async (user: string, req: unknown) => {
     const out = await handle(db, user, req, opts);
     return out as { status: number; body: { ok: boolean; error?: string; tableId: string; code: string; view: TableView } };
@@ -130,6 +130,25 @@ test('friends make a table, join by code, and bots fill the empty seats', async 
   assert.equal(v.seats.filter((x) => !x.isHuman && x.difficulty === 'easy').length, 2);
   assert.ok(v.hand, 'the first hand is dealt');
   assert.ok(s.db.view(made.body.tableId, 'bob').mySeat, 'Bob has a seat');
+});
+
+test('live tables deal from a cryptographic seed that replays exactly', async () => {
+  const s = setup({}, null);
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await drive(s, body.tableId, ['alice', 'bob'], 60);
+  const state = (await s.db.byId(body.tableId))!.state;
+  assert.match(String(state.config!.seed), /^[0-9a-f]{64}\.0\.0$/, 'a 256-bit ChaCha20 key');
+  assert.match(String(state.checkpoint!.rng), /^[0-9a-f]{64}\.0\.\d+$/);
+  assert.ok(state.checkpoint!.handNumber >= 2, 'several hands played');
+  const deal = (t: ReturnType<typeof rebuild>) => JSON.stringify([t.hand?.board, t.hand?.players.map((p) => p.cards)]);
+  assert.equal(deal(rebuild(state)), deal(rebuild(state)), 'the hand in play rebuilds to the same cards');
+
+  const other = setup({}, null);
+  const made = await other.call('alice', { op: 'create', name: 'Alice', settings: other.settings });
+  await other.call('alice', { op: 'start', tableId: made.body.tableId });
+  assert.notEqual((await other.db.byId(made.body.tableId))!.state.config!.seed, state.config!.seed, 'every table gets its own key');
 });
 
 test("nobody's view shows another player's hole cards or the deck", async () => {

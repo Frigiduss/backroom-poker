@@ -78,7 +78,9 @@ anyone who leaves or lets their 30-second clock run out twice, until they're bac
 The table runs on Supabase, not in anyone's browser: an Edge Function called `poker-table`
 shuffles, deals, plays the bots and settles every pot, and keeps the deck and everyone's
 cards in a table that browsers can't read. Each player only ever receives their own cards
-plus what the whole table can see. Online tables use table chips, so banks aren't touched.
+plus what the whole table can see. Each table shuffles with ChaCha20 from a fresh 256-bit key
+out of the server's cryptographic random source, so the cards a player has seen give nothing
+away about the ones still to come. Online tables use table chips, so banks aren't touched.
 
 To switch it on, do these once:
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AdminApi, MemoryStorage, NotSetUpError, OnlineAccountStore, OnlineAuth, OnlineError, STARTING_BANK, applyBonus, bonusAmount, bonusReady, claimLocally,
-  claimOnlineBonus, createProfile, fetchLeaderboard, normalizeProfile, recordHand,
+  claimOnlineBonus, createProfile, fetchLeaderboard, normalizeProfile, recordHand, safeColor,
 } from '../src/accounts';
 import { FakeSupabase } from './fake-supabase';
 
@@ -135,4 +135,12 @@ test('an admin can take a player off the leaderboard, and only an admin', async 
   assert.deepEqual((await fetchLeaderboard(a.auth, 'bank', 25, server.fetch)).map((r) => r.name), ['Honest']);
   await new AdminApi(boss.auth, server.fetch).setLeaderboardHidden(cheat.id, false);
   assert.equal((await fetchLeaderboard(a.auth, 'bank', 25, server.fetch))[0].name, 'Cheat');
+});
+
+test("a player's colour can't carry CSS onto someone else's screen", () => {
+  assert.equal(safeColor('#6fb7ea'), '#6fb7ea');
+  assert.equal(safeColor('red;background:url(https://evil.example/x.png)'), '#e6b85c');
+  assert.equal(safeColor('#fff" onmouseover="x'), '#e6b85c');
+  assert.equal(safeColor(7), '#e6b85c');
+  assert.equal(normalizeProfile({ ...createProfile('A'), color: 'red;position:fixed' })!.color, '#e6b85c');
 });

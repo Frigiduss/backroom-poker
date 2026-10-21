@@ -8,7 +8,7 @@
 import { PERSONA_NAMES } from '../bots/persona';
 import { Tally, blackjackTally } from '../accounts/achievements';
 import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, Round, RoundData, RoundRig, Shoe, ShoeData, bookPlay } from '../engine/blackjack';
-import { Card, createRng, shuffle } from '../engine/cards';
+import { Card, Seed, createRng, shuffle, subSeed } from '../engine/cards';
 import type { AdminCommand, BjAdminInfo, BjMove, BjSpotView, BjTableView, TableSettings } from './protocol';
 import type { Member, TableState } from './server';
 
@@ -50,7 +50,7 @@ export interface BjState {
   /** When the dealer settled the last round. */
   settledAt: number | null;
   /** Bots' random choices. */
-  rng: number;
+  rng: Seed;
   /** Developer console: cards to deal next round. */
   nextRig?: RoundRig | null;
 }
@@ -67,9 +67,9 @@ export function checkBjSettings(s: Partial<TableSettings>): Pick<TableSettings, 
 // ---------- starting, betting and dealing ----------
 
 /** Seats the people (and the bots the host asked for) and opens betting on the first round. */
-export function bjStart(state: TableState, people: Member[], now: number, seed: number) {
+export function bjStart(state: TableState, people: Member[], now: number, seed: Seed) {
   const s = state.settings;
-  const rng = createRng(seed ^ 0x2545f491);
+  const rng = createRng(subSeed(seed, 0x2545f491));
   const taken = new Set(people.map((m) => m.name.toLowerCase()));
   const names = shuffle(BOT_NAMES.filter((n) => !taken.has(n.toLowerCase())), rng);
   const stack = bjStartingStack(s);

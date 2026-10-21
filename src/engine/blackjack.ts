@@ -6,7 +6,7 @@
 // 17s, blackjack pays 3 to 2 and insurance 2 to 1. Players may double any first two cards
 // (after a split too), split pairs of the same value up to four hands, and split aces once
 // for one card each.
-import { Card, Rng, SeededRng, cardLabel, createRng, fullDeck, rankOf, shuffle } from './cards';
+import { Card, Rng, Seed, SeededRng, cardLabel, createRng, fullDeck, rankOf, shuffle } from './cards';
 
 export const BJ_DECKS = 6;
 /** Share of the shoe dealt before the cut card comes out and the shoe is reshuffled. */
@@ -170,7 +170,7 @@ export interface ShoeData {
   dealt: number;
   cut: number;
   shuffles: number;
-  rng: number;
+  rng: Seed;
   stacked?: number;
 }
 
