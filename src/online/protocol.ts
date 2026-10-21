@@ -50,6 +50,8 @@ export type Request =
   | { op: 'bj'; tableId: string; round: number; move: BjMove; amount?: number }
   /** Take your seat back from the bot that played while you were away. */
   | { op: 'back'; tableId: string }
+  /** Says something at the table: a line of text or one of the EMOTES. */
+  | { op: 'chat'; tableId: string; text?: string; emote?: EmoteId }
   /** Developer console: change or look inside any table. Only admin accounts (supabase/admin.sql). */
   | { op: 'admin'; tableId?: string; code?: string; command: AdminCommand }
   /** Developer console: the tables in play. Admins only. */
@@ -77,7 +79,12 @@ export type AdminCommand =
   /** Blackjack: these cards come out of the shoe next, in order. */
   | { do: 'stackshoe'; cards: Card[] }
   /** Blackjack: swaps the dealer's face-down card in the round in play. */
-  | { do: 'hole'; card: Card };
+  | { do: 'hole'; card: Card }
+  /** Stops a person chatting at this table, or lets them again. */
+  | { do: 'mute'; member: string }
+  | { do: 'unmute'; member: string }
+  /** Wipes the table chat for everyone. */
+  | { do: 'clearchat' };
 
 /** Everything about a live table, every card included. Only ever sent to admins. */
 export interface AdminTableInfo {
@@ -112,6 +119,9 @@ export interface AdminTableInfo {
   nextRig: { hole: Record<string, Card[]>; board: Card[] } | null;
   /** A blackjack table, every card included. */
   bj?: BjAdminInfo | null;
+  /** The table chat, oldest first, and who is muted. */
+  chat?: { name: string; text: string; at: number }[];
+  muted?: string[];
 }
 
 export interface BjAdminInfo {
@@ -257,6 +267,32 @@ export interface TableView {
   paused?: boolean;
   /** A blackjack table: everything about it (the poker fields above stay empty). */
   bj?: BjTableView | null;
+  /** The table chat, oldest first. */
+  chat?: ChatLineView[];
+  /** An admin has stopped this viewer chatting here. */
+  chatMuted?: boolean;
+}
+
+/** The quick reactions anyone at a table can send, by id. */
+export const EMOTES = {
+  thumbs: '👍', clap: '👏', laugh: '😂', wow: '😮', cool: '😎', think: '🤔', cry: '😭', angry: '😡', luck: '🍀', fire: '🔥',
+} as const;
+export type EmoteId = keyof typeof EMOTES;
+
+export const CHAT_MAX = 140;
+
+export interface ChatLineView {
+  /** Counts up through the table's chat, so a browser can tell which lines are new. */
+  id: number;
+  at: number;
+  name: string;
+  /** Where the speaker sits, to float the line over their seat; null for watchers and notices. */
+  seat: string | null;
+  you: boolean;
+  text?: string;
+  emote?: EmoteId;
+  /** A notice from the table (chat cleared), not a person. */
+  system?: boolean;
 }
 
 /** One spot at an online blackjack table. */

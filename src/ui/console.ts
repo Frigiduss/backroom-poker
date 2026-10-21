@@ -898,6 +898,38 @@ const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'chat', usage: 'chat', group: 'Online tables', help: 'The online table\'s chat, oldest first, and who is muted.',
+    async run(_, out) {
+      if (!onlineTarget()) throw new UsageError('Open an online table, or pick one with table CODE.');
+      const info = await remote({ do: 'inspect' });
+      const lines = info.chat ?? [];
+      if (!lines.length) out('Nothing said at this table yet.');
+      else out(table(lines.map((l) => [new Date(l.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), esc(l.name), esc(l.text)]), ['Time', 'Who', 'Said']));
+      if (info.muted?.length) out(`Muted: ${info.muted.map(esc).join(', ')}`, 'dim');
+    },
+  },
+  {
+    name: 'mute', usage: 'mute <name>', group: 'Online tables', help: 'Stops a person chatting at the online table (they still play).',
+    async run(args, out) {
+      if (!onlineTarget()) throw new UsageError('Open an online table, or pick one with table CODE.');
+      await remote({ do: 'mute', member: need(args.join(' ') || null, 'Name the person.') }, out);
+    },
+  },
+  {
+    name: 'unmute', usage: 'unmute <name>', group: 'Online tables', help: 'Lets a muted person chat again.',
+    async run(args, out) {
+      if (!onlineTarget()) throw new UsageError('Open an online table, or pick one with table CODE.');
+      await remote({ do: 'unmute', member: need(args.join(' ') || null, 'Name the person.') }, out);
+    },
+  },
+  {
+    name: 'clearchat', usage: 'clearchat', group: 'Online tables', help: 'Wipes the online table\'s chat for everyone.',
+    async run(_, out) {
+      if (!onlineTarget()) throw new UsageError('Open an online table, or pick one with table CODE.');
+      await remote({ do: 'clearchat' }, out);
+    },
+  },
+  {
     name: 'close', usage: 'close yes', group: 'Online tables', help: 'Deletes the online table for everyone at it. Add yes to confirm.',
     async run(args, out) {
       const t = need(onlineTarget(), 'Open an online table, or pick one with table CODE.');

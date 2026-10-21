@@ -293,6 +293,7 @@ function drawWatch(info: AdminTableInfo | null | undefined) {
     ? `round ${bj.roundNumber} · ${bj.round ? bj.round.phase : bj.phase} · shoe ${bj.shoeLeft}/${bj.shoeSize}`
     : `hand ${info.handNumber}${h ? ` · ${h.complete ? 'finished' : `${h.phase}, street ${h.street + 1} of ${h.numStreets}`} · pot <b>${fmt(h.pot)}</b>` : ''}`;
   const people = info.members.filter((m) => !m.left);
+  const muted = !!info.muted?.length;
   el.innerHTML = `
     <div class="adm-watch">
       <div class="adm-bar">
@@ -305,10 +306,13 @@ function drawWatch(info: AdminTableInfo | null | undefined) {
         <button type="button" class="btn btn-sm" data-act="step" title="Make the next bot move or deal now">Step</button>
         <button type="button" class="btn btn-sm" data-act="peek" title="Every card still to come, in the terminal">Peek</button>
         <button type="button" class="btn btn-sm" data-act="state" title="Everything about the table, in the terminal">State</button>
-        ${people.length ? `<span class="adm-kick"><select id="adm-kick" aria-label="Person to kick">${people.map((m) => `<option>${esc(m.name)}</option>`).join('')}</select><button type="button" class="btn btn-sm" id="adm-kick-go">Kick</button></span>` : ''}
+        ${people.length ? `<span class="adm-kick"><select id="adm-kick" aria-label="Person to kick">${people.map((m) => `<option>${esc(m.name)}</option>`).join('')}</select><button type="button" class="btn btn-sm" id="adm-kick-go">Kick</button><button type="button" class="btn btn-sm" id="adm-mute-go" title="Mutes the picked person's chat, or unmutes them if they're muted">Mute chat</button></span>` : ''}
+        ${info.chat?.length ? '<button type="button" class="btn btn-sm" id="adm-clearchat">Clear chat</button>' : ''}
         <button type="button" class="btn btn-sm adm-danger" id="adm-close">Close table</button>
       </div>
       ${info.phase === 'lobby' ? '<p class="adm-muted">Still in the lobby, waiting for the host to start.</p>' : bj ? watchBlackjack(info) : watchPoker(info)}
+      ${info.chat?.length ? `<div class="adm-chat"><h4>Table chat</h4><ol>${info.chat.slice(-8).map((l) => `<li><b>${esc(l.name)}</b> ${esc(l.text)}</li>`).join('')}</ol></div>` : ''}
+      ${muted ? `<p class="adm-muted">Muted: ${info.muted!.map(esc).join(', ')}</p>` : ''}
       <p class="adm-muted adm-people">People: ${people.length ? people.map((m) => `${esc(m.name)}${m.host ? ' (host)' : ''}${m.away ? ' (away)' : ''}`).join(', ') : 'nobody'}</p>
     </div>`;
   const code = info.code;
@@ -323,6 +327,18 @@ function drawWatch(info: AdminTableInfo | null | undefined) {
     if (!confirm(`Take ${who} off table ${code}? A bot plays their chips, and they can join again with the code.`)) return;
     pinTable(code, isBj);
     void run(`kick "${who.replace(/"/g, '')}"`);
+  };
+  const mute = $<HTMLButtonElement>('#adm-mute-go');
+  if (mute) mute.onclick = () => {
+    const who = $<HTMLSelectElement>('#adm-kick')!.value;
+    pinTable(code, isBj);
+    void run(`${info.muted?.includes(who) ? 'unmute' : 'mute'} "${who.replace(/"/g, '')}"`);
+  };
+  const clearChat = $<HTMLButtonElement>('#adm-clearchat');
+  if (clearChat) clearChat.onclick = () => {
+    if (!confirm(`Clear the chat at table ${code} for everyone?`)) return;
+    pinTable(code, isBj);
+    void run('clearchat');
   };
   $('#adm-close')!.onclick = () => {
     if (!confirm(`Close table ${code}? The game ends for everyone at it.`)) return;
