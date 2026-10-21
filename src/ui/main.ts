@@ -86,7 +86,7 @@ function saveSettings() {
 
 const BIG_BLIND = 20;
 const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
-const BOT_DELAY: Record<Speed, number> = { relaxed: 1150, normal: 650, fast: 220 };
+const BOT_DELAY: Record<Speed, number> = { relaxed: 1900, normal: 1150, fast: 300 };
 const AVATAR: Record<Difficulty | 'human', string> = {
   human: '#d9a94e', beginner: '#9fd3a8', easy: '#8fc1e8', medium: '#e8d48f', hard: '#e8a36f', expert: '#e07a8a',
 };
@@ -323,6 +323,9 @@ class Game implements DevGame {
   private turnCue = '';
   /** The turn a bot is working out right now, so a re-render doesn't ask twice. */
   private thinking = '';
+  /** How long the current turn's bot takes, and which turn that was for. */
+  private thinkKey = '';
+  private thinkMs = 0;
   private stopped = false;
   /** Lines bots said since the last draw, floated over their seats once it is on screen. */
   private talkQueue: { seat: string; text: string }[] = [];
@@ -491,18 +494,36 @@ class Game implements DevGame {
     this.schedule();
   }
 
+  /**
+   * How long the bot to act takes over it, like a person would: a quick check, longer to
+   * face a bet, longest for a call that puts them all-in, plus a beat after new cards come out.
+   * Worked out once per turn so a re-render doesn't change it.
+   */
+  private thinkTime(hand: Hand, base: number): number {
+    const key = `${this.table.handNumber}|${hand.actions.length}|${hand.toAct}`;
+    if (this.thinkKey === key) return this.thinkMs;
+    const L = hand.legal();
+    const p = hand.players[hand.toAct];
+    let k = 0.7 + this.talkRng.next() * 0.6;
+    if (L.kind === 'bet' && L.call) k *= L.callAmount >= p.stack ? 1.8 : 1.3;
+    if (hand.actions.at(-1)?.street !== hand.street) k *= 1.25;
+    this.thinkKey = key;
+    this.thinkMs = base * k;
+    return this.thinkMs;
+  }
+
   private schedule() {
     clearTimeout(this.timer);
     const hand = this.hand;
     if (!hand || this.modal !== 'none' || this.paused) return;
     const humanOut = this.spectating || this.humanIndex < 0 || hand.players[this.humanIndex].status === 'folded';
-    const base = this.botDelay ?? BOT_DELAY[prefs.speed] * (humanOut ? 0.45 : 1);
+    const base = this.botDelay ?? BOT_DELAY[prefs.speed] * (humanOut ? 0.6 : 1);
     if (hand.isComplete) {
-      if (prefs.autoDeal || this.spectating || this.autopilot) this.timer = window.setTimeout(() => this.dealNext(), this.botDelay ?? Math.max(900, base * 3));
+      if (prefs.autoDeal || this.spectating || this.autopilot) this.timer = window.setTimeout(() => this.dealNext(), this.botDelay ?? Math.max(900, base * 2.6));
       return;
     }
     if (hand.toAct === this.humanIndex && !this.autopilot) return;
-    this.timer = window.setTimeout(() => this.botAct(), base);
+    this.timer = window.setTimeout(() => this.botAct(), this.botDelay ?? this.thinkTime(hand, base));
   }
 
   refresh() {

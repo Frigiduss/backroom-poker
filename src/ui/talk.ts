@@ -28,20 +28,46 @@ function floatLayer(): HTMLElement {
   return layer;
 }
 
-/** Floats a line (or an emote) up over the seat with this data-seat id. */
+/**
+ * Shows a line (or an emote) from the seat with this data-seat id. A line sits beside the
+ * player's name plate, on the side facing the middle of the table, so it never covers their
+ * name, stack or cards; an emote pops up over the plate.
+ */
 export function floatOver(seatId: string, text: string, opts: { emote?: boolean; delay?: number } = {}) {
   const spot = document.querySelector<HTMLElement>(`[data-seat="${CSS.escape(seatId)}"]`);
   const seat = spot?.querySelector<HTMLElement>('.pod') ?? spot;
   if (!seat) return;
   const r = seat.getBoundingClientRect();
   const b = document.createElement('div');
-  b.className = opts.emote ? 'chat-float emote' : 'chat-float';
   b.textContent = text;
-  b.style.left = `${r.left + r.width / 2}px`;
-  b.style.top = `${r.top}px`;
   b.style.animationDelay = `${opts.delay ?? 0}s`;
+  if (opts.emote) {
+    b.className = 'chat-float emote';
+    b.style.left = `${r.left + r.width / 2}px`;
+    b.style.top = `${r.top}px`;
+  } else {
+    // Point in toward the table. On a phone, or with too little room that side, the middle of
+    // the table is the player's own cards, so the line goes above the speaker's cards instead.
+    const vw = document.documentElement.clientWidth;
+    const felt = (spot?.parentElement ?? document.body).getBoundingClientRect();
+    const right = r.left + r.width / 2 < felt.left + felt.width / 2;
+    const room = right ? vw - r.right - 18 : r.left - 18;
+    // Longer lines stay up a little longer so there is time to read them.
+    b.style.animationDuration = `${Math.min(7, 3.2 + text.length * 0.06)}s`;
+    if (room >= 120 && vw > 720) {
+      b.className = `chat-float side ${right ? 'to-right' : 'to-left'}`;
+      b.style.maxWidth = `${Math.min(240, room)}px`;
+      b.style.top = `${r.top + r.height / 2}px`;
+      b.style.left = right ? `${r.right + 12}px` : `${r.left - 12}px`;
+    } else {
+      const cards = spot?.querySelector<HTMLElement>('.cards, .bj-hands')?.getBoundingClientRect();
+      b.className = 'chat-float';
+      b.style.left = `${r.left + r.width / 2}px`;
+      b.style.top = `${Math.min(r.top, cards && cards.height ? cards.top : r.top) - 6}px`;
+    }
+  }
   floatLayer().append(b);
   b.addEventListener('animationend', () => b.remove());
   // Older browsers without animationend events still get cleaned up.
-  window.setTimeout(() => b.remove(), 7000);
+  window.setTimeout(() => b.remove(), 9000);
 }
