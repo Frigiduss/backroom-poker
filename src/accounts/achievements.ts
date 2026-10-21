@@ -280,7 +280,7 @@ ladder('casino', 'rl.bigWin', [
 ]);
 ladder('casino', 'bac.hands', [
   { id: 'bac-hands-25', name: 'Punto Banco', desc: 'Play 25 hands of baccarat.', tier: 1, goal: 25 },
-  { id: 'bac-hands-500', name: 'High Roller', desc: 'Play 500 hands of baccarat.', tier: 2, goal: 500, title: 'High Roller' },
+  { id: 'bac-hands-500', name: 'Baccarat Baron', desc: 'Play 500 hands of baccarat.', tier: 2, goal: 500, title: 'Baccarat Baron' },
 ]);
 ladder('casino', 'bac.tieWins', [
   { id: 'bac-tie', name: 'All Square', desc: 'Win a Tie bet in baccarat.', tier: 1, goal: 1 },
