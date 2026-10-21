@@ -15,6 +15,8 @@ import { ONLINE } from '../accounts/config';
 import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice } from './profiles';
 import { announce, checkAchievements, renderAchievements } from './achievements';
 import { renderStats } from './stats';
+import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './history';
+import { recordHistory, sourceOfHand } from '../engine/history';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { bindGamePicker, gamePickerHtml } from './picker';
@@ -257,7 +259,8 @@ function renderSetup() {
     opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
     opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
   }
-  const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile), () => renderStats(app, openProfile));
+  const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile), () => renderStats(app, openProfile),
+    () => openHandHistory({ playerId: player().id, fourColor: prefs.fourColor }));
   document.getElementById('open-profile')!.onclick = openProfile;
   bindFriendsPanel(() => ({
     name: me.name,
@@ -363,6 +366,8 @@ class Game implements DevGame {
   /** The player whose bank pays for this game. */
   private readonly profile = player();
   private recorded: Hand | null = null;
+  /** Id of the last hand saved to the hand history. */
+  private lastSaved: string | null = null;
   /** The console rigged a hand or played for the player, so this game earns no achievements. */
   private tainted = false;
   /** Tournament prize paid into the bank, once the player's finishing place is known. */
@@ -447,9 +452,15 @@ class Game implements DevGame {
   private recordResult(hand: Hand) {
     if (this.recorded === hand) return;
     this.recorded = hand;
-    if (this.practice) return;
     const p = this.profile;
     const hi = this.humanIndex;
+    if (hi >= 0) {
+      const where = this.practice ? 'Practice' : FORMAT_NAMES[this.table.config.format];
+      const saved = recordHistory(sourceOfHand(hand, hi), hi, { where, number: this.table.handNumber });
+      saveHand(p.id, saved);
+      this.lastSaved = saved?.id ?? null;
+    }
+    if (this.practice) return;
     if (hand.wasRigged || this.autopilot) this.tainted = true;
     if (hi >= 0) {
       const me = hand.players[hi];
@@ -548,7 +559,8 @@ class Game implements DevGame {
   private schedule() {
     clearTimeout(this.timer);
     const hand = this.hand;
-    if (!hand || this.modal !== 'none' || this.paused) return;
+    // Reviewing an old hand holds the game until the player is back.
+    if (!hand || this.modal !== 'none' || this.paused || handHistoryOpen()) return;
     const humanOut = this.spectating || this.humanIndex < 0 || hand.players[this.humanIndex].status === 'folded';
     const base = this.botDelay ?? BOT_DELAY[prefs.speed] * (humanOut ? 0.6 : 1);
     if (hand.isComplete) {
@@ -720,6 +732,7 @@ class Game implements DevGame {
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 18h7"/></svg><span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
+          <button type="button" class="icon-btn" id="open-history" title="Hand history (H)">${icon(HISTORY_ICON)}<span>History</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
@@ -931,7 +944,7 @@ class Game implements DevGame {
       const lines = (res?.summary ?? []).slice(1).map((l) => `<div>${esc(this.speak(l))}</div>`).join('');
       const note = this.spectating ? 'Watching the bots finish the tournament.' : auto ? 'Next hand coming up…' : '';
       return `${mine}<span class="status">${lines}${note ? `<div>${note}</div>` : ''}</span>${
-        auto || this.modal !== 'none' ? '' : '<div class="acts"><button type="button" class="act raise" id="next-hand">Next hand<kbd>Space</kbd></button></div>'}`;
+        auto || this.modal !== 'none' ? '' : `<div class="acts">${this.lastSaved ? '<button type="button" class="act call" id="replay-hand">Replay<kbd>H</kbd></button>' : ''}<button type="button" class="act raise" id="next-hand">Next hand<kbd>Space</kbd></button></div>`}`;
     }
     if (hi < 0 || hand.toAct !== hi) {
       const who = hand.toAct >= 0 ? hand.players[hand.toAct].name : '';
@@ -1072,6 +1085,8 @@ class Game implements DevGame {
     };
     on('log-toggle', toggleLog);
     on('log-close', toggleLog);
+    on('open-history', () => this.openHistory());
+    on('replay-hand', () => this.openHistory(this.lastSaved ?? undefined));
     on('close-modal', () => this.closeModal());
     on('confirm-leave', () => renderSetup());
     on('again', () => {
@@ -1190,6 +1205,12 @@ class Game implements DevGame {
     play('chips');
   }
 
+  /** The hand history over the table; the game waits until it closes. */
+  private openHistory(select?: string) {
+    clearTimeout(this.timer);
+    openHandHistory({ playerId: this.profile.id, fourColor: prefs.fourColor, select, onClose: () => !this.stopped && this.schedule() });
+  }
+
   private openModal(m: 'settings' | 'leave') {
     clearTimeout(this.timer);
     this.modal = m;
@@ -1223,7 +1244,10 @@ class Game implements DevGame {
       if (document.getElementById('do-check')) click('do-check');
       else click('do-call');
     } else if (k === 'r') click('do-raise');
-    else if (k === 'm') {
+    else if (k === 'h') {
+      e.preventDefault();
+      this.openHistory(this.hand?.isComplete ? this.lastSaved ?? undefined : undefined);
+    } else if (k === 'm') {
       e.preventDefault();
       this.toggleSound();
     }
@@ -1266,6 +1290,7 @@ async function boot() {
     lobby: renderSetup,
     signIn: () => renderAuth(app, renderSetup),
     prefs: () => prefs,
+    playerId: () => player().id,
     toggleSound: () => {
       prefs.sound = !prefs.sound;
       saveSettings();

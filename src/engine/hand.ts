@@ -40,6 +40,8 @@ export interface HandPlayer {
   cards: Card[];
   /** Parallel to cards: true when everyone can see that card. */
   faceUp: boolean[];
+  /** Every card this player was given, in the order dealt (draw replacements come after the first five). */
+  dealt: Card[];
   status: PlayerStatus;
   streetBet: number;
   totalBet: number;
@@ -91,6 +93,8 @@ export interface ActionRecord {
   allIn: boolean;
   /** Raised or bet (counts as aggression). */
   aggressive: boolean;
+  /** Draws: the positions of the cards thrown away, lowest first. */
+  discard?: number[];
 }
 
 export interface PotResult {
@@ -204,6 +208,7 @@ export class Hand {
       stack: p.stack,
       cards: [],
       faceUp: [],
+      dealt: [],
       status: 'active',
       streetBet: 0,
       totalBet: 0,
@@ -576,6 +581,7 @@ export class Hand {
     const rigged = this.rigHole.get(i);
     p.cards.push(rigged?.length ? rigged.shift()! : this.draw1());
     p.faceUp.push(up);
+    p.dealt.push(p.cards[p.cards.length - 1]);
   }
 
   private dealStreet() {
@@ -721,6 +727,7 @@ export class Hand {
     p.drew = idx.length;
     p.lastAction = idx.length ? `Draws ${idx.length}` : 'Stands pat';
     this.record(i, 'draw', 0, false);
+    this.actions[this.actions.length - 1].discard = [...idx].reverse();
     this.say('action', idx.length ? `${p.name} draws ${idx.length}` : `${p.name} stands pat`, i);
     this.drawQueue.shift();
     if (this.drawQueue.length) this.toAct = this.drawQueue[0];

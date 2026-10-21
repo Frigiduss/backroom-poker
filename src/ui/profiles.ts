@@ -7,6 +7,8 @@ import { VARIANTS, VariantId } from '../engine/variants';
 import { makeCard } from '../engine/cards';
 import { cardHtml, esc, fmt, titleHtml } from './dom';
 import { applyLook } from './looks';
+import { loadHands } from './history';
+import { historyNet } from '../engine/history';
 
 // ---------- the signed-in player ----------
 
@@ -422,6 +424,18 @@ function statsStripHtml(p: Profile): string {
   </button>`;
 }
 
+/** A link to the hand history, with how many hands are saved and the latest result. */
+function historyStripHtml(p: Profile): string {
+  const hands = loadHands(p.id);
+  const net = hands[0] ? historyNet(hands[0]) : 0;
+  const last = hands[0] ? `Last hand <span class="${net > 0 ? 'up' : net < 0 ? 'down' : ''}">${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))}</span>` : 'Nothing yet';
+  return `<button type="button" class="ach-strip history-strip" id="open-history">
+    <span class="sl">Hand history</span>
+    <b>${hands.length} <span>hand${hands.length === 1 ? '' : 's'} saved</span></b>
+    <span class="pb-more">${last} · replay any hand street by street</span>
+  </button>`;
+}
+
 function achievementsStripHtml(p: Profile): string {
   const c = allCounters(p, serverAwards());
   const got = ACHIEVEMENTS.filter((a) => a.measure(c) >= a.goal).length;
@@ -434,7 +448,7 @@ function achievementsStripHtml(p: Profile): string {
 }
 
 /** Player profile: stats, name, colour, refill, and the online account. */
-export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void, onStats?: () => void) {
+export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void, onStats?: () => void, onHistory?: () => void) {
   const p = player();
   const refillable = canRefill(p);
   app.innerHTML = `
@@ -464,17 +478,20 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
       </div>
       ${statsHtml(p)}
       ${onStats ? statsStripHtml(p) : ''}
+      ${onHistory ? historyStripHtml(p) : ''}
       ${onAchievements ? achievementsStripHtml(p) : ''}
     </section>
     ${accountPanelHtml()}
   </main>`;
 
-  const rerender = () => renderProfile(app, onBack, onAchievements, onStats);
+  const rerender = () => renderProfile(app, onBack, onAchievements, onStats, onHistory);
   document.getElementById('back')!.onclick = onBack;
   const achBtn = document.getElementById('open-achievements');
   if (achBtn && onAchievements) achBtn.onclick = onAchievements;
   const statsBtn = document.getElementById('open-stats');
   if (statsBtn && onStats) statsBtn.onclick = onStats;
+  const historyBtn = document.getElementById('open-history');
+  if (historyBtn && onHistory) historyBtn.onclick = onHistory;
 
   const rename = document.getElementById('rename') as HTMLInputElement;
   const renameSave = document.getElementById('rename-save')!;

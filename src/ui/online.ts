@@ -12,6 +12,8 @@ import { STRUCTURE_NAMES, VARIANTS, describeHolding } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../online/protocol';
 import { checkAchievements } from './achievements';
+import { HISTORY_ICON, openHandHistory, saveHand } from './history';
+import { recordHistory } from '../engine/history';
 import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
 import { SoundName, play } from './sound';
 import { consoleEnabled, toggleConsole } from './console';
@@ -35,6 +37,8 @@ interface Hooks {
   signIn: () => void;
   prefs: () => TablePrefs;
   toggleSound: () => void;
+  /** The player whose hand history finished hands go to. */
+  playerId: () => string;
 }
 
 let hooks: Hooks;
@@ -242,6 +246,9 @@ class OnlineTable {
   private resizeHandler = () => this.render();
   /** The last finished hand checked for achievements the server credited. */
   private awardsHand = -1;
+  /** The last finished hand saved to the hand history, and its id there. */
+  private savedHand = -1;
+  private lastSaved: string | null = null;
   /** Draws a blackjack table, when this is one. */
   private readonly bj = new BjScreen({
     move: (move, amount) => {
@@ -329,6 +336,7 @@ class OnlineTable {
     this.render();
     this.chat?.update(next);
     this.schedule();
+    this.saveHistory(next);
     // The server counts achievements as each hand finishes; look for new ones then.
     if (next.mySeat && next.hand?.result && next.handNumber !== this.awardsHand) {
       this.awardsHand = next.handNumber;
@@ -339,6 +347,23 @@ class OnlineTable {
       this.awardsHand = next.bj!.roundNumber;
       void checkAchievements();
     }
+  }
+
+  /** The hand history over the table. The table plays on underneath, turn clock included. */
+  private openHistory() {
+    openHandHistory({ playerId: hooks.playerId(), fourColor: hooks.prefs().fourColor, select: this.view.hand?.result ? this.lastSaved ?? undefined : undefined });
+  }
+
+  /** Keeps each finished hand the viewer played in their hand history. */
+  private saveHistory(v: TableView) {
+    const hand = v.hand;
+    if (!hand?.result || !v.mySeat || v.handNumber === this.savedHand) return;
+    this.savedHand = v.handNumber;
+    const me = hand.players.findIndex((p) => p.id === v.mySeat);
+    if (me < 0) return;
+    const saved = recordHistory(hand, me, { where: `Online · ${v.code}`, number: v.handNumber });
+    saveHand(hooks.playerId(), saved);
+    if (saved) this.lastSaved = saved.id;
   }
 
   /**
@@ -505,6 +530,7 @@ class OnlineTable {
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
+          ${v.watching ? '' : `<button type="button" class="icon-btn" id="open-history" title="Hand history (H)">${icon(HISTORY_ICON)}<span>History</span></button>`}
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
@@ -914,6 +940,7 @@ class OnlineTable {
     };
     on('log-toggle', toggleLog);
     on('log-close', toggleLog);
+    on('open-history', () => this.openHistory());
     on('sound-toggle', () => {
       hooks.toggleSound();
       this.render();
@@ -1002,7 +1029,10 @@ class OnlineTable {
       return;
     }
     if (k === 'f') click('do-fold');
-    else if (k === 'c' || k === 'k') click(document.getElementById('do-check') ? 'do-check' : 'do-call');
+    else if (k === 'h' && !this.view.watching) {
+      e.preventDefault();
+      this.openHistory();
+    } else if (k === 'c' || k === 'k') click(document.getElementById('do-check') ? 'do-check' : 'do-call');
     else if (k === 'r') click('do-raise');
     else if (k === 'm') {
       e.preventDefault();

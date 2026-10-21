@@ -2185,6 +2185,149 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .bead { width: 11px; height: 11px; line-height: 11px; font-size: 7px; }
 }
 
+/* Hand history: saved hands on the left, a replay table on the right. */
+.history-strip .pb-more .up { color: var(--good); }
+.history-strip .pb-more .down { color: var(--bad); }
+.hh-overlay { z-index: 40; place-items: stretch; }
+.hh {
+  width: min(1180px, 100%); height: min(780px, 100%); margin: auto;
+  display: grid; grid-template-rows: auto minmax(0, 1fr);
+  background: linear-gradient(180deg, #18231e, #101814);
+  border: 1px solid rgba(230, 184, 92, .4); border-radius: 18px;
+  box-shadow: var(--shadow); overflow: hidden;
+  animation: rise .25s cubic-bezier(.2, .8, .2, 1);
+}
+.hh-head { display: flex; align-items: baseline; gap: 12px; padding: 14px 16px 12px 20px; border-bottom: 1px solid var(--line); }
+.hh-head h2 { margin: 0; font-family: var(--display); font-size: 26px; }
+.hh-sub { color: var(--muted); font-size: 13.5px; flex: 1; }
+.hh-head .icon-btn { align-self: center; }
+.hh-body { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+.hh-empty { padding: 40px 24px; display: grid; gap: 8px; align-content: start; justify-items: center; text-align: center; color: var(--muted); }
+.hh-empty p { margin: 0; max-width: 46ch; }
+.hh-empty b { color: var(--text); font-size: 18px; }
+
+.hh-list { overflow-y: auto; border-right: 1px solid var(--line); padding: 8px; display: grid; gap: 4px; align-content: start; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.hh-item {
+  background: none;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 10px; border: 1px solid transparent; text-align: left; color: var(--text);
+  transition: background .15s, border-color .15s;
+}
+.hh-item:hover { background: rgba(255, 255, 255, .05); }
+.hh-item[aria-current="true"] { background: rgba(230, 184, 92, .1); border-color: rgba(230, 184, 92, .45); }
+.hh-what { display: grid; min-width: 0; }
+.hh-what b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hh-what span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hh-net { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); }
+.hh-net.up { color: var(--good); }
+.hh-net.down { color: var(--bad); }
+.hh-cards { display: flex; gap: 2px; }
+.hh-mini {
+  font-style: normal; font-weight: 700; font-size: 11.5px; line-height: 1; letter-spacing: -.02em;
+  min-width: 22px; padding: 4px 2px; text-align: center; border-radius: 4px;
+  background: linear-gradient(165deg, #fff, var(--ivory-2)); color: var(--suit-black);
+}
+.hh-mini.s1, .hh-mini.s2 { color: var(--suit-red); }
+.four-color .hh-mini.s1 { color: var(--suit-blue); }
+.four-color .hh-mini.s0 { color: var(--suit-green); }
+.hh-cards.many .hh-mini { min-width: 20px; box-shadow: -1px 0 2px rgba(0, 0, 0, .35); }
+.hh-cards.many .hh-mini + .hh-mini { margin-left: -6px; }
+.hh-mini.back { background: linear-gradient(160deg, var(--back-a), var(--back-b)); border: 2px solid var(--back-edge); height: 22px; }
+
+.hh-replay {
+  display: grid; grid-template-rows: auto minmax(220px, 1fr) auto auto auto minmax(80px, 150px);
+  gap: 10px; padding: 14px 16px 16px; min-height: 0; min-width: 0;
+}
+.hh-info { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.hh-info b { font-size: 15px; }
+.hh-info span { color: var(--muted); font-size: 13px; }
+.hh-felt {
+  --cw: clamp(26px, 3.4vw, 42px);
+  position: relative; min-height: 0; border-radius: 999px;
+  border: 6px solid var(--leather-hi);
+  box-shadow: 0 0 0 2px var(--wood), inset 0 0 0 1px var(--felt-line), inset 0 0 50px rgba(0, 0, 0, .45);
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi), var(--felt) 55%, var(--felt-deep));
+  margin: 18px 34px 26px;
+}
+.hh-center { position: absolute; left: 50%; top: 47%; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 8px; }
+.hh-board { display: flex; gap: 4px; min-height: calc(var(--cw) * 1.4); }
+.hh-pot { font-size: 13px; color: rgba(241, 244, 239, .8); background: rgba(0, 0, 0, .3); border-radius: 999px; padding: 3px 12px; font-variant-numeric: tabular-nums; }
+.hh-pot b { color: var(--gold-hi); }
+.hh-seat { position: absolute; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 0; width: max-content; z-index: 1; transition: opacity .2s; }
+.hh-hole { display: flex; height: calc(var(--cw) * .82 * 1.4); margin-bottom: calc(var(--cw) * -.32); }
+.hh-hole .card { --w: calc(var(--cw) * .82); }
+.hh-hole .card + .card { margin-left: calc(var(--w) * -.38); }
+.hh-hole .card.upcard { translate: 0 -10%; }
+.hh-seat.me .hh-hole { height: calc(var(--cw) * 1.4); }
+.hh-seat.me .hh-hole .card { --w: var(--cw); }
+.hh-seat.me .hh-hole .card + .card { margin-left: calc(var(--w) * -.2); }
+.hh-plate {
+  position: relative; z-index: 1; display: grid; justify-items: center; min-width: 92px;
+  padding: 4px 12px; border-radius: 10px; background: rgba(10, 14, 12, .92); border: 1px solid var(--line-2);
+}
+.hh-plate b { font-size: 13px; font-weight: 600; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hh-plate span { font-size: 12.5px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.hh-dealer {
+  position: absolute; right: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--ink);
+  background: radial-gradient(circle at 35% 30%, #fff, var(--ivory-2)); box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+.hh-tag {
+  margin-top: 3px; font-size: 11.5px; font-family: var(--label); letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text); background: rgba(0, 0, 0, .45); border-radius: 999px; padding: 1px 9px; white-space: nowrap;
+}
+.hh-seat.acting .hh-plate { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 16px rgba(230, 184, 92, .45); }
+.hh-seat.acting .hh-tag { background: var(--gold); color: var(--ink); }
+.hh-seat.folded { opacity: .45; }
+.hh-seat.winner .hh-plate { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 0 18px rgba(95, 211, 138, .4); }
+.hh-seat.winner .hh-tag { background: var(--good); color: var(--ink); }
+.hh-bet {
+  position: absolute; transform: translate(-50%, -50%); z-index: 1;
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--gold-hi);
+  background: rgba(0, 0, 0, .4); border: 1px solid rgba(230, 184, 92, .35); border-radius: 999px; padding: 1px 8px;
+}
+.hh-caption { margin: 0; display: flex; align-items: baseline; gap: 10px; font-size: 16px; min-height: 1.5em; }
+.hh-caption.final { color: var(--good); }
+.hh-chap { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--gold); flex: none; }
+.hh-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hh-controls .icon-btn { padding: 7px 10px; }
+.hh-controls .icon-btn svg { fill: currentColor; stroke: none; }
+.hh-controls [data-go="first"] svg, .hh-controls [data-go="last"] svg { stroke: currentColor; stroke-width: 1.8; }
+.hh-play { color: var(--ink) !important; background: linear-gradient(180deg, var(--gold-hi), var(--gold)) !important; border-color: var(--gold-deep) !important; min-width: 96px; justify-content: center; }
+.hh-count { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.hh-chapters { display: flex; gap: 6px; flex-wrap: wrap; }
+.hh-chapters button {
+  font-family: var(--label); letter-spacing: .06em; text-transform: uppercase; font-size: 12.5px; background: none;
+  padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted);
+}
+.hh-chapters button:hover { color: var(--text); }
+.hh-chapters button[aria-pressed="true"] { background: rgba(230, 184, 92, .14); border-color: var(--gold); color: var(--gold-hi); }
+.hh-steps { list-style: none; margin: 0; padding: 4px; overflow-y: auto; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: rgba(0, 0, 0, .18); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; position: relative; }
+.hh-steps button { background: none; border: 0; display: block; width: 100%; text-align: left; padding: 3px 8px; border-radius: 6px; font-size: 13.5px; color: var(--muted); }
+.hh-steps button:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.hh-steps button.me { color: var(--text); }
+.hh-steps button.final { color: var(--good); }
+.hh-steps button[aria-current="step"] { background: rgba(230, 184, 92, .16); color: var(--gold-hi); }
+.hh-step-head { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 11px; color: var(--faint); padding: 6px 8px 1px; }
+
+@media (max-width: 860px) {
+  .hh-overlay { padding: 0; }
+  .hh { height: 100%; border-radius: 0; border: 0; }
+  .hh-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow-y: auto; }
+  .hh-list { display: flex; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; }
+  .hh-item { flex: none; width: 230px; border-color: var(--line); }
+  .hh-replay { grid-template-rows: auto 300px auto auto auto 180px; padding: 12px; }
+  .hh-felt { --cw: 30px; margin: 22px 26px 30px; border-radius: 120px; }
+  .hh-plate { min-width: 70px; padding: 3px 8px; }
+  .hh-plate b { font-size: 12px; max-width: 80px; }
+  .hh-caption { font-size: 15px; flex-wrap: wrap; gap: 2px 10px; }
+  .hh-controls .icon-btn span { display: none; }
+  .hh-play { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hh { animation: none; }
+}
+.hh:has(.hh-empty) { height: auto; }
 /* ---------- video poker ----------
    A machine cabinet: a marquee, the pay table on the glass, then the five cards with HELD
    tags above them and the coin meters along the bottom. */
