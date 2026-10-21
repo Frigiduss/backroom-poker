@@ -1,4 +1,4 @@
-import { SeededRng, createRng } from './cards';
+import { Seed, SeededRng, createRng } from './cards';
 import { Card } from './cards';
 import { ActionRecord, Hand, Rig, Stakes } from './hand';
 import { Structure, VARIANTS, VariantDef, VariantId } from './variants';
@@ -27,7 +27,7 @@ export interface TableConfig {
   /** Tournaments: hands between blind increases. */
   handsPerLevel: number;
   seats: SeatConfig[];
-  seed?: number;
+  seed?: Seed;
 }
 
 export interface Seat {

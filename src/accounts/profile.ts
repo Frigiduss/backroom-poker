@@ -13,6 +13,13 @@ export const NAME_MAX = 14;
 
 export const PROFILE_COLORS = ['#e6b85c', '#7fd39b', '#6fb7ea', '#ef8f52', '#e95a78', '#b59cf0', '#5fd3c8', '#d9c46a'];
 
+/**
+ * A player's colour if it's a plain hex colour, else the fallback. Colours go into style
+ * attributes, and other people's come from their own saves, so anything else could carry CSS.
+ */
+export const safeColor = (c: unknown, fallback = PROFILE_COLORS[0]): string =>
+  typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c) ? c : fallback;
+
 export interface ProfileStats {
   hands: number;
   handsWon: number;
@@ -164,7 +171,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
   const p: Profile = {
     id: r.id,
     name: cleanName(r.name) || 'Player',
-    color: typeof r.color === 'string' ? r.color : PROFILE_COLORS[0],
+    color: safeColor(r.color),
     createdAt: num(r.createdAt, Date.now()),
     updatedAt: num(r.updatedAt, Date.now()),
     bank: Math.max(0, Math.floor(num(r.bank, STARTING_BANK))),

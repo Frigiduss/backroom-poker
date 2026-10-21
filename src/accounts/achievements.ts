@@ -12,6 +12,7 @@ import { Cat, categoryOf } from '../engine/evaluator';
 import { Round, handTotal } from '../engine/blackjack';
 import type { Coup, BacResult } from '../engine/baccarat';
 import { SpinResult, isZero } from '../engine/roulette';
+import { VpHand, VpResult, isAcesLine, isQuadsLine } from '../engine/videopoker';
 import type { Hand } from '../engine/hand';
 import { Difficulty, Format } from '../engine/table';
 import { VARIANTS, VARIANT_ORDER, VariantId, showdownValue } from '../engine/variants';
@@ -21,7 +22,7 @@ export type Counters = Record<string, number>;
 export type Tier = 1 | 2 | 3 | 4;
 export const TIER_NAMES: Record<Tier, string> = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Diamond' };
 
-export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'online';
+export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'videopoker' | 'online';
 export const GROUP_NAMES: Record<AchievementGroup, string> = {
   career: 'Career',
   hands: 'Big hands',
@@ -30,9 +31,10 @@ export const GROUP_NAMES: Record<AchievementGroup, string> = {
   bots: 'Bot hunting',
   blackjack: 'Blackjack',
   casino: 'Roulette and baccarat',
+  videopoker: 'Video poker',
   online: 'Online with friends',
 };
-export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'online'];
+export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'videopoker', 'online'];
 
 export interface Achievement {
   id: string;
@@ -51,7 +53,7 @@ export interface Achievement {
 }
 
 /** Counters that keep the best value seen rather than a running total. */
-const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin', 'rl.bigWin', 'bac.bigWin', 'bac.bestRun']);
+const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin', 'rl.bigWin', 'bac.bigWin', 'bac.bestRun', 'vp.bigWin']);
 export const isMaxCounter = (key: string): boolean => MAX_COUNTERS.has(key);
 export const isOnlineCounter = (key: string): boolean => key.startsWith('online.');
 
@@ -293,6 +295,28 @@ ladder('casino', 'bac.nines', [
 ]);
 ladder('casino', 'bac.bestRun', [
   { id: 'bac-run-6', name: 'Ride the Dragon', desc: 'Come out ahead on 6 baccarat hands in a row.', tier: 3, goal: 6, title: 'Dragon Rider' },
+]);
+
+// Video poker machines.
+ladder('videopoker', 'vp.hands', [
+  { id: 'vp-hands-50', name: 'Coin In', desc: 'Play 50 hands of video poker.', tier: 1, goal: 50 },
+  { id: 'vp-hands-1000', name: 'Video King', desc: 'Play 1,000 hands of video poker.', tier: 2, goal: 1000, title: 'Video King' },
+]);
+ladder('videopoker', 'vp.cleanSlates', [
+  { id: 'vp-clean-slate', name: 'Clean Slate', desc: 'Throw away all five cards and draw a paying hand.', tier: 1, goal: 1 },
+]);
+ladder('videopoker', 'vp.quads', [
+  { id: 'vp-quads-1', name: 'Four Alarm', desc: 'Hit four of a kind in video poker.', tier: 2, goal: 1 },
+  { id: 'vp-quads-25', name: 'Quad Machine', desc: 'Hit four of a kind in video poker 25 times.', tier: 3, goal: 25, title: 'Quad Machine' },
+]);
+ladder('videopoker', 'vp.aces', [
+  { id: 'vp-aces', name: 'Aces Up', desc: 'Hit four aces in video poker.', tier: 3, goal: 1, title: 'Ace Hunter' },
+]);
+ladder('videopoker', 'vp.bigWin', [
+  { id: 'vp-win-1000', name: 'Bells and Whistles', desc: 'Win 1,000 chips on one hand of video poker.', tier: 2, goal: 1000 },
+]);
+ladder('videopoker', 'vp.royals', [
+  { id: 'vp-royal', name: 'Royal Jackpot', desc: 'Draw a royal flush in video poker.', tier: 4, goal: 1, title: 'Jackpot' },
 ]);
 
 // Online with friends: credited by the table server only.
@@ -551,6 +575,20 @@ export function baccaratTally(coup: Coup, r: BacResult, run = 0): Tally {
   if (won('playerPair') || won('bankerPair')) add('bac.pairWins');
   const nine = coup.natural && ((won('player') && coup.playerTotal === 9) || (won('banker') && coup.bankerTotal === 9));
   if (nine) add('bac.nines');
+  return t;
+}
+
+/** What one hand of video poker adds to the player's record. */
+export function videoPokerTally(hand: VpHand, r: VpResult): Tally {
+  const t = emptyTally();
+  if (!r.staked) return t;
+  const add = (k: string) => (t.sum[k] = (t.sum[k] ?? 0) + 1);
+  add('vp.hands');
+  if (r.net > 0) t.max['vp.bigWin'] = r.net;
+  if (r.line && r.replaced === 5) add('vp.cleanSlates');
+  if (isQuadsLine(r.line)) add('vp.quads');
+  if (isAcesLine(r.line, hand.cards)) add('vp.aces');
+  if (r.line === 'royal') add('vp.royals');
   return t;
 }
 

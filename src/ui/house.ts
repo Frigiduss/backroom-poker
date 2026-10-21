@@ -1,5 +1,5 @@
-// What the roulette and baccarat tables share: the lobby card's frame, the chip rack, the
-// top bar and the settings modal. Both games are the player alone against the house, with
+// What the roulette, baccarat and video poker tables share: the lobby card's frame, the chip rack, the
+// top bar and the settings modal. These games are the player alone against the house, with
 // bets taken straight from the chip bank like blackjack.
 import { takeUnlocks } from '../accounts';
 import { announce } from './achievements';
@@ -71,6 +71,8 @@ export abstract class HouseTable<S extends { chip: number }> {
   protected abstract onKey(k: string, e: KeyboardEvent): void;
   /** Settles anything still in play when the player walks away. */
   protected abstract finish(): void;
+  /** Whether the number keys pick a chip from the rack; a table can take them for itself. */
+  protected readonly numberKeysPickChips: boolean = true;
   /** Extra toggles for the settings modal. */
   protected settingsExtraHtml(): string {
     return '';
@@ -217,7 +219,7 @@ export abstract class HouseTable<S extends { chip: number }> {
     }
     // Number keys pick a chip from the rack.
     const n = Number(k);
-    if (n >= 1 && n <= this.chips.length) {
+    if (this.numberKeysPickChips && n >= 1 && n <= this.chips.length) {
       document.querySelector<HTMLButtonElement>(`[data-chip="${this.chips[n - 1]}"]`)?.click();
       return;
     }

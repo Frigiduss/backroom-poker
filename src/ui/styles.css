@@ -1262,6 +1262,7 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 }
 .dev-open:hover { border-color: #8ff0b0; }
 .dev-flag { color: #8ff0b0; }
+.reveal-flag { font: inherit; font-weight: 700; background: none; border: 1px solid currentColor; border-radius: 999px; padding: 0 0.5em; cursor: pointer; }
 .dev-console {
   --dev-fg: #d7f5df; --dev-dim: #7c9a86; --dev-acc: #8ff0b0; --dev-err: #ff8a7a; --dev-line: rgba(143, 240, 176, .16);
   position: fixed; inset: 0 0 auto 0; z-index: 1000;
@@ -2327,3 +2328,97 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .hh { animation: none; }
 }
 .hh:has(.hh-empty) { height: auto; }
+/* ---------- video poker ----------
+   A machine cabinet: a marquee, the pay table on the glass, then the five cards with HELD
+   tags above them and the coin meters along the bottom. */
+.vp-machine {
+  --cw: clamp(40px, min(10cqw, 15cqh), 112px);
+  width: min(100cqw, 980px); max-height: 100%;
+  display: flex; justify-content: center;
+}
+.vp-cabinet {
+  width: 100%;
+  display: grid; gap: clamp(8px, 1.6cqh, 16px);
+  padding: clamp(10px, 2cqh, 20px) clamp(10px, 2.4cqw, 26px);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #2a2119, #120d09 70%);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .7), 0 0 0 1px rgba(0, 0, 0, .8), inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 3px rgba(230, 184, 92, .25);
+}
+.vp-marquee {
+  justify-self: center;
+  font-family: var(--display); font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  font-size: clamp(15px, min(2.6cqw, 3.6cqh), 28px);
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold) 60%, #b9852f);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.vp-pays-wrap {
+  border-radius: 10px; padding: 4px 8px;
+  background: linear-gradient(180deg, #0b1d4a, #081537);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), inset 0 6px 20px rgba(0, 0, 0, .4);
+}
+.vp-pays { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.vp-pays th, .vp-pays td {
+  padding: 0 6px; line-height: clamp(14px, 2.4cqh, 20px); white-space: nowrap;
+  font-family: var(--label); font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  font-size: clamp(10px, min(1.4cqw, 2cqh), 14px); color: #f3d76b;
+}
+.vp-pays th { text-align: left; font-weight: 600; }
+.vp-pays td { text-align: right; }
+.vp-pays td.on { background: rgba(200, 40, 58, .55); color: #fff; }
+.vp-pays tr.made th, .vp-pays tr.made td { color: #fff; }
+.vp-pays tr.hit th, .vp-pays tr.hit td { background: #f3d76b; color: #081537; animation: vp-blink .5s steps(2) 4; }
+@keyframes vp-blink { 50% { background: transparent; color: #f3d76b; } }
+.vp-pays-wrap.small { padding: 4px 6px; }
+.vp-pays-wrap.small th, .vp-pays-wrap.small td { font-size: 11px; line-height: 17px; padding: 0 4px; }
+.vp-screen {
+  display: grid; justify-items: center; gap: clamp(6px, 1.4cqh, 12px);
+  padding: clamp(8px, 2cqh, 18px) 8px;
+  border-radius: 14px;
+  background:
+    radial-gradient(ellipse 80% 90% at 50% 30%, var(--felt-hi) 0%, var(--felt) 55%, var(--felt-deep) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08), inset 0 10px 40px rgba(0, 0, 0, .5);
+}
+.vp-cards { display: flex; gap: clamp(6px, 1.4cqw, 16px); }
+.vp-card {
+  display: grid; justify-items: center; gap: 4px;
+  background: none; border: 0; padding: 0; color: inherit; cursor: pointer;
+}
+.vp-card:disabled { cursor: default; }
+.vp-card:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 4px; border-radius: 8px; }
+.vp-card .card { transition: transform .12s, box-shadow .12s; }
+.vp-card:not(:disabled):hover .card { filter: brightness(1.04); box-shadow: 0 0 0 2px rgba(243, 215, 107, .5), 0 4px 10px rgba(0, 0, 0, .35); }
+.vp-card.held .card { box-shadow: 0 0 0 3px #f3d76b, 0 10px 18px rgba(0, 0, 0, .45); }
+.vp-card .card.deal { animation-delay: calc(var(--i, 0) * 90ms); }
+.vp-held {
+  font-family: var(--label); font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: clamp(11px, 1.3cqw, 14px);
+  line-height: 20px; padding: 0 10px; border-radius: 6px;
+  background: #f3d76b; color: #081537;
+  visibility: hidden;
+}
+.vp-card.held .vp-held { visibility: visible; }
+.vp-card kbd { opacity: .55; }
+.vp-card:disabled kbd { visibility: hidden; }
+.vp-msg {
+  font-family: var(--display); font-weight: 700; font-size: clamp(14px, 1.8cqw, 20px);
+  background: rgba(6, 10, 8, .72); border: 1px solid rgba(230, 184, 92, .5); border-radius: 999px;
+  padding: 4px 18px; white-space: nowrap;
+}
+.vp-msg.won { border-color: #f3d76b; color: #f3d76b; animation: rise .3s cubic-bezier(.2, .8, .2, 1); }
+.vp-msg.lost { color: var(--muted); }
+.vp-meters {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: clamp(11px, 1.3cqw, 14px); color: #f2a59b;
+}
+.vp-meters b { font-family: var(--display); font-size: 1.3em; color: #ff6b5a; font-variant-numeric: tabular-nums; margin-left: 6px; letter-spacing: 0; }
+.vp-meters b.up { color: #f3d76b; }
+
+@media (max-width: 720px) {
+  .vp-machine { --cw: clamp(40px, 16cqw, 76px); }
+  .vp-cabinet { border-radius: 16px; padding: 10px 8px; }
+  .vp-pays th, .vp-pays td { padding: 0 3px; font-size: 10px; line-height: 15px; letter-spacing: 0; }
+  .vp-cards { gap: 4px; }
+  .vp-card kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-pays tr.hit th, .vp-pays tr.hit td { animation: none; }
+}

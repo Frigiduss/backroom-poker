@@ -3,6 +3,7 @@
 // returns a player's name, colour, title and score, never who owns them.
 import { BonusClaim } from './bonus';
 import { OnlineAuth, OnlineError, restRequest } from './online';
+import { safeColor } from './profile';
 
 type Fetch = typeof fetch;
 
@@ -44,7 +45,7 @@ export async function fetchLeaderboard(auth: OnlineAuth, board: Board, limit = 2
   return (rows ?? []).map((r) => ({
     rank: Number(r.rank ?? 0),
     name: String(r.name ?? 'Player'),
-    color: typeof r.color === 'string' ? r.color : '#e6b85c',
+    color: safeColor(r.color),
     title: typeof r.title === 'string' ? r.title : null,
     value: Number(r.value ?? 0),
     mine: r.mine === true,

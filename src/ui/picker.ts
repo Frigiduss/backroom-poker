@@ -4,8 +4,8 @@ import { cardHtml } from './dom';
 
 /** Every game in the lobby: a poker variant, or one of the house games. */
 export type GameId = VariantId | HouseGame;
-export type HouseGame = 'blackjack' | 'roulette' | 'baccarat';
-export const HOUSE_GAMES: HouseGame[] = ['blackjack', 'roulette', 'baccarat'];
+export type HouseGame = 'blackjack' | 'roulette' | 'baccarat' | 'videopoker';
+export const HOUSE_GAMES: HouseGame[] = ['blackjack', 'roulette', 'baccarat', 'videopoker'];
 export const isHouseGame = (id: string): id is HouseGame => (HOUSE_GAMES as string[]).includes(id);
 
 interface Category { id: string; name: string; games: GameId[] }
@@ -50,6 +50,7 @@ const SHOWCASE: Record<GameId, Omit<Showcase, 'name' | 'blurb' | 'facts'>> = {
   blackjack: { hand: [c(14, 3), c(13, 2)], caption: 'Blackjack: an ace and a ten-card, paid 3 to 2.' },
   roulette: { hand: [], art: rouletteArt(), caption: 'Seventeen, black. A chip straight up on it pays 35 to 1.' },
   baccarat: { hand: [c(4, 2), c(5, 3)], handLabel: 'Player', board: [c(13, 0), c(7, 1)], boardLabel: 'Banker', caption: 'A natural nine for Player beats Banker\'s seven.' },
+  videopoker: { hand: [c(11, 2), c(11, 3), c(4, 0), c(11, 1), c(9, 2)], caption: 'Three jacks dealt. Hold them and draw two more cards.' },
 };
 
 /** A few pockets of the wheel around 17, for the feature panel. */
@@ -75,6 +76,11 @@ const HOUSE: Record<HouseGame, { name: string; blurb: string; facts: string[] }>
     blurb: 'Bet on Player, Banker or a tie, and the closest hand to nine wins. The cards are drawn by the house rules, so it is all in the bet.',
     facts: ['Casino', 'vs the house', '8 decks', 'Punto banco'],
   },
+  videopoker: {
+    name: 'Video Poker',
+    blurb: 'Five cards, one draw, and a pay table on the glass. Hold what you like, draw the rest, and a royal flush on five coins pays 4,000.',
+    facts: ['Casino', 'vs the machine', 'Jacks or Better', 'Bonus Poker', 'Double Double Bonus'],
+  },
 };
 
 function showcase(id: GameId): Showcase {
@@ -96,7 +102,7 @@ const lastPick: Record<string, GameId> = {};
 let featured: GameId | null = null;
 
 const fan = (n: number) => `<span class="hole" style="--n:${n};--s:${n > 4 ? 5 : n > 2 ? 7 : 9}px" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i};--k:${i - (n - 1) / 2}"></i>`).join('')}</span>`;
-const holeCount = (id: GameId) => (isHouseGame(id) ? 2 : VARIANTS[id].holeCards);
+const holeCount = (id: GameId) => (id === 'videopoker' ? 5 : isHouseGame(id) ? 2 : VARIANTS[id].holeCards);
 const wheelIcon = '<span class="hole wheel-icon" aria-hidden="true"><i></i></span>';
 const pillIcon = (id: GameId) => (id === 'roulette' ? wheelIcon : fan(holeCount(id)));
 

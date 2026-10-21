@@ -107,5 +107,5 @@ grant select, insert on public.admin_log to authenticated;
 -- Make your own account an admin: put the email you signed up with between the quotes.
 -- (Sign up in the game first, so the account exists.)
 insert into public.admins (user_id)
-select id from auth.users where lower(email) = lower('oath08@outlook.com')
+select id from auth.users where lower(email) = lower('YOUR-EMAIL@example.com')
 on conflict do nothing;
