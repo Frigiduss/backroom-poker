@@ -8,6 +8,7 @@
 //
 // The server also credits achievements for online play: every finished hand and tournament
 // adds to each person's counters in player_awards, which browsers can read but not write.
+import { PERSONA_NAMES, personaFor } from '../bots/persona';
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
@@ -32,7 +33,7 @@ const TIMEOUTS_TO_AWAY = 2;
 export const WATCHERS_MAX = 12;
 const NAME_MAX = 14;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana', 'Iris', 'Jax', 'Kai', 'Lulu', 'Milo', 'Nova', 'Otto', 'Pia', 'Quinn', 'Rex', 'Sage', 'Tess', 'Vic', 'Wren', 'Zed', 'Bea'];
+const BOT_NAMES = PERSONA_NAMES;
 const STYLES: BotStyle[] = ['balanced', 'balanced', 'tight', 'loose', 'aggressive', 'passive'];
 
 export interface Member {
@@ -317,7 +318,9 @@ function startGame(state: TableState, now: number, seed: number, credits?: Award
   const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rng.next() * xs.length)];
   const seats: SeatConfig[] = people.map((m) => ({ name: m.name, isHuman: true }));
   while (seats.length < Math.max(2, s.seats)) {
-    seats.push({ name: names[seats.length % names.length], isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: pick(STYLES) });
+    const name = names[seats.length % names.length];
+    // Each regular plays their own style.
+    seats.push({ name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: personaFor(name)?.style ?? pick(STYLES) });
   }
   // People sit in a random order around the table.
   const order = shuffle(seats.map((_, i) => i), rng);

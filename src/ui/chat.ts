@@ -4,6 +4,7 @@
 import { CHAT_MAX, ChatLineView, EMOTES, EmoteId, TableView } from '../online/protocol';
 import { esc } from './dom';
 import { play } from './sound';
+import { floatOver } from './talk';
 
 export interface ChatHooks {
   /** Sends a line or an emote; resolves once the server has it. */
@@ -24,7 +25,6 @@ const readOpen = (): boolean => {
 
 export class ChatDock {
   private el: HTMLElement;
-  private layer: HTMLElement;
   private open = readOpen();
   private lines: ChatLineView[] = [];
   private muted = false;
@@ -39,10 +39,7 @@ export class ChatDock {
   constructor(private readonly h: ChatHooks) {
     this.el = document.createElement('div');
     this.el.className = 'chat-dock';
-    this.layer = document.createElement('div');
-    this.layer.className = 'chat-float-layer';
-    this.layer.setAttribute('aria-hidden', 'true');
-    document.body.append(this.layer, this.el);
+    document.body.append(this.el);
     document.addEventListener('keydown', this.keyHandler);
     this.draw();
   }
@@ -51,7 +48,6 @@ export class ChatDock {
     document.removeEventListener('keydown', this.keyHandler);
     clearTimeout(this.errorTimer);
     this.el.remove();
-    this.layer.remove();
   }
 
   /** Takes the chat from a fresh table view. */
@@ -74,20 +70,7 @@ export class ChatDock {
 
   private float(l: ChatLineView, i: number) {
     if (!l.seat) return;
-    const spot = document.querySelector<HTMLElement>(`[data-seat="${CSS.escape(l.seat)}"]`);
-    const seat = spot?.querySelector<HTMLElement>('.pod') ?? spot;
-    if (!seat) return;
-    const r = seat.getBoundingClientRect();
-    const b = document.createElement('div');
-    b.className = l.emote ? 'chat-float emote' : 'chat-float';
-    b.textContent = l.emote ? EMOTES[l.emote] : l.text ?? '';
-    b.style.left = `${r.left + r.width / 2}px`;
-    b.style.top = `${r.top}px`;
-    b.style.animationDelay = `${i * 0.15}s`;
-    this.layer.append(b);
-    b.addEventListener('animationend', () => b.remove());
-    // Older browsers without animationend events still get cleaned up.
-    window.setTimeout(() => b.remove(), 7000);
+    floatOver(l.seat, l.emote ? EMOTES[l.emote] : l.text ?? '', { emote: !!l.emote, delay: i * 0.15 });
   }
 
   private setOpen(on: boolean) {

@@ -1948,3 +1948,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 .game-table thead th { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--muted); font-weight: 400; }
 .game-table th[scope="row"] .bar { margin-top: 6px; height: 4px; max-width: 260px; }
 .game-table tbody tr:last-child > * { border-bottom: 0; }
+
+/* Bot faces and table talk */
+.avatar.face { font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-weight: 400; font-size: clamp(15px, 2cqw, 22px); line-height: 1; }
+.log li.k-talk { color: var(--ivory); font-style: italic; }
