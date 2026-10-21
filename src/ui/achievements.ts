@@ -1,8 +1,9 @@
 // The achievements screen (progress on every achievement, and the title picker) and the
 // pop-up that celebrates a new unlock.
-import { ACHIEVEMENTS, Achievement, GROUP_NAMES, GROUP_ORDER, TIER_NAMES, allCounters, isUnlocked } from '../accounts';
+import { ACHIEVEMENTS, Achievement, GROUP_NAMES, GROUP_ORDER, TIER_NAMES, allCounters, isUnlocked, looksUnlockedBy } from '../accounts';
 import { esc, fmt, titleHtml } from './dom';
 import { currentTitle, isOnline, player, refreshAwards, savePlayer, serverAwards } from './profiles';
+import { bindLooks, looksPanelHtml } from './looks';
 import { play } from './sound';
 
 // ---------- unlock pop-ups ----------
@@ -24,13 +25,22 @@ export function announce(list: Achievement[]) {
   shown.forEach((a, i) => {
     const el = document.createElement('div');
     el.className = `ach-toast t${a.tier}`;
-    el.innerHTML = `${medalHtml(a)}<span class="at-text"><span class="at-kicker">Achievement unlocked${i === shown.length - 1 && extra > 0 ? ` · and ${extra} more` : ''}</span><b>${esc(a.name)}</b><span>${a.title ? `New title: <em>${esc(a.title)}</em>` : esc(a.desc)}</span></span>`;
+    el.innerHTML = `${medalHtml(a)}<span class="at-text"><span class="at-kicker">Achievement unlocked${i === shown.length - 1 && extra > 0 ? ` · and ${extra} more` : ''}</span><b>${esc(a.name)}</b><span>${rewardText(a) || esc(a.desc)}</span></span>`;
     el.style.animationDelay = `${i * 0.25}s`;
     toastRoot!.appendChild(el);
     window.setTimeout(() => el.classList.add('out'), 5200 + i * 250);
     window.setTimeout(() => el.remove(), 5800 + i * 250);
   });
   play('win', 300);
+}
+
+const lookKinds = { felt: 'felt', back: 'card back' };
+
+/** What an achievement gives you, such as "New title: Grinder · New felt: Midnight". */
+function rewardText(a: Achievement): string {
+  const parts = a.title ? [`New title: <em>${esc(a.title)}</em>`] : [];
+  for (const l of looksUnlockedBy(a.id)) parts.push(`New ${lookKinds[l.kind]}: <em>${esc(l.name)}</em>`);
+  return parts.join(' · ');
 }
 
 /** Checks for new unlocks (fetching online progress first when signed in) and celebrates them. */
@@ -66,6 +76,7 @@ export async function renderAchievements(app: HTMLElement, onBack: () => void) {
           <b>${esc(a.name)}</b>
           <span class="ach-desc">${esc(a.desc)}</span>
           ${a.title ? `<span class="ach-title">Title: <em>${esc(a.title)}</em></span>` : ''}
+          ${looksUnlockedBy(a.id).map((l) => `<span class="ach-title">${l.kind === 'felt' ? 'Felt' : 'Card back'}: <em>${esc(l.name)}</em></span>`).join('')}
           <div class="ach-progress">${progress}</div>
         </div>
       </li>`;
@@ -102,6 +113,7 @@ export async function renderAchievements(app: HTMLElement, onBack: () => void) {
           ${chosen ? `<p class="title-preview">${esc(p.name)} ${titleHtml(chosen)}</p>` : ''}
         </div>
       </section>
+      ${looksPanelHtml(p, c)}
       <div class="seg ach-filter" role="group" aria-label="Show">
         ${(['all', 'unlocked', 'locked'] as Filter[]).map((f) => `<button type="button" data-filter="${f}" aria-pressed="${f === filter}">${{ all: 'All', unlocked: 'Unlocked', locked: 'Still to get' }[f]}</button>`).join('')}
       </div>
@@ -113,6 +125,10 @@ export async function renderAchievements(app: HTMLElement, onBack: () => void) {
       filter = b.dataset.filter as Filter;
       draw();
     }));
+    bindLooks(app, p, c, serverAwards(), () => {
+      draw();
+      void savePlayer();
+    });
     app.querySelectorAll<HTMLButtonElement>('[data-title]').forEach((b) => (b.onclick = async () => {
       p.title = b.dataset.title || null;
       p.updatedAt = Date.now();
