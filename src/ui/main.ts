@@ -74,6 +74,8 @@ const DEFAULT_SETUP: Setup = {
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
 let prefs: Prefs = { ...DEFAULT_PREFS };
+/** The console's `reveal`: bots' cards face up at any table, until turned off or the page reloads. */
+let devReveal = false;
 
 /** Each player keeps their own lobby choices and table preferences. */
 function loadSettings(p: Profile) {
@@ -402,6 +404,11 @@ class Game implements DevGame {
     return this.setup.practice;
   }
 
+  /** Bots' cards face up: the practice setting, or the console's reveal at any table. */
+  get revealing(): boolean {
+    return devReveal || (this.practice && prefs.reveal);
+  }
+
   /** Pays the buy-in or entry fee and deals the first hand. False if the bank can't cover it. */
   start(): boolean {
     const p = this.profile;
@@ -708,7 +715,7 @@ class Game implements DevGame {
       <header class="topbar">
         <div class="tb-game">
           <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
-          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.practice ? ' · <b class="practice-flag">Practice</b>' : ''}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
+          <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.practice ? ' · <b class="practice-flag">Practice</b>' : ''}${devReveal ? ' · <button type="button" class="dev-flag reveal-flag" id="reveal-off" title="Turned on with the console\'s reveal. Tap to turn it off.">Cards up ✕</button>' : ''}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
         </div>
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 18h7"/></svg><span>Console</span></button>` : ''}
@@ -772,14 +779,14 @@ class Game implements DevGame {
       if (hi >= 0 && hand.toAct === hi && !hand.isComplete) classes.push('acting');
       if (res && hi >= 0 && winners.has(hi)) classes.push('winner');
       if (hp && hp.cards.length > 4) classes.push('many');
-      if (hp && !isMe && hp.status !== 'folded' && (hp.shown || prefs.reveal)) classes.push('showing');
+      if (hp && !isMe && hp.status !== 'folded' && (hp.shown || this.revealing)) classes.push('showing');
 
       let cards = '';
       if (hp && (hp.status !== 'folded' || isMe)) {
         const pickable = isMe && hand.phase === 'draw' && hand.toAct === hi;
         cards = hp.cards
           .map((c, k) => {
-            const visible = isMe || hp.shown || hp.faceUp[k] || prefs.reveal;
+            const visible = isMe || hp.shown || hp.faceUp[k] || this.revealing;
             const key = `${t.handNumber}:${seat.id}:${k}:${visible ? c : 'x'}`;
             const cls: string[] = [];
             if (!this.seenCards.has(key)) {
@@ -1004,7 +1011,7 @@ class Game implements DevGame {
         <label class="toggle"><input type="checkbox" id="pref-odds" ${prefs.showOdds ? 'checked' : ''}> Show my pot share against random hands</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
         <label class="toggle"><input type="checkbox" id="pref-talk" ${prefs.talk ? 'checked' : ''}> Let the bots chat at the table</label>
-        <label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Show the bots' cards (peek at their hands)</label>
+        ${this.practice ? `<label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Show the bots' cards (practice tables only)</label>` : ''}
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
     }
@@ -1154,6 +1161,10 @@ class Game implements DevGame {
     pref('pref-talk', 'talk');
     pref('pref-sound', 'sound');
     on('sound-toggle', () => this.toggleSound());
+    on('reveal-off', () => {
+      devReveal = false;
+      this.render();
+    });
     const vol = document.getElementById('pref-volume') as HTMLInputElement | null;
     if (vol) {
       vol.oninput = () => {
@@ -1281,12 +1292,11 @@ async function boot() {
       else if (document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     },
     reveal: (on) => {
-      if (on !== undefined && on !== prefs.reveal) {
-        prefs.reveal = on;
-        saveSettings();
+      if (on !== undefined && on !== devReveal) {
+        devReveal = on;
         game?.render();
       }
-      return prefs.reveal;
+      return devReveal;
     },
     onlineTable: activeTable,
     blackjack: () => blackjack?.dev ?? null,

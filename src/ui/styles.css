@@ -1262,6 +1262,7 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 }
 .dev-open:hover { border-color: #8ff0b0; }
 .dev-flag { color: #8ff0b0; }
+.reveal-flag { font: inherit; font-weight: 700; background: none; border: 1px solid currentColor; border-radius: 999px; padding: 0 0.5em; cursor: pointer; }
 .dev-console {
   --dev-fg: #d7f5df; --dev-dim: #7c9a86; --dev-acc: #8ff0b0; --dev-err: #ff8a7a; --dev-line: rgba(143, 240, 176, .16);
   position: fixed; inset: 0 0 auto 0; z-index: 1000;
