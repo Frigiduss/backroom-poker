@@ -13,10 +13,11 @@ keeps players in the browser only.
    **Site URL** to `https://frigiduss.github.io/backroom-poker/` and add the same address
    under **Redirect URLs**. Sign-up confirmation and password-reset emails then bring
    people back to the game.
-4. **Optional: skip the confirmation email.** Under **Authentication → Sign In / Providers →
-   Email**, turn off **Confirm email** if you'd rather new accounts work straight away.
-   Supabase's built-in email sender only sends a few emails an hour, so this helps while
-   you're trying things out.
+4. **Sign-in rules.** Under **Authentication → Sign In / Providers → Email**, keep **Confirm
+   email** on, so nobody can make an account with someone else's address, and set the
+   **Minimum password length** to 8 to match the game. (Turning **Confirm email** off makes
+   new accounts work straight away, which can help while trying things out, since Supabase's
+   built-in email sender only sends a few emails an hour.)
 5. **Copy the keys into the game.** Open **Project Settings → API** (or **Data API**) and
    copy the **Project URL** and the **anon public** key (the one labelled public or
    publishable, never the `service_role` secret). Paste them into
@@ -25,6 +26,26 @@ keeps players in the browser only.
 
 The anon key is designed to be public. The row security rules in `setup.sql` are what stop
 one account from reading or changing another account's players.
+
+## Two-step sign-in
+
+Players can protect their account with an authenticator app (Google Authenticator, Microsoft
+Authenticator, 1Password, Authy and so on): **Profile → Account security → Two-step sign-in →
+Set up**. After that, signing in asks for the app's 6-digit code as well as the password. The
+same panel changes the password and signs the account out on every device.
+
+The code is checked by Supabase, and the database enforces it: `mfa_ok()` and the restrictive
+"two-step sign-in finished" policies mean a sign-in that skipped the code can't read or change
+that account's rows, use admin powers or collect the daily bonus, and the `poker-table` function
+turns it away too. Accounts without an authenticator app work exactly as before. Supabase has
+authenticator-app sign-in switched on by default (**Authentication → Multi-Factor**).
+
+**Projects set up before two-step sign-in** run [`security.sql`](security.sql) once in the SQL
+Editor. New projects get it from the other files.
+
+**Someone lost their phone?** After checking it's really them, remove their authenticator in the
+SQL Editor and they can sign in with just the password again:
+`delete from auth.mfa_factors where user_id = (select id from auth.users where email = 'their@email');`
 
 ## How it behaves
 

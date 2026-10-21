@@ -21,6 +21,9 @@ grant select on public.player_awards to authenticated;
 drop policy if exists "Player awards: read your own" on public.player_awards;
 create policy "Player awards: read your own" on public.player_awards
   for select to authenticated using (owner = auth.uid());
+drop policy if exists "Player awards: two-step sign-in finished" on public.player_awards;
+create policy "Player awards: two-step sign-in finished" on public.player_awards as restrictive
+  for all to authenticated using ((select public.mfa_ok())) with check ((select public.mfa_ok()));
 
 -- Adds to players' counters: "sum" counters are added, "max" counters keep the larger value.
 -- p_credits is a list of {owner, player_id, sum: {counter: n}, max: {counter: n}}.

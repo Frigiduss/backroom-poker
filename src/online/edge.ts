@@ -1,6 +1,7 @@
 // The poker-table Supabase Edge Function. scripts/build.mjs bundles this file (with the
 // engine and bots) into supabase/functions/poker-table/index.ts, which is what gets deployed.
 // Supabase provides SUPABASE_URL and the service key to every function on its own.
+import { assuranceOf } from '../accounts/online';
 import { RestTableDb } from './rest-db';
 import { handle } from './server';
 
@@ -34,14 +35,20 @@ const CORS = {
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-/** Checks the caller's sign-in with Supabase Auth and returns their account id. */
+/**
+ * Checks the caller's sign-in with Supabase Auth and returns their account id, or 'code' when
+ * the account has an authenticator app and this sign-in skipped its code.
+ */
 async function userFor(req: Request): Promise<string | null> {
   const auth = req.headers.get('Authorization') ?? '';
   if (!/^Bearer \S+/.test(auth)) return null;
   const res = await fetch(`${URL_BASE}/auth/v1/user`, { headers: { apikey: KEY, Authorization: auth } });
   if (!res.ok) return null;
-  const user = (await res.json()) as { id?: string };
-  return user.id ?? null;
+  const user = (await res.json()) as { id?: string; factors?: { status?: string }[] };
+  if (!user.id) return null;
+  // Auth has just vouched for this token, so its aal claim can be read as is.
+  if (user.factors?.some((f) => f.status === 'verified') && assuranceOf(auth.slice(7)) !== 'aal2') return 'code';
+  return user.id;
 }
 
 Deno.serve(async (req) => {
@@ -51,6 +58,7 @@ Deno.serve(async (req) => {
   try {
     const userId = await userFor(req);
     if (!userId) return json(401, { ok: false, error: 'Sign in to play online.' });
+    if (userId === 'code') return json(401, { ok: false, error: 'Finish two-step sign-in to play online.' });
     const body = await req.json().catch(() => null);
     const out = await handle(db, userId, body);
     return json(out.status, out.body);

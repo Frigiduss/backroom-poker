@@ -28,12 +28,25 @@ export class FakeSupabase {
   calls: string[] = [];
   private n = 0;
 
-  private session(userId: string, email: string) {
-    const access = `at-${++this.n}`;
+  /** Authenticator apps by user id. The right code is always 246810. */
+  factors = new Map<string, { id: string; status: 'verified' | 'unverified' }[]>();
+  /** Access tokens that finished two-step sign-in. */
+  aal2 = new Set<string>();
+  private challenges = new Map<string, string>();
+
+  /** Access tokens look like JWTs, with the `aal` claim the game reads. */
+  private session(userId: string, email: string, aal = 'aal1') {
+    const access = `h.${Buffer.from(JSON.stringify({ aal })).toString('base64url')}.at-${++this.n}`;
     const refresh = `rt-${this.n}`;
     this.tokens.set(access, userId);
-    this.refreshTokens.set(refresh, userId);
+    if (aal === 'aal2') this.aal2.add(access);
+    this.refreshTokens.set(refresh, `${userId}|${aal}`);
     return { access_token: access, refresh_token: refresh, expires_in: this.expiresIn, token_type: 'bearer', user: { id: userId, email } };
+  }
+
+  /** What the real server's mfa_ok() says for this token. */
+  private mfaOk(token: string, uid: string) {
+    return this.aal2.has(token) || !(this.factors.get(uid) ?? []).some((f) => f.status === 'verified');
   }
 
   private emailOf(id: string) {
@@ -65,25 +78,65 @@ export class FakeSupabase {
       const owner = this.refreshTokens.get(body.refresh_token);
       if (!owner) return { status: 400, body: { error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' } };
       this.refreshTokens.delete(body.refresh_token);
-      return { status: 200, body: this.session(owner, this.emailOf(owner)) };
+      const [id, aal] = owner.split('|');
+      return { status: 200, body: this.session(id, this.emailOf(id), aal) };
     }
     if (p === '/auth/v1/user') {
       if (!uid) return { status: 401, body: { msg: 'invalid JWT' } };
-      if (method === 'PUT') this.users.get(this.emailOf(uid))!.password = body.password;
-      return { status: 200, body: { id: uid, email: this.emailOf(uid) } };
+      if (method === 'PUT') {
+        if (!this.mfaOk(bearer, uid)) return { status: 401, body: { error_code: 'insufficient_aal', msg: 'AAL2 required' } };
+        this.users.get(this.emailOf(uid))!.password = body.password;
+      }
+      const factors = (this.factors.get(uid) ?? []).map((f) => ({ id: f.id, factor_type: 'totp', status: f.status, friendly_name: 'app' }));
+      return { status: 200, body: { id: uid, email: this.emailOf(uid), ...(factors.length ? { factors } : {}) } };
     }
     if (p === '/auth/v1/logout') {
-      this.tokens.delete(bearer);
+      if (u.searchParams.get('scope') === 'global' && uid) {
+        for (const [t, id] of [...this.tokens]) if (id === uid) this.tokens.delete(t);
+        for (const [t, id] of [...this.refreshTokens]) if (id.startsWith(`${uid}|`)) this.refreshTokens.delete(t);
+      } else this.tokens.delete(bearer);
       return { status: 204 };
+    }
+    const factorPath = /^\/auth\/v1\/factors(?:\/([^/]+))?(?:\/(challenge|verify))?$/.exec(p);
+    if (factorPath) {
+      if (!uid) return { status: 401, body: { msg: 'invalid JWT' } };
+      const list = this.factors.get(uid) ?? [];
+      this.factors.set(uid, list);
+      const [, fid, step] = factorPath;
+      const f = list.find((x) => x.id === fid);
+      if (!fid && method === 'POST') {
+        const id = `factor-${++this.n}`;
+        list.push({ id, status: 'unverified' });
+        return { status: 200, body: { id, type: 'totp', totp: { qr_code: 'data:image/svg+xml;utf-8,<svg xmlns="http://www.w3.org/2000/svg"><path fill="#000" d="M0 0h1v1z"/></svg>', secret: 'JBSWY3DPEHPK3PXP', uri: 'otpauth://totp/x' } } };
+      }
+      if (!f) return { status: 404, body: { error_code: 'mfa_factor_not_found', msg: 'Factor not found' } };
+      if (step === 'challenge') {
+        const id = `ch-${++this.n}`;
+        this.challenges.set(id, f.id);
+        return { status: 200, body: { id, expires_at: 0 } };
+      }
+      if (step === 'verify') {
+        if (this.challenges.get(body.challenge_id) !== f.id) return { status: 422, body: { error_code: 'mfa_challenge_expired', msg: 'Challenge expired' } };
+        if (body.code !== '246810') return { status: 422, body: { error_code: 'mfa_verification_failed', msg: 'Invalid TOTP code entered' } };
+        f.status = 'verified';
+        return { status: 200, body: this.session(uid, this.emailOf(uid), 'aal2') };
+      }
+      if (method === 'DELETE') {
+        if (f.status === 'verified' && !this.aal2.has(bearer)) return { status: 401, body: { error_code: 'insufficient_aal', msg: 'AAL2 required' } };
+        list.splice(list.indexOf(f), 1);
+        return { status: 200, body: { id: f.id } };
+      }
     }
     if (p === '/auth/v1/recover') return { status: 200, body: {} };
 
     const prefer = headers.Prefer ?? headers.prefer ?? '';
-    const admin = !!uid && this.admins.has(uid);
+    const admin = !!uid && this.admins.has(uid) && this.mfaOk(bearer, uid);
     const denied = { status: 403, body: { code: '42501', message: 'permission denied' } };
 
     if (p === '/rest/v1/players') {
       if (!uid) return { status: 401, body: { code: 'PGRST301', message: 'JWT expired' } };
+      // The restrictive "two-step sign-in finished" policy: no rows, and no writes.
+      if (!this.mfaOk(bearer, uid)) return method === 'GET' ? { status: 200, body: [] } : { status: 403, body: { code: '42501', message: 'new row violates row-level security policy for table "players"' } };
       const idEq = u.searchParams.get('id')?.replace(/^eq\./, '');
       const ownerEq = u.searchParams.get('owner')?.replace(/^eq\./, '');
       // Row security: your own rows, or every row for an admin (supabase/admin.sql).

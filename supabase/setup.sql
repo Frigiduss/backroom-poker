@@ -29,3 +29,23 @@ create policy "Players: owner can delete" on public.players
   for delete to authenticated using (owner = auth.uid());
 
 grant select, insert, update, delete on public.players to authenticated;
+
+-- True unless the signed-in account has an authenticator app and this sign-in skipped its code.
+-- Restrictive policies use it, so a stolen password alone can't read or change anything.
+create or replace function public.mfa_ok()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(auth.jwt() ->> 'aal', '') = 'aal2'
+    or not exists (select 1 from auth.mfa_factors f where f.user_id = auth.uid() and f.status = 'verified');
+$$;
+
+revoke all on function public.mfa_ok() from public;
+grant execute on function public.mfa_ok() to anon, authenticated;
+
+drop policy if exists "Players: two-step sign-in finished" on public.players;
+create policy "Players: two-step sign-in finished" on public.players as restrictive
+  for all to authenticated using ((select public.mfa_ok())) with check ((select public.mfa_ok()));

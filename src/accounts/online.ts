@@ -24,6 +24,38 @@ export interface Session {
   email: string;
 }
 
+/** An authenticator app set up on the account for two-step sign-in. */
+export interface Factor {
+  id: string;
+  verified: boolean;
+  name: string;
+}
+
+/** A new authenticator being set up: scan `qr` (an SVG data URI) or type `secret`. */
+export interface TotpSetup {
+  id: string;
+  qr: string;
+  secret: string;
+}
+
+/** Fewest characters a new password may have. Supabase's own setting should match (supabase/README.md). */
+export const PASSWORD_MIN = 8;
+
+/**
+ * How strongly this sign-in was checked, from the access token: 'aal2' once an authenticator
+ * code was entered, 'aal1' after just a password. The server checks the token; this is only
+ * for knowing when to ask for a code.
+ */
+export function assuranceOf(accessToken: string): string {
+  try {
+    const part = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, '='))) as { aal?: unknown };
+    return typeof claims.aal === 'string' ? claims.aal : 'aal1';
+  } catch {
+    return 'aal1';
+  }
+}
+
 export class OnlineError extends Error {
   constructor(message: string, readonly status = 0) {
     super(message);
@@ -42,9 +74,19 @@ function friendly(status: number, body: Record<string, unknown>): string {
   if (code === 'email_not_confirmed' || /not confirmed/i.test(msg)) return 'Confirm your email first: open the link we sent you, then sign in.';
   if (code === 'user_already_exists' || /already registered/i.test(msg)) return 'There is already an account with that email. Sign in instead.';
   if (code === 'weak_password' || /password should be/i.test(msg)) return msg || 'Pick a longer password.';
+  if (code === 'mfa_verification_failed' || /invalid totp/i.test(msg)) return "That code didn't match. Check the app and try the newest code.";
+  if (code === 'mfa_challenge_expired') return 'That took too long. Try a fresh code.';
+  if (code === 'insufficient_aal') return 'Enter a code from your authenticator app first.';
   if (code === 'over_email_send_rate_limit' || status === 429) return 'Too many tries. Wait a minute and try again.';
   if (/valid email|email address/i.test(msg)) return 'That email address doesn\'t look right.';
   return msg || `The server said no (${status}).`;
+}
+
+/** Supabase sends the QR code as raw SVG after a data: prefix; encode it so any '#' in it survives. Only SVG is kept. */
+function qrUri(qr: string): string {
+  const m = /^data:image\/svg\+xml;(?:utf-8|charset=utf-8),([\s\S]*)$/i.exec(qr);
+  if (m) return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(m[1].includes('<') ? m[1] : decodeURIComponent(m[1]))}`;
+  return qr.trim().startsWith('<svg') ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr)}` : '';
 }
 
 /** Email and password sign-in, with the session kept in browser storage and refreshed as needed. */
@@ -140,6 +182,60 @@ export class OnlineAuth {
     const s = this.session;
     this.keep(null);
     if (s) await this.call('logout', { token: s.accessToken }).catch(() => undefined);
+  }
+
+  /** Signs this account out on every device, this one included. */
+  async signOutEverywhere(): Promise<void> {
+    await this.call('logout?scope=global', { token: await this.token() });
+    this.keep(null);
+  }
+
+  // ---------- two-step sign-in (Supabase MFA with an authenticator app) ----------
+
+  /** The authenticator apps on the account. */
+  async factors(): Promise<Factor[]> {
+    const user = await this.call('user', { method: 'GET', token: await this.token() });
+    const list = Array.isArray(user.factors) ? (user.factors as Record<string, unknown>[]) : [];
+    return list
+      .filter((f) => f.factor_type === 'totp' && typeof f.id === 'string')
+      .map((f) => ({ id: f.id as string, verified: f.status === 'verified', name: String(f.friendly_name ?? '') }));
+  }
+
+  /** The authenticator to ask for a code when this sign-in still needs its second step, else null. */
+  async secondStepFactor(): Promise<Factor | null> {
+    const s = this.session;
+    if (!s || assuranceOf(s.accessToken) === 'aal2') return null;
+    return (await this.factors()).find((f) => f.verified) ?? null;
+  }
+
+  /** Starts setting up an authenticator app. Any half-finished setup is cleared first. */
+  async enrollTotp(): Promise<TotpSetup> {
+    const token = await this.token();
+    for (const f of await this.factors()) if (!f.verified) await this.call(`factors/${encodeURIComponent(f.id)}`, { method: 'DELETE', token });
+    const r = await this.call('factors', { body: { factor_type: 'totp', friendly_name: `Back Room Poker ${new Date().toISOString().slice(0, 16)}` }, token });
+    const totp = (r.totp ?? {}) as { qr_code?: unknown; secret?: unknown };
+    if (typeof r.id !== 'string' || typeof totp.secret !== 'string') throw new OnlineError('Two-step sign-in could not be set up. Try again.');
+    return { id: r.id, qr: typeof totp.qr_code === 'string' ? qrUri(totp.qr_code) : '', secret: totp.secret };
+  }
+
+  /**
+   * Checks a code from the authenticator app. That finishes a sign-in's second step, or turns
+   * on a new authenticator, and upgrades this sign-in to 'aal2'.
+   */
+  async verifyTotp(factorId: string, code: string): Promise<void> {
+    const token = await this.token();
+    const f = encodeURIComponent(factorId);
+    const challenge = await this.call(`factors/${f}/challenge`, { body: {}, token });
+    if (typeof challenge.id !== 'string') throw new OnlineError('The code could not be checked. Try again.');
+    const s = this.toSession(await this.call(`factors/${f}/verify`, { body: { challenge_id: challenge.id, code: code.replace(/\s+/g, '') }, token }));
+    if (!s) throw new OnlineError('The code could not be checked. Try again.');
+    this.keep(s);
+  }
+
+  /** Removes an authenticator, after a fresh code from it, so a borrowed unlocked device can't turn it off. */
+  async removeTotp(factorId: string, code: string): Promise<void> {
+    await this.verifyTotp(factorId, code);
+    await this.call(`factors/${encodeURIComponent(factorId)}`, { method: 'DELETE', token: await this.token() });
   }
 
   /**

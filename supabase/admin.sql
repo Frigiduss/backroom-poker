@@ -1,5 +1,5 @@
 -- Back Room Poker: the developer console.
--- Run this once, after setup.sql, in the SQL Editor (New query → paste → Run). Running it
+-- Run this once, after setup.sql (it needs mfa_ok() from there), in the SQL Editor (New query → paste → Run). Running it
 -- again is safe. It adds:
 --   * admins       accounts allowed to use the console (add yourself at the bottom)
 --   * is_admin()   true when the signed-in account is an admin
@@ -28,7 +28,7 @@ stable
 security definer
 set search_path = ''
 as $$
-  select exists (select 1 from public.admins where user_id = auth.uid());
+  select exists (select 1 from public.admins where user_id = auth.uid()) and public.mfa_ok();
 $$;
 
 revoke all on function public.is_admin() from public, anon;

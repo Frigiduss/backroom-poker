@@ -1,5 +1,5 @@
 import {
-  ACHIEVEMENTS, Achievement, AccountStore, Counters, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
+  ACHIEVEMENTS, Achievement, AccountStore, Counters, Factor, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PASSWORD_MIN, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
   BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
   takeUnlocks, titleFor,
 } from '../accounts';
@@ -85,6 +85,10 @@ export async function openPlayer(onReady: () => void, app: HTMLElement) {
  */
 export async function goOnline(onReady: () => void, app: HTMLElement) {
   if (!auth?.current) return openPlayer(onReady, app);
+  // An account with an authenticator app needs its code before anything opens. (If the check
+  // can't reach the server, the database still refuses a sign-in that skipped the code.)
+  const second = await auth.secondStepFactor().catch(() => null);
+  if (second) return renderSecondStep(app, onReady, second);
   const online = new OnlineAccountStore(auth, storage);
   store = online;
   try {
@@ -264,7 +268,7 @@ export function renderAuth(app: HTMLElement, onReady: () => void, mode: 'signin'
       </label>
       <label class="auth-field"><span>Password</span>
         <span class="pw-wrap">
-          <input id="auth-pass" class="text-input" type="password" minlength="6" autocomplete="${signup ? 'new-password' : 'current-password'}" ${signup ? 'placeholder="At least 6 characters"' : ''} required>
+          <input id="auth-pass" class="text-input" type="password" ${signup ? `minlength="${PASSWORD_MIN}" placeholder="At least ${PASSWORD_MIN} characters"` : ''} autocomplete="${signup ? 'new-password' : 'current-password'}" required>
           <button type="button" class="pw-show" id="pw-show" aria-pressed="false">Show</button>
         </span>
       </label>
@@ -321,6 +325,36 @@ export function renderAuth(app: HTMLElement, onReady: () => void, mode: 'signin'
     store = local;
     void openPlayer(onReady, app);
   };
+}
+
+/** The second step of signing in: a code from the authenticator app. */
+export function renderSecondStep(app: HTMLElement, onReady: () => void, factor: Factor) {
+  if (!auth) return void openPlayer(onReady, app);
+  const a = auth;
+  app.innerHTML = authShell(`
+    <div class="auth-head">
+      <h2>Two-step sign-in</h2>
+      <p class="auth-sub">Open your authenticator app and type the 6-digit code for <b>Back Room Poker</b>${a.current?.email ? ` (${esc(a.current.email)})` : ''}.</p>
+    </div>
+    <form id="code-form" class="auth-form">
+      <label class="auth-field"><span>Code</span>
+        <input id="mfa-code" class="text-input mfa-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="123456" required>
+      </label>
+      <button type="submit" class="btn btn-primary btn-lg auth-go">Sign in</button>
+    </form>
+    <p class="form-error" id="auth-error" role="alert"></p>
+    <p class="fine auth-foot">Lost your phone? Ask the site's admin to remove two-step sign-in from your account. <button type="button" class="link-btn plain" id="not-you">Use a different account</button></p>
+  `, 'One more check that it\'s really you.');
+  const code = document.getElementById('mfa-code') as HTMLInputElement;
+  code.focus();
+  document.getElementById('code-form')!.onsubmit = (e) => {
+    e.preventDefault();
+    busy(app, async () => {
+      await a.verifyTotp(factor.id, code.value);
+      await goOnline(onReady, app);
+    });
+  };
+  document.getElementById('not-you')!.onclick = () => busy(app, () => signOutTo(app, onReady));
 }
 
 /** Shown when there are no players yet: a new account (or this device) picks a name and colour. */
@@ -530,6 +564,12 @@ function accountPanelHtml(): string {
       <h2 class="step">Online account</h2>
       <p>Signed in as <b>${esc(s.email)}</b>. Your chips and stats are saved online.</p>
       <div class="row-btns"><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
+    </section>
+    <section class="panel account-panel" id="security-panel">
+      <h2 class="step">Account security</h2>
+      <div id="security-body"><p class="fine">Checking…</p></div>
+      <p class="form-ok" id="form-ok" role="status"></p>
+      <p class="form-error" id="form-error" role="alert"></p>
     </section>`;
   }
   if (s) {
@@ -549,6 +589,7 @@ function accountPanelHtml(): string {
 
 function bindAccountPanel(app: HTMLElement, onReady: () => void) {
   if (!auth) return;
+  if (document.getElementById('security-panel')) void renderSecurity(app, onReady);
   document.getElementById('sign-out')?.addEventListener('click', () => busy(app, () => signOutTo(app, onReady)));
   document.getElementById('go-auth')?.addEventListener('click', () => renderAuth(app, onReady));
   document.getElementById('retry-online')?.addEventListener('click', () => busy(app, async () => {
@@ -556,6 +597,129 @@ function bindAccountPanel(app: HTMLElement, onReady: () => void) {
     const n = takeNotice();
     if (n) throw new Error(n);
   }));
+}
+
+// ---------- account security (profile page) ----------
+
+const passwordField = (id: string, label: string) => `<label class="auth-field"><span>${label}</span>
+  <input id="${id}" class="text-input" type="password" minlength="${PASSWORD_MIN}" placeholder="At least ${PASSWORD_MIN} characters" autocomplete="new-password" required>
+</label>`;
+
+const codeField = (id: string) => `<label class="auth-field"><span>Code from the app</span>
+  <input id="${id}" class="text-input mfa-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="123456" required>
+</label>`;
+
+/** Two-step sign-in, a new password, and signing out on every device. */
+async function renderSecurity(app: HTMLElement, onReady: () => void, view: 'main' | 'password' | 'setup' | 'off' = 'main', okText = '') {
+  const a = auth;
+  const body = document.getElementById('security-body');
+  if (!a || !body) return;
+  const ok = document.getElementById('form-ok')!;
+  const err = document.getElementById('form-error')!;
+  ok.textContent = okText;
+  err.textContent = '';
+  let factor: Factor | undefined;
+  try {
+    factor = (await a.factors()).find((f) => f.verified);
+  } catch (e) {
+    body.innerHTML = '';
+    err.textContent = (e as Error).message;
+    return;
+  }
+  if (!body.isConnected) return;
+  const again = (v: typeof view, msg = '') => renderSecurity(app, onReady, v, msg);
+
+  if (view === 'setup') {
+    const setup = await a.enrollTotp().catch((e: Error) => {
+      err.textContent = e.message;
+      return null;
+    });
+    if (!setup || !body.isConnected) return;
+    body.innerHTML = `<div class="mfa-setup">
+        ${setup.qr ? `<img class="mfa-qr" src="${esc(setup.qr)}" alt="QR code for your authenticator app" width="180" height="180">` : ''}
+        <div class="mfa-steps">
+          <p>1. Open an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) and scan this code.</p>
+          <p>Can't scan? Add it by hand with this key: <code class="mfa-secret">${esc(setup.secret.replace(/(.{4})/g, '$1 ').trim())}</code></p>
+          <p>2. Type the 6-digit code it shows.</p>
+          <form id="mfa-on" class="auth-form">
+            ${codeField('mfa-code')}
+            <div class="row-btns"><button type="submit" class="btn btn-sm btn-primary">Turn on</button><button type="button" class="btn btn-sm" id="sec-cancel">Cancel</button></div>
+          </form>
+        </div>
+      </div>`;
+    document.getElementById('mfa-on')!.onsubmit = (e) => {
+      e.preventDefault();
+      const code = (document.getElementById('mfa-code') as HTMLInputElement).value;
+      busy(app, async () => {
+        await a.verifyTotp(setup.id, code);
+        await again('main', 'Two-step sign-in is on. Next time you sign in, have your phone handy.');
+      });
+    };
+  } else if (view === 'off' && factor) {
+    const f = factor;
+    body.innerHTML = `<form id="mfa-off" class="auth-form">
+        <p>To turn off two-step sign-in, type a code from your authenticator app.</p>
+        ${codeField('mfa-code')}
+        <div class="row-btns"><button type="submit" class="btn btn-sm">Turn off</button><button type="button" class="btn btn-sm" id="sec-cancel">Cancel</button></div>
+      </form>`;
+    document.getElementById('mfa-off')!.onsubmit = (e) => {
+      e.preventDefault();
+      const code = (document.getElementById('mfa-code') as HTMLInputElement).value;
+      busy(app, async () => {
+        await a.removeTotp(f.id, code);
+        await again('main', 'Two-step sign-in is off.');
+      });
+    };
+  } else if (view === 'password') {
+    body.innerHTML = `<form id="pw-change" class="auth-form">
+        ${passwordField('new-pass', 'New password')}
+        ${passwordField('new-pass2', 'Type it again')}
+        <div class="row-btns"><button type="submit" class="btn btn-sm btn-primary">Save password</button><button type="button" class="btn btn-sm" id="sec-cancel">Cancel</button></div>
+      </form>`;
+    document.getElementById('pw-change')!.onsubmit = (e) => {
+      e.preventDefault();
+      const pw = (document.getElementById('new-pass') as HTMLInputElement).value;
+      if (pw !== (document.getElementById('new-pass2') as HTMLInputElement).value) {
+        err.textContent = "The two passwords don't match.";
+        return;
+      }
+      busy(app, async () => {
+        await a.setPassword(pw);
+        await again('main', 'Password changed.');
+      });
+    };
+  } else {
+    body.innerHTML = `<div class="sec-rows">
+        <div class="sec-row">
+          <div><b>Two-step sign-in</b> <span class="sec-pill ${factor ? 'on' : ''}">${factor ? 'On' : 'Off'}</span>
+            <p>${factor ? 'Signing in asks for a code from your authenticator app as well as your password.' : 'Ask for a code from an authenticator app on your phone as well as your password, so a stolen password alone can\'t get in.'}</p></div>
+          <button type="button" class="btn btn-sm ${factor ? '' : 'btn-primary'}" id="mfa-toggle">${factor ? 'Turn off' : 'Set up'}</button>
+        </div>
+        <div class="sec-row">
+          <div><b>Password</b><p>Use one you don't use anywhere else.</p></div>
+          <button type="button" class="btn btn-sm" id="pw-open">Change password</button>
+        </div>
+        <div class="sec-row">
+          <div><b>Signed in somewhere else?</b><p>Signs this account out on every device, including this one.</p></div>
+          <button type="button" class="btn btn-sm" id="sign-out-all">Sign out everywhere</button>
+        </div>
+      </div>`;
+    document.getElementById('mfa-toggle')!.onclick = () => again(factor ? 'off' : 'setup');
+    document.getElementById('pw-open')!.onclick = () => again('password');
+    document.getElementById('sign-out-all')!.onclick = () => {
+      if (!confirm('Sign out on every device? You\'ll need to sign in again here too.')) return;
+      busy(app, async () => {
+        await savePlayer();
+        await a.signOutEverywhere();
+        store = local;
+        current = null;
+        applyLook(null, {});
+        saveError = '';
+        renderAuth(app, onReady, 'signin', 'Signed out on every device.');
+      });
+    };
+  }
+  document.getElementById('sec-cancel')?.addEventListener('click', () => again('main'));
 }
 
 /** After a password-reset link: the person is signed in and picks a new password. */
@@ -569,17 +733,29 @@ export function renderNewPassword(app: HTMLElement, onDone: () => void) {
     </div>
     <form id="pw-form" class="auth-form">
       <label class="auth-field"><span>New password</span>
-        <input id="new-pass" class="text-input" type="password" minlength="6" placeholder="At least 6 characters" autocomplete="new-password" required>
+        <input id="new-pass" class="text-input" type="password" minlength="${PASSWORD_MIN}" placeholder="At least ${PASSWORD_MIN} characters" autocomplete="new-password" required>
       </label>
+      <div id="reset-code" hidden>${codeField('mfa-code')}</div>
       <button type="submit" class="btn btn-primary btn-lg auth-go">Save and play</button>
     </form>
     <p class="form-error" id="auth-error" role="alert"></p>
   `, 'Locked out? Not for long.');
   const input = document.getElementById('new-pass') as HTMLInputElement;
   input.focus();
+  // A reset link only proves the email; an account with two-step sign-in needs its code too.
+  const codeBox = document.getElementById('reset-code')!;
+  const codeInput = document.getElementById('mfa-code') as HTMLInputElement;
+  codeInput.required = false;
+  let factor: Factor | null = null;
+  void a.secondStepFactor().then((f) => {
+    factor = f;
+    codeBox.hidden = !f;
+    codeInput.required = !!f;
+  }).catch(() => undefined);
   document.getElementById('pw-form')!.onsubmit = (e) => {
     e.preventDefault();
     busy(app, async () => {
+      if (factor) await a.verifyTotp(factor.id, codeInput.value);
       await a.setPassword(input.value);
       onDone();
     });

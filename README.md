@@ -49,6 +49,8 @@ Signed in, you can also:
 - **Chat** at the table.
 - **Climb the leaderboard** for chip bank, biggest pot and achievements (players appear
   after 10 hands; you can take yourself off it).
+- **Lock down your account** with two-step sign-in (a code from an authenticator app),
+  change your password, or sign out on every device, from **Profile → Account security**.
 
 Online tables use table chips, so your bank isn't at stake there.
 
@@ -155,6 +157,7 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/achievements.sql` | Achievements earned at online tables |
 | `supabase/leaderboard.sql` | Daily bonus and leaderboard |
 | `supabase/admin.sql` | Admin accounts |
+| `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
 Step-by-step instructions are in [supabase/README.md](supabase/README.md). Only the public
 (anon/publishable) key belongs in the code; the database's row security rules are what keep
