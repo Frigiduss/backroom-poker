@@ -40,6 +40,8 @@ export interface PlayerTag {
 export type Request =
   | ({ op: 'create'; name: string; settings: TableSettings } & PlayerTag)
   | ({ op: 'join'; code: string; name: string } & PlayerTag)
+  /** Watches a table without a seat: no hole cards but the ones shown, no moves. Join later to sit in. */
+  | ({ op: 'watch'; code: string; name: string } & PlayerTag)
   | { op: 'leave'; tableId: string }
   | { op: 'start'; tableId: string }
   | { op: 'act'; tableId: string; hand: number; action: Action }
@@ -94,7 +96,7 @@ export interface AdminTableInfo {
   phase: 'lobby' | 'playing' | 'over';
   paused: boolean;
   settings: TableSettings;
-  members: { name: string; userId: string; seat: string | null; host: boolean; left: boolean; away: boolean }[];
+  members: { name: string; userId: string; seat: string | null; host: boolean; left: boolean; away: boolean; watching: boolean }[];
   handNumber: number;
   level: number;
   seats: { id: string; name: string; isHuman: boolean; difficulty?: Difficulty; style?: BotStyle; stack: number; busted: boolean }[];
@@ -179,6 +181,8 @@ export interface MemberView {
   /** Seat id once the game has started (or once a late joiner is dealt in). */
   seat: string | null;
   left: boolean;
+  /** Watching the table, not playing. */
+  watching: boolean;
 }
 
 export interface SeatView {
@@ -245,6 +249,10 @@ export interface TableView {
   mySeat: string | null;
   /** Joined after the start; gets a seat when the next hand is dealt. */
   waitingForSeat: boolean;
+  /** The viewer is watching, not playing: they see only what the whole table sees. */
+  watching: boolean;
+  /** A watcher could sit in now (a seat is open or a bot's seat can be taken). */
+  canSit: boolean;
   handNumber: number;
   level: number;
   handsUntilNextLevel: number | null;

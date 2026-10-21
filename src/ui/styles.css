@@ -1354,6 +1354,8 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .rs-tag.host { color: var(--gold); }
 .room-card .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .room-wait { color: var(--muted); font-style: italic; }
+.room-watchers { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+.room-watchers .sl { margin-right: 6px; }
 
 .code-tag { letter-spacing: .15em; color: var(--gold) !important; }
 .net-problem {
@@ -1483,6 +1485,9 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 }
 .lvl.ttl { color: var(--gold-hi); border-color: rgba(230, 184, 92, .6); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paused-tag { color: var(--gold-hi); }
+.watch-tag { color: var(--gold-hi); }
+.watch-count { color: var(--muted); cursor: default; }
+.watch-note { color: var(--muted); font-size: 13px; }
 
 /* ---------- blackjack ----------
    A half-moon table: the dealer and chip tray along the straight edge at the top, the
