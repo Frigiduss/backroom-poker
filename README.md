@@ -157,6 +157,7 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/achievements.sql` | Achievements earned at online tables |
 | `supabase/leaderboard.sql` | Daily bonus and leaderboard |
 | `supabase/admin.sql` | Admin accounts |
+| `supabase/banks.sql` | Limits on how fast an online chip bank can grow, so a save can't be edited to cheat |
 | `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
 Step-by-step instructions are in [supabase/README.md](supabase/README.md). Only the public
