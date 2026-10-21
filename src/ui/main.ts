@@ -13,6 +13,7 @@ import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
 import { ONLINE } from '../accounts/config';
 import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice } from './profiles';
 import { announce, checkAchievements, renderAchievements } from './achievements';
+import { renderStats } from './stats';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
 import { bindGamePicker, gamePickerHtml } from './picker';
@@ -234,7 +235,7 @@ function renderSetup() {
     opp.oninput = () => (document.getElementById('opp-out')!.textContent = opp.value);
     opp.onchange = () => update(() => (setup.opponents = Number(opp.value)));
   }
-  const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile));
+  const openProfile = () => renderProfile(app, renderSetup, () => renderAchievements(app, openProfile), () => renderStats(app, openProfile));
   document.getElementById('open-profile')!.onclick = openProfile;
   bindFriendsPanel(() => ({
     name: me.name,

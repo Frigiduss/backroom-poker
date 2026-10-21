@@ -2,7 +2,7 @@
 // For online players the server keeps the claim time (supabase/leaderboard.sql, which repeats
 // these numbers), so changing the device clock or editing saved data can't collect it twice.
 // Players kept only in this browser use the same rules with the browser's clock.
-import { Profile } from './profile';
+import { Profile, noteChips } from './profile';
 
 /** Hours to wait between claims. A little under a day, so the time of day can drift. */
 export const BONUS_COOLDOWN_HOURS = 20;
@@ -51,6 +51,7 @@ export function applyBonus(p: Profile, c: BonusClaim): void {
     p.stats.peakBank = Math.max(p.stats.peakBank, p.bank);
   }
   p.updatedAt = Date.now();
+  noteChips(p, p.updatedAt);
 }
 
 /** A claim checked against the browser's clock, for players that aren't saved online. */
