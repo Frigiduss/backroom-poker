@@ -10,6 +10,8 @@
 import { Card, rankOf, suitOf } from '../engine/cards';
 import { Cat, categoryOf } from '../engine/evaluator';
 import { Round, handTotal } from '../engine/blackjack';
+import type { Coup, BacResult } from '../engine/baccarat';
+import { SpinResult, isZero } from '../engine/roulette';
 import type { Hand } from '../engine/hand';
 import { Difficulty, Format } from '../engine/table';
 import { VARIANTS, VARIANT_ORDER, VariantId, showdownValue } from '../engine/variants';
@@ -19,7 +21,7 @@ export type Counters = Record<string, number>;
 export type Tier = 1 | 2 | 3 | 4;
 export const TIER_NAMES: Record<Tier, string> = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Diamond' };
 
-export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'online';
+export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'online';
 export const GROUP_NAMES: Record<AchievementGroup, string> = {
   career: 'Career',
   hands: 'Big hands',
@@ -27,9 +29,10 @@ export const GROUP_NAMES: Record<AchievementGroup, string> = {
   formats: 'Cash and tournaments',
   bots: 'Bot hunting',
   blackjack: 'Blackjack',
+  casino: 'Roulette and baccarat',
   online: 'Online with friends',
 };
-export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'online'];
+export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'online'];
 
 export interface Achievement {
   id: string;
@@ -48,7 +51,7 @@ export interface Achievement {
 }
 
 /** Counters that keep the best value seen rather than a running total. */
-const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin']);
+const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin', 'rl.bigWin', 'bac.bigWin', 'bac.bestRun']);
 export const isMaxCounter = (key: string): boolean => MAX_COUNTERS.has(key);
 export const isOnlineCounter = (key: string): boolean => key.startsWith('online.');
 
@@ -258,6 +261,38 @@ ladder('blackjack', 'bj.bestRun', [
 ladder('blackjack', 'bj.bigWin', [
   { id: 'bj-win-1000', name: 'Paid Out', desc: 'Win 1,000 chips in one hand of blackjack.', tier: 1, goal: 1000 },
   { id: 'bj-win-10000', name: 'Broke the Bank', desc: 'Win 10,000 chips in one hand of blackjack.', tier: 3, goal: 10_000, title: 'Bank Breaker' },
+]);
+
+// Roulette and baccarat against the house.
+ladder('casino', 'rl.spins', [
+  { id: 'rl-spins-25', name: 'Place Your Bets', desc: 'Play 25 spins of roulette.', tier: 1, goal: 25 },
+  { id: 'rl-spins-500', name: 'Wheel Watcher', desc: 'Play 500 spins of roulette.', tier: 2, goal: 500, title: 'Wheel Watcher' },
+]);
+ladder('casino', 'rl.straightHits', [
+  { id: 'rl-straight-1', name: 'Straight Up', desc: 'Hit a single number in roulette.', tier: 1, goal: 1 },
+  { id: 'rl-straight-25', name: 'Sharpshooter', desc: 'Hit a single number in roulette 25 times.', tier: 3, goal: 25, title: 'Sharpshooter' },
+]);
+ladder('casino', 'rl.zeroHits', [
+  { id: 'rl-zero', name: 'Green Machine', desc: 'Win a bet on the zero.', tier: 2, goal: 1 },
+]);
+ladder('casino', 'rl.bigWin', [
+  { id: 'rl-win-5000', name: 'Spin Doctor', desc: 'Win 5,000 chips on one spin of roulette.', tier: 3, goal: 5000, title: 'Spin Doctor' },
+]);
+ladder('casino', 'bac.hands', [
+  { id: 'bac-hands-25', name: 'Punto Banco', desc: 'Play 25 hands of baccarat.', tier: 1, goal: 25 },
+  { id: 'bac-hands-500', name: 'High Roller', desc: 'Play 500 hands of baccarat.', tier: 2, goal: 500, title: 'High Roller' },
+]);
+ladder('casino', 'bac.tieWins', [
+  { id: 'bac-tie', name: 'All Square', desc: 'Win a Tie bet in baccarat.', tier: 1, goal: 1 },
+]);
+ladder('casino', 'bac.pairWins', [
+  { id: 'bac-pair', name: 'Pair Up', desc: 'Win a pair bet in baccarat.', tier: 1, goal: 1 },
+]);
+ladder('casino', 'bac.nines', [
+  { id: 'bac-nine', name: 'Le Grand', desc: 'Win a baccarat bet on a natural nine.', tier: 2, goal: 1 },
+]);
+ladder('casino', 'bac.bestRun', [
+  { id: 'bac-run-6', name: 'Ride the Dragon', desc: 'Come out ahead on 6 baccarat hands in a row.', tier: 3, goal: 6, title: 'Dragon Rider' },
 ]);
 
 // Online with friends: credited by the table server only.
@@ -487,6 +522,35 @@ export function blackjackTally(round: Round, seat: number, run = 0): Tally {
   }
   if (s.hands.length > 1 && s.hands.every((h) => won(h.outcome))) add('bj.splitSweeps');
   if (s.insurance && round.dealer.length === 2 && handTotal(round.dealer).total === 21) add('bj.insured');
+  return t;
+}
+
+/** What one spin of the roulette wheel adds to the player's record. */
+export function rouletteTally(r: SpinResult): Tally {
+  const t = emptyTally();
+  if (!r.staked) return t;
+  const add = (k: string) => (t.sum[k] = (t.sum[k] ?? 0) + 1);
+  add('rl.spins');
+  if (r.net > 0) t.max['rl.bigWin'] = r.net;
+  const hits = r.spots.filter((s) => s.paid > 0 && s.key.startsWith('straight:'));
+  if (hits.length) add('rl.straightHits');
+  if (isZero(r.pocket) && hits.length) add('rl.zeroHits');
+  return t;
+}
+
+/** What one baccarat coup adds to the player's record. `run` is their streak of winning hands including this one. */
+export function baccaratTally(coup: Coup, r: BacResult, run = 0): Tally {
+  const t = emptyTally();
+  if (!r.staked) return t;
+  const add = (k: string) => (t.sum[k] = (t.sum[k] ?? 0) + 1);
+  add('bac.hands');
+  if (r.net > 0) t.max['bac.bigWin'] = r.net;
+  if (run > 0) t.max['bac.bestRun'] = run;
+  const won = (spot: string) => r.spots.some((s) => s.spot === spot && s.outcome === 'win');
+  if (won('tie')) add('bac.tieWins');
+  if (won('playerPair') || won('bankerPair')) add('bac.pairWins');
+  const nine = coup.natural && ((won('player') && coup.playerTotal === 9) || (won('banker') && coup.bankerTotal === 9));
+  if (nine) add('bac.nines');
   return t;
 }
 

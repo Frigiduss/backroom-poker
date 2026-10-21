@@ -102,19 +102,21 @@ export const activeTable = (): { tableId: string; code: string; game: 'poker' | 
 
 // ---------- lobby panel ----------
 
-export function friendsPanelHtml(): string {
+/** `solo` names the picked game when it can only be played alone, so no table can be made for it. */
+export function friendsPanelHtml(solo?: string): string {
   if (!hooks?.auth) return '';
   const body = signedIn()
     ? `<p>Make a private table with the game and settings above, then send the code to your friends. Bots take any seats nobody fills. Got a code? Join to play, or watch first and sit in when you're ready.</p>
       ${resumable ? `<div class="resume-row"><span>${resumable.watching ? 'You were watching' : 'You still have a seat at'} table <b>${esc(resumable.code)}</b> (${esc(gameName(resumable.settings))}).</span><button type="button" class="btn btn-sm btn-primary" id="resume-table">${resumable.watching ? 'Back to watching' : 'Back to the table'}</button></div>` : ''}
       <div class="friends-actions">
-        <button type="button" class="btn btn-primary" id="make-table">Make a table</button>
+        <button type="button" class="btn btn-primary" id="make-table" ${solo ? 'disabled' : ''}>Make a table</button>
         <form class="join-form" id="join-form">
           <input class="text-input code-input" id="join-code" maxlength="8" placeholder="Table code" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(linkCode)}" aria-label="Table code">
           <button type="submit" class="btn">Join</button>
           <button type="button" class="btn" id="watch-table" title="See the table without taking a seat">Watch</button>
         </form>
       </div>
+      ${solo ? `<p class="fine">${solo} is just you against the house for now. Pick poker or blackjack to make a table for friends.</p>` : ''}
       <p class="fine">Online tables play with table chips, so your bank stays as it is. Everyone gets ${TURN_SECONDS} seconds a turn.</p>
       <p class="form-error" id="friends-error" role="alert"></p>`
     : `<p>Sign in to an online account to make a table and invite friends with a code.</p>
