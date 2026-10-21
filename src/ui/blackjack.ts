@@ -10,6 +10,8 @@ import type { DevBlackjack } from './console-blackjack';
 import { cardHtml, chipsHtml, esc, fmt } from './dom';
 import { currentTitle, player, savePlayer, serverAwards } from './profiles';
 import { SoundName, play, setVolume } from './sound';
+import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../bots/persona';
+import { avatarHtml, floatOver } from './talk';
 
 // ---------- lobby settings ----------
 
@@ -35,6 +37,8 @@ export interface BjPrefs {
   sound: boolean;
   volume: number;
   fourColor: boolean;
+  /** Bots chat at the table now and then. */
+  talk: boolean;
 }
 
 export const limitText = (l: BjLimits) => `${fmt(BJ_LIMITS[l].min)} – ${fmt(BJ_LIMITS[l].max)}`;
@@ -114,7 +118,6 @@ interface Spot {
   level: string;
 }
 
-const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana', 'Iris', 'Jax', 'Kai', 'Lulu', 'Milo', 'Nova', 'Otto', 'Pia', 'Quinn', 'Rex', 'Sage', 'Tess'];
 const BOT_LEVELS = ['beginner', 'easy', 'medium', 'hard', 'expert'];
 const DELAY: Record<BjPrefs['speed'], number> = { relaxed: 1000, normal: 620, fast: 240 };
 const BOT_BUYIN = 40;
@@ -194,7 +197,7 @@ export class BjFelt {
         <div class="bj-hands">${hands}</div>
         ${circle}
         <div class="pod" title="${esc(spot.name)}">
-          <span class="avatar lv-${spot.level}">${esc(spot.name.slice(0, 1).toUpperCase())}</span>
+          ${avatarHtml(spot.name, spot.level, spot.level !== 'human')}
           <span class="plate"><span class="nm">${esc(spot.name)}</span><span class="stk">${fmt(spot.stack)}</span></span>
           ${label}
         </div>
@@ -293,11 +296,15 @@ export class BlackjackTable {
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
   /** Developer console: the bots and dealer wait while paused. */
   private paused = false;
+  /** Round number of the last bot remark, and lines waiting to float up once drawn. */
+  private lastTalk = -10;
+  private talkRng = createRng();
+  private talkQueue: { seat: string; text: string }[] = [];
   /** Developer console: cards to deal next round, by spot id. */
   private nextRig: RoundRig | null = null;
 
   constructor(private readonly h: Hooks) {
-    const names = shuffle([...BOT_NAMES], this.rng);
+    const names = shuffle(PERSONA_NAMES.filter((n) => n.toLowerCase() !== this.profile.name.toLowerCase()), this.rng);
     const limits = this.limits;
     const bots: Spot[] = Array.from({ length: Math.max(0, Math.min(BJ_MAX_BOTS, h.setup.bots)) }, (_, i) => ({
       id: `b${i}`, name: names[i], isHuman: false, stack: limits.min * BOT_BUYIN, level: BOT_LEVELS[Math.floor(this.rng.next() * BOT_LEVELS.length)],
@@ -519,9 +526,27 @@ export class BlackjackTable {
     if (net > 0) this.run++;
     else if (net < 0) this.run = 0;
     credit(this.profile, blackjackTally(r, this.humanSpot, this.run));
+    this.talk(r);
     // A bet the bank can no longer cover comes down to what's left.
     this.bet = this.clampBet(Math.min(this.bet, this.profile.bank));
     announce(takeUnlocks(this.profile, serverAwards()));
+  }
+
+  /** Now and then a bot says something about how their round went. */
+  private talk(r: Round) {
+    if (!this.h.prefs.talk || this.rounds - this.lastTalk < 2 || this.talkRng.next() > 0.3) return;
+    const said = r.seats.flatMap((seat, i) => {
+      const spot = this.spots[i];
+      const who = spot && !spot.isHuman ? personaFor(spot.name) : undefined;
+      const outcome = seat.hands[0]?.outcome;
+      if (!who || !outcome || outcome === 'push') return [];
+      const event: TalkEvent = outcome === 'blackjack' ? 'bigwin' : outcome === 'win' ? 'win' : 'lose';
+      return [{ who, spot, event }];
+    });
+    const pick = said[Math.floor(this.talkRng.next() * said.length)];
+    if (!pick) return;
+    this.lastTalk = this.rounds;
+    this.talkQueue.push({ seat: pick.spot.id, text: lineFor(pick.who, pick.event, this.talkRng) });
   }
 
   // ---------- rendering ----------
@@ -552,11 +577,13 @@ export class BlackjackTable {
     ${this.modalHtml()}`;
     this.opening = false;
     this.bind();
+    const said = this.talkQueue.splice(0);
+    if (said.length) requestAnimationFrame(() => said.forEach((l) => floatOver(l.seat, l.text)));
   }
 
   private feltHtml(r: Round | null): string {
     const spots: FeltSpot[] = this.spots.map((s, i) => ({
-      name: s.name, me: s.isHuman, stack: s.isHuman ? this.bank : s.stack, level: s.level,
+      id: s.id, name: s.name, me: s.isHuman, stack: s.isHuman ? this.bank : s.stack, level: s.level,
       label: s.isHuman ? currentTitle() : 'Bot', seat: r ? i : -1,
       // Between rounds the circle holds the next bet.
       bet: s.isHuman && (!r || r.isComplete) ? this.bet : 0,
@@ -644,6 +671,7 @@ export class BlackjackTable {
           <input id="pref-volume" class="slider" type="range" min="0" max="100" step="5" value="${Math.round(p.volume * 100)}"></div>
         <label class="toggle"><input type="checkbox" id="pref-sound" ${p.sound ? 'checked' : ''}> Play table sounds</label>
         <label class="toggle"><input type="checkbox" id="pref-hints" ${this.h.setup.hints ? 'checked' : ''}> Show the by-the-book play</label>
+        <label class="toggle"><input type="checkbox" id="pref-talk" ${p.talk ? 'checked' : ''}> Let the bots chat at the table</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${p.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
@@ -703,6 +731,7 @@ export class BlackjackTable {
     pref('pref-sound', (v) => (this.h.prefs.sound = v));
     pref('pref-hints', (v) => (this.h.setup.hints = v));
     pref('pref-four', (v) => (this.h.prefs.fourColor = v));
+    pref('pref-talk', (v) => (this.h.prefs.talk = v));
     const vol = document.getElementById('pref-volume') as HTMLInputElement | null;
     if (vol) {
       vol.oninput = () => {

@@ -1899,3 +1899,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .lb-head .seg button { font-size: 13.5px; padding-inline: 4px; }
   .lb-value .wide { display: none; }
 }
+
+/* Bot faces and table talk */
+.avatar.face { font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-weight: 400; font-size: clamp(15px, 2cqw, 22px); line-height: 1; }
+.log li.k-talk { color: var(--ivory); font-style: italic; }

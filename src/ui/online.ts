@@ -18,6 +18,7 @@ import { consoleEnabled, toggleConsole } from './console';
 import { BjScreen } from './online-blackjack';
 import { ChatDock } from './chat';
 import { BJ_RULES_LINE, limitText } from './blackjack';
+import { avatarHtml, botTitle } from './talk';
 
 export interface TablePrefs {
   fourColor: boolean;
@@ -654,8 +655,8 @@ class OnlineTable {
         ? seat.away ? '<span class="lvl lv-human">Away</span>' : seat.title ? `<span class="lvl lv-human ttl" title="Title">${esc(seat.title)}</span>` : isMe ? '' : '<span class="lvl lv-human">Friend</span>' : `<span class="lvl lv-${level}">${BOT_LABEL(seat.difficulty)}</span>`;
       parts.push(`<div class="${classes.join(' ')}" data-seat="${seat.id}" style="left:${p.x}%;top:${p.y}%">
         <div class="cards">${cards}</div>
-        <div class="pod" title="${esc(seat.name)} · ${tag}">
-          <span class="avatar lv-${level}">${esc(seat.name.slice(0, 1).toUpperCase())}</span>
+        <div class="pod" title="${esc(seat.isHuman ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
+          ${avatarHtml(seat.name, level, !seat.isHuman)}
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
           ${badge}${clock}
         </div>

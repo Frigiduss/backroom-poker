@@ -1,9 +1,10 @@
 import { Bot, Decision, STYLE_NAMES } from '../bots/bot';
 import { specFromView } from '../bots/equity';
+import { PERSONAS, Persona, TalkEvent, lineFor, personaFor, remarkAfter } from '../bots/persona';
 import { buildView } from '../bots/view';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
-import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
+import { DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
@@ -19,6 +20,7 @@ import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
 import { equity, think } from './thinker';
+import { avatarHtml, botTitle, floatOver } from './talk';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
 
 // ---------- settings ----------
@@ -49,6 +51,8 @@ interface Prefs {
   showOdds: boolean;
   fourColor: boolean;
   reveal: boolean;
+  /** Bots chat at the table now and then. */
+  talk: boolean;
   sound: boolean;
   volume: number;
 }
@@ -59,7 +63,7 @@ const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
   game: 'poker', bj: DEFAULT_BJ, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
-const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, sound: true, volume: 0.7 };
+const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
 let prefs: Prefs = { ...DEFAULT_PREFS };
 
@@ -82,8 +86,6 @@ function saveSettings() {
 const BIG_BLIND = 20;
 const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
 const BOT_DELAY: Record<Speed, number> = { relaxed: 1150, normal: 650, fast: 220 };
-const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana', 'Iris', 'Jax', 'Kai', 'Lulu', 'Milo', 'Nova', 'Otto', 'Pia', 'Quinn', 'Rex', 'Sage', 'Tess', 'Vic', 'Wren', 'Zed', 'Bea'];
-const STYLES: BotStyle[] = ['balanced', 'balanced', 'tight', 'loose', 'aggressive', 'passive'];
 const AVATAR: Record<Difficulty | 'human', string> = {
   human: '#d9a94e', beginner: '#9fd3a8', easy: '#8fc1e8', medium: '#e8d48f', hard: '#e8a36f', expert: '#e07a8a',
 };
@@ -321,6 +323,11 @@ class Game implements DevGame {
   /** The turn a bot is working out right now, so a re-render doesn't ask twice. */
   private thinking = '';
   private stopped = false;
+  /** Lines bots said since the last draw, floated over their seats once it is on screen. */
+  private talkQueue: { seat: string; text: string }[] = [];
+  /** Hand number of the last time a bot spoke, so the table is never too chatty. */
+  private lastTalk = -10;
+  private talkRng = createRng();
   /** The player whose bank pays for this game. */
   private readonly profile = player();
   private recorded: Hand | null = null;
@@ -338,12 +345,14 @@ class Game implements DevGame {
     this.setup = s;
     const v = VARIANTS[s.variant];
     const rng = createRng();
-    const names = shuffle([...BOT_NAMES], rng);
+    const regulars = shuffle([...PERSONAS], rng).filter((p) => p.name.toLowerCase() !== (s.name || 'You').toLowerCase());
     const opponents = s.format === 'headsup' ? 1 : Math.min(s.opponents, v.maxPlayers - 1);
     const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rng.next() * xs.length)];
     const seats: SeatConfig[] = [{ name: s.name || 'You', isHuman: true }];
     for (let i = 0; i < opponents; i++) {
-      seats.push({ name: names[i], isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: pick(STYLES) });
+      // Skill comes from the setup; each regular plays their own style.
+      const who = regulars[i];
+      seats.push({ name: who.name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: who.style });
     }
     this.table = new Table({
       variant: s.variant,
@@ -466,9 +475,11 @@ class Game implements DevGame {
       this.log.push({ text: this.speak(text), kind: e.kind, me: e.player !== undefined && e.player === this.humanIndex });
     }
     this.playSounds(hand, fresh);
+    this.talkDuring(hand, fresh);
     if (this.log.length > 500) this.log.splice(0, this.log.length - 500);
 
     if (hand.isComplete) {
+      this.talkAfter(hand);
       this.table.finishHand();
       this.recordResult(hand);
       const me = this.humanSeat;
@@ -572,6 +583,48 @@ class Game implements DevGame {
     cues.slice(-6).forEach((c, i) => play(c, i * 0.13));
   }
 
+  /** A bot says something: into the log, and up over their seat once the table is drawn. */
+  private say(seatId: string, event: TalkEvent): boolean {
+    const seat = this.table.seats.find((x) => x.id === seatId);
+    const who: Persona | undefined = seat && !seat.isHuman ? personaFor(seat.name) : undefined;
+    if (!who || !prefs.talk) return false;
+    const text = lineFor(who, event, this.talkRng);
+    this.log.push({ text: `${who.name}: “${text}”`, kind: 'talk', me: false });
+    this.talkQueue.push({ seat: seatId, text });
+    this.lastTalk = this.table.handNumber;
+    return true;
+  }
+
+  /** Greetings on the first hand, and the odd word when a bot shoves. */
+  private talkDuring(hand: Hand, entries: Hand['log']) {
+    const roll = () => this.talkRng.next();
+    for (const e of entries) {
+      if (e.kind === 'start' && this.table.handNumber === 1) {
+        const bots = this.table.seats.filter((x) => !x.isHuman);
+        const greeter = bots[Math.floor(roll() * bots.length)];
+        if (greeter && roll() < 0.6) this.say(greeter.id, 'hello');
+      } else if (e.kind === 'action' && e.player !== undefined && /all-in/.test(e.text) && this.lastTalk < this.table.handNumber && roll() < 0.4) {
+        this.say(hand.players[e.player].id, 'allin');
+      }
+    }
+  }
+
+  /** Once a hand is over, maybe one bot has something to say about it. */
+  private talkAfter(hand: Hand) {
+    const res = hand.result;
+    if (!res || this.lastTalk === this.table.handNumber) return;
+    const remark = remarkAfter({
+      bots: hand.players.map((p) => (this.bots.has(p.id) ? p.id : null)),
+      showdown: res.showdown,
+      net: hand.players.map((p) => p.stack - p.startStack),
+      pot: res.won.reduce((a, b) => a + b, 0),
+      busted: hand.players.flatMap((p, i) => (p.stack === 0 ? [i] : [])),
+      bigBlind: hand.stakes.bb || hand.stakes.bigBet,
+    }, this.talkRng.next());
+    // Leave a quiet hand between remarks, except when someone busts.
+    if (remark && (this.table.handNumber - this.lastTalk > 1 || remark.event === 'bust')) this.say(remark.seat, remark.event);
+  }
+
   /** Engine text is third person ("Ada calls"). When the player is named "You", fix the verbs. */
   private speak(text: string): string {
     if (this.humanSeat.name !== 'You') return text;
@@ -629,6 +682,8 @@ class Game implements DevGame {
     const ol = document.querySelector('.log ol');
     if (ol) ol.scrollTop = atBottom || logScroll === undefined ? ol.scrollHeight : logScroll;
     this.bind();
+    const said = this.talkQueue.splice(0);
+    if (said.length) requestAnimationFrame(() => said.forEach((l, k) => floatOver(l.seat, l.text, { delay: k * 0.4 })));
   }
 
   private seatLayout(): { x: number; y: number }[] {
@@ -703,10 +758,10 @@ class Game implements DevGame {
       const handName = res && winners.has(hi) && res.showdown && res.handNames[hi] ? `<span class="bubble handname">${esc(res.handNames[hi]!)}</span>` : '';
       const level = isMe ? 'human' : seat.difficulty!;
 
-      parts.push(`<div class="${classes.join(' ')}" style="left:${p.x}%;top:${p.y}%">
+      parts.push(`<div class="${classes.join(' ')}" data-seat="${seat.id}" style="left:${p.x}%;top:${p.y}%">
         <div class="cards">${cards}</div>
-        <div class="pod" title="${esc(seat.name)} · ${tag}">
-          <span class="avatar lv-${level}">${esc(seat.name.slice(0, 1).toUpperCase())}</span>
+        <div class="pod" title="${esc(isMe ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
+          ${avatarHtml(seat.name, level, !isMe)}
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
           ${isMe ? (currentTitle() ? `<span class="lvl lv-human ttl">${esc(currentTitle()!)}</span>` : '') : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>
@@ -900,6 +955,7 @@ class Game implements DevGame {
         <label class="toggle"><input type="checkbox" id="pref-auto" ${prefs.autoDeal ? 'checked' : ''}> Deal the next hand automatically</label>
         <label class="toggle"><input type="checkbox" id="pref-odds" ${prefs.showOdds ? 'checked' : ''}> Show my pot share against random hands</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
+        <label class="toggle"><input type="checkbox" id="pref-talk" ${prefs.talk ? 'checked' : ''}> Let the bots chat at the table</label>
         <label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Show the bots' cards (peek at their hands)</label>
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
@@ -1047,6 +1103,7 @@ class Game implements DevGame {
     pref('pref-odds', 'showOdds');
     pref('pref-four', 'fourColor');
     pref('pref-reveal', 'reveal');
+    pref('pref-talk', 'talk');
     pref('pref-sound', 'sound');
     on('sound-toggle', () => this.toggleSound());
     const vol = document.getElementById('pref-volume') as HTMLInputElement | null;

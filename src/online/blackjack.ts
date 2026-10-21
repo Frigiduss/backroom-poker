@@ -5,6 +5,7 @@
 //
 // The table is saved as plain data (the shoe's cards, the round in play) rather than
 // replayed, because a shoe lasts many rounds.
+import { PERSONA_NAMES } from '../bots/persona';
 import { Tally, blackjackTally } from '../accounts/achievements';
 import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, Round, RoundData, RoundRig, Shoe, ShoeData, bookPlay } from '../engine/blackjack';
 import { Card, createRng, shuffle } from '../engine/cards';
@@ -21,7 +22,7 @@ const GAP_MS = 700;
 const RESULT_MS = 4500;
 const TURN_MS = 30_000;
 const TIMEOUTS_TO_AWAY = 2;
-const BOT_NAMES = ['Ada', 'Blaze', 'Cleo', 'Duke', 'Echo', 'Finn', 'Gus', 'Hana', 'Iris', 'Jax', 'Kai', 'Lulu', 'Milo', 'Nova', 'Otto', 'Pia', 'Quinn', 'Rex', 'Sage', 'Tess'];
+const BOT_NAMES = PERSONA_NAMES;
 
 export class BjError extends Error {}
 
