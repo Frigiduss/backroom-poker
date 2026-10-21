@@ -1,2 +1,5 @@
 node_modules/
 .test-build/
+# Build output: made by `npm run build` (and by the deploy workflows), never committed.
+dist/
+supabase/functions/poker-table/index.ts
