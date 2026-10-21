@@ -56,9 +56,9 @@ SQL Editor and they can sign in with just the password again:
 - If the account server can't be reached when the game opens, it falls back to the
   players on the device and says so; **Try again** on the profile page reconnects.
 - The same player open on two devices at once: the last one to save wins.
-- The chip bank is kept by the browser, so a determined player could edit their own
-  numbers. That only matters if bank sizes are ever compared between people, for
-  example a leaderboard, which would need the bank rules to run on the server.
+- Games against bots run in the browser, so the database can't check each hand. Once
+  [`banks.sql`](banks.sql) is run it limits what a save can add instead (see "Chip bank
+  limits" below), so editing a saved player can't add more than real winning could.
 
 ## The developer console
 
@@ -155,7 +155,28 @@ To switch both on, open **SQL Editor → New query**, paste everything from
 [`leaderboard.sql`](leaderboard.sql), and click **Run**. Until then the lobby says they aren't
 set up yet.
 
-The scores come from each player's saved numbers, which the browser keeps (see "How it
-behaves" above). Someone determined could edit their own player to climb the board. If that
-happens, the developer console can set their bank and stats back, or turn the leaderboard
-off for that player with `edit <player> board off`, which their own setting can't undo.
+The scores come from each player's saved numbers. With [`banks.sql`](banks.sql) run, the
+database limits how fast a bank can grow (below), so the bank and biggest-pot boards can't be
+jumped by editing a save. If someone still looks wrong, the developer console can set their
+bank and stats back, or turn the leaderboard off for that player with `edit <player> board off`,
+which their own setting can't undo.
+
+## Chip bank limits
+
+Run [`banks.sql`](banks.sql) once (after `setup.sql`, `admin.sql` and `leaderboard.sql`). From
+then on every save of an online player passes a check in the database:
+
+- Losing chips always saves and earns back the same amount of "win allowance", so ups and
+  downs never run into the limit.
+- Winning chips spends the allowance. It refills by 2,000 chips a minute up to 500,000, and a
+  new account starts with 100,000.
+- A win bigger than the allowance saves only what the allowance covers. The game keeps
+  sending its own number, so an honest big win (a straight-up hit at a high-limit roulette
+  table, say) still lands in full as the allowance refills.
+- Topping a bank under 1,000 back up to 10,000 is free once an hour, and a daily bonus adds
+  its chips to the allowance.
+- The biggest pot can't jump past 50,000 (a full table of 200-big-blind stacks is 36,000).
+
+Admin changes from the console aren't limited. Banks saved before `banks.sql` keep their
+numbers; the console can set any that look wrong back. `select * from bank_guard` in the SQL
+Editor shows each account's allowance and how many saves were capped (`clamped`).
