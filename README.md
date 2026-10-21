@@ -39,10 +39,10 @@ that carries between games, lifetime stats, and their own lobby choices and tabl
 - **Blackjack** bets straight from the bank: each wager leaves it when placed and winnings
   land back in it, so bets on an unfinished hand are lost if you leave or close the tab.
 - A bank under 1,000 can be refilled to 10,000.
-- Several players can share a device; switch from the profile page. Players are stored in
-  the browser, so use **Download backup** / **Import a backup** to move one between devices.
-- **Online accounts** (optional): sign in with an email and password to keep your players
-  on every device. Off until a Supabase project is connected; see
+- Each online account is one player. Playing offline keeps a single player in this browser;
+  signing in to a new account brings that player along.
+- **Online accounts** (optional): sign in with an email and password to keep your chips and
+  stats on every device. Off until a Supabase project is connected; see
   [supabase/README.md](supabase/README.md) for the five-minute setup.
 
 ## Develop
@@ -78,7 +78,7 @@ and add the `checks` check.
   Decisions use Monte Carlo equity, pot odds, position, starting-hand charts, and at
   Hard/Expert, opponent ranges from their betting; Expert also adapts to each
   player's observed tendencies.
-- `src/accounts/` – player profiles: chip bank rules, stats, backups, and the
+- `src/accounts/` – player profiles: chip bank rules, stats, and the
   `AccountStore` interface. `LocalAccountStore` keeps profiles in browser storage;
   `OnlineAccountStore` keeps them in Supabase (`online.ts`, configured in `config.ts`).
 - `src/ui/` – the browser front end (plain TypeScript + DOM).

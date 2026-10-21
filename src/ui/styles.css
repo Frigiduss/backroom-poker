@@ -435,8 +435,6 @@ input[type="range"]:disabled { opacity: .35; }
 
 .btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); transform: none; }
 .btn-sm { padding: 7px 13px; font-size: 14px; border-radius: 9px; }
-.btn.danger { color: var(--bad); }
-.btn.danger:hover { border-color: var(--bad); }
 
 /* ---------- Players ---------- */
 .pfp {
@@ -470,8 +468,6 @@ input[type="range"]:disabled { opacity: .35; }
   color: var(--muted); background: rgba(255, 255, 255, .06); border-radius: 999px; padding: 6px 12px;
 }
 
-.create-row { display: flex; gap: 8px; }
-.create-row .text-input { flex: 1; min-width: 0; }
 .fine { margin: 0; color: var(--faint); font-size: 13.5px; }
 .link-btn { color: var(--gold); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .form-error { margin: 0; color: var(--bad); font-size: 14px; }
@@ -512,17 +508,6 @@ input[type="range"]:disabled { opacity: .35; }
 .stat b { font-size: 22px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .stat b.up { color: var(--good); }
 .stat b.down { color: var(--bad); }
-.profile-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.player-list { display: grid; gap: 8px; margin-bottom: 14px; }
-.player-row {
-  display: flex; align-items: center; gap: 12px;
-  border: 1px solid var(--line); background: rgba(0, 0, 0, .2); border-radius: 12px; padding: 8px 12px 8px 8px;
-  text-align: left; transition: border-color .15s;
-}
-.player-row:hover { border-color: var(--gold); }
-.pr-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-bank { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
-.pr-go { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--gold); }
 .prize { color: var(--good); }
 
 /* ---------- Sign in, sign up, pick a name ---------- */
@@ -638,7 +623,6 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   .bank-box { justify-items: start; width: 100%; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pb-more { display: none; }
-  .pr-bank { display: none; }
 }
 
 /* ---------- Game screen ---------- */

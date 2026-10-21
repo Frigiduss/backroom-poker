@@ -1,6 +1,6 @@
 import {
   ACHIEVEMENTS, Achievement, AccountStore, Counters, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
-  BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, exportProfile, importProfile, newId, refill, settleOpenTable,
+  BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
   takeUnlocks, titleFor,
 } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
@@ -18,7 +18,7 @@ let current: Profile | null = null;
 let saving: Promise<void> = Promise.resolve();
 /** Why the last online save failed, shown on the lobby badge until a save succeeds. */
 let saveError = '';
-/** A one-off message for the lobby, such as falling back to this device's players. */
+/** A one-off message for the lobby, such as falling back to this device's player. */
 let notice = '';
 
 /** Sets up where players are kept. `onlineAuth` is null when online accounts aren't configured. */
@@ -48,8 +48,9 @@ export function takeNotice(): string {
 }
 
 /**
- * Opens the last player used with the current store, or the welcome screen when there
- * are none. Any chips left at a table by a closed tab are settled first.
+ * Opens the player for the current store (one per account, or one on this device), or the
+ * welcome screen when there is none yet. Older saves from when an account could hold several
+ * players open the one played last. Any chips left at a table by a closed tab are settled first.
  */
 export async function openPlayer(onReady: () => void, app: HTMLElement) {
   let players: Profile[];
@@ -57,7 +58,7 @@ export async function openPlayer(onReady: () => void, app: HTMLElement) {
     players = await store.list();
   } catch (err) {
     if (!isOnline()) throw err;
-    notice = `${(err as Error).message} You're playing with the players saved on this device.`;
+    notice = `${(err as Error).message} You're playing with the player saved on this device.`;
     store = local;
     players = await store.list();
   }
@@ -77,8 +78,8 @@ export async function openPlayer(onReady: () => void, app: HTMLElement) {
 }
 
 /**
- * Switches to the signed-in account's players. A brand-new account gets copies of the
- * players on this device, so nobody starts over when they first sign in.
+ * Switches to the signed-in account's player. A brand-new account gets a copy of the
+ * player on this device, so nobody starts over when they first sign in.
  */
 export async function goOnline(onReady: () => void, app: HTMLElement) {
   if (!auth?.current) return openPlayer(onReady, app);
@@ -87,14 +88,17 @@ export async function goOnline(onReady: () => void, app: HTMLElement) {
   try {
     const existing = await online.list();
     if (!existing.length) {
-      for (const p of await local.list()) {
+      const here = await local.list();
+      const id = await local.currentId();
+      const p = here.find((x) => x.id === id) ?? here.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (p) {
         settleOpenTable(p);
         await online.put({ ...p, id: newId() });
       }
     }
   } catch (err) {
     store = local;
-    notice = `${(err as Error).message} You're playing with the players saved on this device.`;
+    notice = `${(err as Error).message} You're playing with the player saved on this device.`;
   }
   return openPlayer(onReady, app);
 }
@@ -191,26 +195,6 @@ export function playerBadgeHtml(): string {
     <span class="pb-text"><b>${esc(p.name)}${titleHtml(currentTitle())}</b><span>Bank <em>${fmt(p.bank)}</em>${saveError ? ' · <i class="unsaved" title="' + esc(saveError) + '">not saved online</i>' : ''}</span></span>
     <span class="pb-more">Profile</span>
   </button>`;
-}
-
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsText(file);
-  });
-}
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ---------- sign in, sign up, pick a name ----------
@@ -359,7 +343,7 @@ export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedNam
     <p class="form-error" id="form-error" role="alert"></p>
     <p class="fine auth-foot">${signedIn
       ? `Signed in as <b>${esc(auth!.current!.email)}</b>. <button type="button" class="link-btn plain" id="not-you">Not you?</button>`
-      : `Saved in this browser only.${auth ? ' <button type="button" class="link-btn plain" id="to-auth">Sign in instead</button> ·' : ''} <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label>`}</p>
+      : `Saved in this browser only.${auth ? ' <button type="button" class="link-btn plain" id="to-auth">Sign in instead</button>' : ''}`}</p>
   `, 'One last thing before the cards come out.');
 
   const input = document.getElementById('new-name') as HTMLInputElement;
@@ -384,24 +368,6 @@ export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedNam
   };
   document.getElementById('not-you')?.addEventListener('click', () => busy(app, () => signOutTo(app, onDone)));
   document.getElementById('to-auth')?.addEventListener('click', () => renderAuth(app, onDone));
-  bindImport(onDone);
-}
-
-function bindImport(onDone: () => void) {
-  const file = document.getElementById('import-file') as HTMLInputElement | null;
-  if (!file) return;
-  file.onchange = async () => {
-    const f = file.files?.[0];
-    if (!f) return;
-    try {
-      const p = importProfile(await readFile(f));
-      await store.put(p);
-      await selectPlayer(p);
-      onDone();
-    } catch (err) {
-      document.getElementById('form-error')!.textContent = (err as Error).message;
-    }
-  };
 }
 
 /** Signs out and goes back to the sign-in screen. */
@@ -452,10 +418,9 @@ function achievementsStripHtml(p: Profile): string {
   </button>`;
 }
 
-/** Player profile: stats, rename, refill, backup, and switching between players on this device. */
+/** Player profile: stats, name, colour, refill, and the online account. */
 export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void) {
   const p = player();
-  const others = (await store.list().catch(() => [] as Profile[])).filter((x) => x.id !== p.id).sort((a, b) => b.updatedAt - a.updatedAt);
   const refillable = canRefill(p);
   app.innerHTML = `
   <main class="lobby profile-page">
@@ -484,24 +449,6 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
       </div>
       ${statsHtml(p)}
       ${onAchievements ? achievementsStripHtml(p) : ''}
-      <div class="profile-actions">
-        <button type="button" class="btn btn-sm" id="export">Download backup</button>
-        <button type="button" class="btn btn-sm danger" id="delete">Delete player</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2 class="step">${isOnline() ? 'Players in your account' : 'Players on this device'}</h2>
-      <div class="player-list">
-        ${others.map((o) => `<button type="button" class="player-row" data-switch="${esc(o.id)}">${avatarHtml(o)}<span class="pr-name">${esc(o.name)}</span><span class="pr-bank">${fmt(o.bank)} chips</span><span class="pr-go">Switch</span></button>`).join('')}
-        ${others.length ? '' : `<p class="fine">Nobody else yet. Add a player for each person who plays${isOnline() ? '' : ' on this device'}.</p>`}
-      </div>
-      <form id="create-form" class="create-row">
-        <input id="new-name" class="text-input" maxlength="${NAME_MAX}" placeholder="New player's name" autocomplete="off" required>
-        <button type="submit" class="btn">Add player</button>
-      </form>
-      <p class="fine">${isOnline() ? 'These players are saved online and open on any device where you sign in.' : 'Players are saved in this browser only. Sign in below, or use a backup file, to move them to another device.'} <label class="link-btn">Import a backup<input type="file" id="import-file" accept="application/json,.json" hidden></label></p>
-      <p class="form-error" id="form-error" role="alert"></p>
     </section>
     ${accountPanelHtml()}
   </main>`;
@@ -535,45 +482,6 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
     rerender();
   }));
 
-  document.getElementById('export')!.onclick = () => {
-    const safe = p.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'player';
-    download(`backroom-poker-${safe}.json`, exportProfile(p));
-  };
-
-  const del = document.getElementById('delete') as HTMLButtonElement;
-  del.onclick = async () => {
-    if (del.dataset.armed !== '1') {
-      del.dataset.armed = '1';
-      del.textContent = `Delete ${p.name} for good?`;
-      return;
-    }
-    await store.remove(p.id);
-    const next = others[0] ?? null;
-    await selectPlayer(next);
-    if (next) rerender();
-    else renderWelcome(app, onBack);
-  };
-
-  app.querySelectorAll<HTMLButtonElement>('[data-switch]').forEach((b) => (b.onclick = async () => {
-    const next = await store.get(b.dataset.switch!);
-    if (!next) return;
-    await selectPlayer(next);
-    onBack();
-  }));
-
-  const input = document.getElementById('new-name') as HTMLInputElement;
-  document.getElementById('create-form')!.onsubmit = async (e) => {
-    e.preventDefault();
-    const name = cleanName(input.value);
-    if (!name) return;
-    const used = new Set([p.color, ...others.map((o) => o.color)]);
-    const color = PROFILE_COLORS.find((c) => !used.has(c)) ?? PROFILE_COLORS[(others.length + 1) % PROFILE_COLORS.length];
-    const np = createProfile(name, { color });
-    await store.put(np);
-    await selectPlayer(np);
-    onBack();
-  };
-  bindImport(onBack);
   bindAccountPanel(app, onBack);
 }
 
@@ -585,21 +493,21 @@ function accountPanelHtml(): string {
   if (s && isOnline()) {
     return `<section class="panel account-panel">
       <h2 class="step">Online account</h2>
-      <p>Signed in as <b>${esc(s.email)}</b>. Your players are saved online.</p>
+      <p>Signed in as <b>${esc(s.email)}</b>. Your chips and stats are saved online.</p>
       <div class="row-btns"><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
     </section>`;
   }
   if (s) {
     return `<section class="panel account-panel">
       <h2 class="step">Online account</h2>
-      <p>Signed in as <b>${esc(s.email)}</b>, but the account server couldn't be reached, so you're using this device's players.</p>
+      <p>Signed in as <b>${esc(s.email)}</b>, but the account server couldn't be reached, so you're using this device's player.</p>
       <div class="row-btns"><button type="button" class="btn btn-sm btn-primary" id="retry-online">Try again</button><button type="button" class="btn btn-sm" id="sign-out">Sign out</button></div>
       <p class="form-error" id="form-error" role="alert"></p>
     </section>`;
   }
   return `<section class="panel account-panel">
     <h2 class="step">Online account</h2>
-    <p>You're playing offline. Sign in to keep your players on every device; the ones on this device come with you into a new account.</p>
+    <p>You're playing offline. Sign in to keep your chips and stats on every device; the player on this device comes with you into a new account.</p>
     <div class="row-btns"><button type="button" class="btn btn-sm btn-primary" id="go-auth">Sign in or create an account</button></div>
   </section>`;
 }

@@ -1,6 +1,6 @@
 // Online accounts on Supabase (hosted sign-in plus a Postgres database). This talks to
 // Supabase's REST endpoints directly with fetch, which keeps the game a small single file.
-// Each signed-in account can hold several players; every player is one row of the
+// Each signed-in account plays as one player, stored as one row of the
 // `players` table (see supabase/setup.sql), readable and writable only by its owner.
 import { Counters } from './achievements';
 import { Profile, normalizeProfile } from './profile';
