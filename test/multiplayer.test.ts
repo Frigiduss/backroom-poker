@@ -508,3 +508,106 @@ test('admins can peek at the turn and river of an online hand; nobody else can',
   assert.ok(board.length >= 3, `the flop came out (board ${board.length})`);
   assert.deepEqual(board, told.flatMap((c) => c.board).slice(0, board.length));
 });
+
+test('friends can watch from the waiting room, are not dealt in, and sit in when they like', async () => {
+  const s = setup();
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', playerId: 'pa', settings: s.settings });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pb' });
+  const w = await s.call('cara', { op: 'watch', code: body.code.toLowerCase(), name: 'Cara', playerId: 'pc' });
+  assert.equal(w.status, 200, w.body.error);
+  assert.ok(w.body.view.watching);
+  assert.ok(w.body.view.canSit, 'two of four seats are open');
+  assert.deepEqual(w.body.view.members.map((m) => [m.name, m.watching]), [['Alice', false], ['Bob', false], ['Cara', true]]);
+  assert.equal((await s.call('cara', { op: 'start', tableId: body.tableId })).status, 403, 'a watcher cannot start the game');
+
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  const v = s.db.view(body.tableId, 'cara');
+  assert.equal(v.phase, 'playing');
+  assert.equal(v.mySeat, null, 'watchers are not dealt in');
+  assert.equal(v.seats.filter((x) => x.isHuman).length, 2);
+  assert.ok(v.watching && v.canSit, 'a bot seat is free in a cash game');
+  assert.equal(v.legal, null);
+  const acted = await s.call('cara', { op: 'act', tableId: body.tableId, hand: v.handNumber, action: { type: 'fold' } });
+  assert.equal(acted.status, 409);
+  assert.equal((await s.call('cara', { op: 'chat', tableId: body.tableId, text: 'nice hand' })).status, 200, 'watchers can chat');
+  assert.equal((await s.call('cara', { op: 'watch', code: body.code, name: 'Cara' })).status, 200, 'watching again changes nothing');
+
+  const sat = await s.call('cara', { op: 'join', code: body.code, name: 'Cara', playerId: 'pc' });
+  assert.equal(sat.status, 200, sat.body.error);
+  assert.ok(sat.body.view.waitingForSeat);
+  assert.ok(!sat.body.view.watching);
+  await drive(s, body.tableId, ['alice', 'bob'], 300);
+  const after = s.db.view(body.tableId, 'cara');
+  assert.ok(after.mySeat, 'Cara got a seat at the next deal');
+  assert.equal(after.seats.find((x) => x.you)!.name, 'Cara');
+});
+
+test('watchers earn nothing and only the table owner can start; a waiting room of only watchers closes', async () => {
+  const s = setup();
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', playerId: 'pa', settings: s.settings });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pb' });
+  await s.call('cara', { op: 'watch', code: body.code, name: 'Cara', playerId: 'pc' });
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await drive(s, body.tableId, ['alice', 'bob'], 200);
+  assert.ok(s.db.awarded.has('alice/pa'), 'players earn online achievements');
+  assert.ok(!s.db.awarded.has('cara/pc'), 'watchers earn nothing');
+
+  const room = await s.call('dan', { op: 'create', name: 'Dan', settings: s.settings });
+  await s.call('eve', { op: 'watch', code: room.body.code, name: 'Eve' });
+  await s.call('dan', { op: 'leave', tableId: room.body.tableId });
+  assert.equal(await s.db.byId(room.body.tableId), null, 'nobody is left to start it');
+});
+
+test('full tables and tournaments can still be watched, but not sat at', async () => {
+  const s = setup({ format: 'sng', seats: 2 });
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob' });
+  assert.equal((await s.call('cara', { op: 'join', code: body.code, name: 'Cara' })).status, 409, 'the waiting room is full');
+  const w = await s.call('cara', { op: 'watch', code: body.code, name: 'Cara' });
+  assert.equal(w.status, 200);
+  assert.ok(!w.body.view.canSit);
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  const v = s.db.view(body.tableId, 'cara');
+  assert.ok(v.watching && !v.canSit, 'no seats open mid-tournament');
+  const sat = await s.call('cara', { op: 'join', code: body.code, name: 'Cara' });
+  assert.equal(sat.status, 409);
+  assert.match(sat.body.error!, /tournament/);
+  assert.ok(s.db.view(body.tableId, 'cara').watching, 'still watching after the refusal');
+
+  for (let i = 0; i < 12; i++) await s.call(`w${i}`, { op: 'watch', code: body.code, name: `W${i}` });
+  assert.equal((await s.call('crowd', { op: 'watch', code: body.code, name: 'Crowd' })).status, 409, 'watchers are capped');
+  assert.equal((await s.call('nobody', { op: 'watch', code: 'NOPE1', name: 'N' })).status, 404);
+});
+
+test("a watcher never sees a card the whole table can't see, in any family of game", async () => {
+  for (const variant of ['holdem', 'omaha', 'stud7', 'draw5'] as const) {
+    const s = setup({ variant, structure: VARIANTS[variant].defaultStructure });
+    const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings });
+    await s.call('bob', { op: 'join', code: body.code, name: 'Bob' });
+    await s.call('cara', { op: 'watch', code: body.code, name: 'Cara' });
+    await s.call('alice', { op: 'start', tableId: body.tableId });
+    let checked = 0;
+    let showdowns = 0;
+    for (let i = 0; i < 150; i++) {
+      const v = s.db.view(body.tableId, 'cara');
+      const truth = rebuild((await s.db.byId(body.tableId))!.state).hand;
+      if (v.hand && truth) {
+        v.hand.players.forEach((p, pi) => {
+          const real = truth.players[pi];
+          p.cards.forEach((c, k) => {
+            const public_ = real.shown || real.faceUp[k];
+            assert.equal(c !== null, public_, `${variant}: card ${k} of ${p.name} is ${public_ ? 'public' : 'hidden'}`);
+            if (c !== null) assert.equal(c, real.cards[k]);
+          });
+          if (real.shown) showdowns++;
+        });
+        assert.equal(v.legal, null);
+        assert.ok(!/deck|seed|checkpoint|rng|upcoming/i.test(JSON.stringify(v)), 'no secret state in the view');
+        checked++;
+      }
+      await drive(s, body.tableId, ['alice', 'bob'], 1);
+    }
+    assert.ok(checked > 50, `${variant}: watched plenty of steps`);
+    assert.ok(showdowns > 0, `${variant}: saw cards shown down`);
+  }
+});

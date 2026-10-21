@@ -257,3 +257,28 @@ test('stacking the shoe moves real cards to the top, and the hole card can be sw
   const fair = new Round(new Shoe(6, createRng(4)), [{ id: 'a', name: 'A', stack: 1000, bet: 100 }]);
   assert.equal(fair.rigged, false);
 });
+
+test('a watcher sees the blackjack table but never the hole card, and can take a free spot', async () => {
+  const s = setup();
+  const id = await table(s);
+  const code = (await s.db.byId(id))!.code;
+  const w = await s.call('cara', { op: 'watch', code, name: 'Cara' });
+  assert.equal(w.status, 200, w.body.error);
+  assert.ok(w.body.view.watching && w.body.view.canSit, 'the bot spot can be taken');
+  assert.equal(w.body.view.bj!.spots.filter((x) => x.you).length, 0);
+  assert.equal((await s.call('cara', { op: 'bj', tableId: id, round: view(s, id, 'cara').roundNumber, move: 'bet', amount: 10 })).status, 409);
+  await move(s, id, 'alice', 'bet', 10);
+  await move(s, id, 'bob', 'bet', 10);
+  const v = view(s, id, 'cara');
+  assert.equal(v.phase, 'round');
+  assert.equal(v.legal, null);
+  assert.equal(v.insuranceCost, null);
+  if (!v.round!.holeShown) assert.equal(v.round!.dealer[1], null, 'the hole card stays on the server');
+  assert.ok(!/"shoe"|"rng"|nextRig/.test(JSON.stringify(s.db.view(id, 'cara'))), 'no shoe in the view');
+
+  const sat = await s.call('cara', { op: 'join', code, name: 'Cara' });
+  assert.equal(sat.status, 200, sat.body.error);
+  assert.ok(sat.body.view.waitingForSeat);
+  await drive(s, id, ['alice', 'bob'], 40);
+  assert.ok(s.db.view(id, 'cara').bj!.spots.some((x) => x.you && x.name === 'Cara'), 'Cara took the bot spot');
+});
