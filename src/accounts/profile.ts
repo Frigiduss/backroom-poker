@@ -316,27 +316,3 @@ export function takeUnlocks(p: Profile, server: Counters = {}, now = Date.now())
   if (fresh.length) touch(p);
   return fresh;
 }
-
-// ---------- backup ----------
-
-const EXPORT_FORMAT = 'backroom-poker-profile';
-
-export function exportProfile(p: Profile): string {
-  return JSON.stringify({ format: EXPORT_FORMAT, version: 1, profile: p }, null, 2);
-}
-
-/** Reads a profile backup. The copy gets a fresh id so it never overwrites an existing profile. */
-export function importProfile(text: string): Profile {
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error("That file isn't a Back Room Poker profile.");
-  }
-  const d = data as { format?: string; profile?: unknown };
-  const p = d && d.format === EXPORT_FORMAT ? normalizeProfile(d.profile) : null;
-  if (!p) throw new Error("That file isn't a Back Room Poker profile.");
-  p.id = newId();
-  settleOpenTable(p);
-  return p;
-}

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   LocalAccountStore, MemoryStorage, STARTING_BANK, TOURNAMENT_FEE, buyIn, canRefill, cashOut, createProfile, enterTournament,
-  exportProfile, finishTournament, importProfile, normalizeProfile, prizeFor, recordHand, refill, setTableStack, settleOpenTable,
+  finishTournament, normalizeProfile, prizeFor, recordHand, refill, setTableStack, settleOpenTable,
 } from '../src/accounts';
 
 test('cash game: buy-in, rebuy and cash-out move chips through the bank', () => {
@@ -109,13 +109,3 @@ test('damaged or partial saves still load', async () => {
   assert.equal(normalizeProfile({ name: 'no id' }), null);
 });
 
-test('backup round trip gets a new id and settles any open table', () => {
-  const p = createProfile('A');
-  buyIn(p, 2000);
-  const copy = importProfile(exportProfile(p));
-  assert.notEqual(copy.id, p.id);
-  assert.equal(copy.name, 'A');
-  assert.equal(copy.table, null);
-  assert.equal(copy.bank, STARTING_BANK);
-  assert.throws(() => importProfile('{"hello":1}'));
-});
