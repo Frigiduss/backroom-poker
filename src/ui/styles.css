@@ -2279,3 +2279,20 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 @media (prefers-reduced-motion: reduce) {
   .vp-pays tr.hit th, .vp-pays tr.hit td { animation: none; }
 }
+
+/* Account security (profile page) */
+.sec-rows { display: grid; gap: 4px; }
+.sec-row { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+.sec-row:first-child { border-top: 0; padding-top: 0; }
+.sec-row p { margin: 2px 0 0; font-size: 14px; }
+.sec-row .btn { flex: none; }
+.sec-pill { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; background: rgba(255,255,255,.08); color: var(--muted); vertical-align: 1px; }
+.sec-pill.on { background: rgba(127,211,155,.16); color: var(--good); }
+.mfa-setup { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.mfa-qr { flex: none; width: 180px; height: 180px; padding: 8px; border-radius: 10px; background: #fff; }
+.mfa-steps { flex: 1 1 240px; display: grid; gap: 10px; }
+.mfa-secret { font-size: 13px; word-break: break-all; color: var(--text); background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; }
+.mfa-code { letter-spacing: .3em; font-variant-numeric: tabular-nums; max-width: 12em; }
+@media (max-width: 560px) {
+  .sec-row { flex-direction: column; align-items: stretch; }
+}

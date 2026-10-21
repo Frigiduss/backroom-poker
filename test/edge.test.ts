@@ -24,6 +24,8 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
   assert.equal(headers.get('apikey'), 'service-key');
   if (url.pathname === '/auth/v1/user') {
     const token = headers.get('Authorization')?.replace('Bearer ', '');
+    // user-2fa-<id>: an account with an authenticator app, signed in with just the password.
+    if (token?.startsWith('user-2fa-')) return reply(200, { id: token.slice(9), factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] });
     return token?.startsWith('user-') ? reply(200, { id: token.slice(5) }) : reply(401, { msg: 'bad jwt' });
   }
   assert.equal(headers.get('Authorization'), 'Bearer service-key');
@@ -122,6 +124,17 @@ test('the deployed function signs people in, makes a table and plays a hand over
   assert.ok(left.ok);
   assert.ok(!views.has(`${made.tableId}/bob`), "Bob's view is removed when he leaves");
   assert.ok(calls.includes('POST /rest/v1/rpc/put_poker_views'));
+});
+
+test('an account with two-step sign-in needs the code before it can play online', async () => {
+  const h = await load();
+  const settings = { variant: 'holdem', structure: 'NL', format: 'cash', difficulty: 'easy', stackBB: 100, blindSpeed: 'normal', seats: 3 };
+  const skipped = await post(h, '2fa-carol', { op: 'create', name: 'Carol', settings });
+  assert.equal(skipped.status, 401);
+  assert.match((await skipped.json()).error, /two-step/);
+  const aal2 = Buffer.from(JSON.stringify({ aal: 'aal2' })).toString('base64url');
+  const done = await (await post(h, `2fa-carol.${aal2}.sig`, { op: 'create', name: 'Carol', settings })).json();
+  assert.ok(done.ok, done.error);
 });
 
 test('console commands over REST: admins only, checked on the server', async () => {

@@ -24,6 +24,9 @@ grant select on public.daily_bonus to authenticated;
 drop policy if exists "Daily bonus: read your own" on public.daily_bonus;
 create policy "Daily bonus: read your own" on public.daily_bonus
   for select to authenticated using (owner = auth.uid());
+drop policy if exists "Daily bonus: two-step sign-in finished" on public.daily_bonus;
+create policy "Daily bonus: two-step sign-in finished" on public.daily_bonus as restrictive
+  for all to authenticated using ((select public.mfa_ok())) with check ((select public.mfa_ok()));
 
 -- The numbers match src/accounts/bonus.ts: every 20 hours, the streak holds if claimed within
 -- 48 hours, 1,000 chips on day one rising 500 a day to 4,000 from day seven.
@@ -41,6 +44,9 @@ declare
 begin
   if me is null then
     raise exception 'Sign in to collect the daily bonus.' using errcode = '42501';
+  end if;
+  if not public.mfa_ok() then
+    raise exception 'Finish two-step sign-in first.' using errcode = '42501';
   end if;
   if not exists (select 1 from public.players where id = p_player and owner = me) then
     raise exception 'That player isn''t in your account.' using errcode = '42501';

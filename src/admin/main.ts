@@ -4,7 +4,7 @@
 // and changes things through the same database rules (supabase/admin.sql) and table-server
 // admin checks as the console, and most buttons simply run a console command.
 import { ONLINE } from '../accounts/config';
-import { AdminApi, AdminLogEntry, AdminPlayer, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
+import { AdminApi, AdminLogEntry, AdminPlayer, Factor, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
 import { Card } from '../engine/cards';
 import { DIFFICULTY_NAMES } from '../engine/table';
 import { VARIANTS } from '../engine/variants';
@@ -107,6 +107,31 @@ function renderSignIn(message = '') {
   };
 }
 
+/** The second step for an admin account with an authenticator app. */
+function renderCode(factor: Factor, message = '') {
+  renderGate('Two-step sign-in', `
+    <p class="adm-muted">Type the 6-digit code from your authenticator app.</p>
+    <form id="adm-code" class="adm-form">
+      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required></label>
+      <p class="adm-error" role="alert">${esc(message)}</p>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+    </form>`, '<button type="button" class="btn" id="adm-code-out">Sign out</button>');
+  const form = $<HTMLFormElement>('#adm-code')!;
+  form.querySelector<HTMLInputElement>('input')!.focus();
+  $('#adm-code-out')!.onclick = () => void signOut();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const button = form.querySelector<HTMLButtonElement>('button')!;
+    button.disabled = true;
+    try {
+      await auth!.verifyTotp(factor.id, String(new FormData(form).get('code')));
+      await enter();
+    } catch (err) {
+      renderCode(factor, (err as Error).message);
+    }
+  };
+}
+
 async function signOut() {
   stopTimer();
   await auth?.signOut();
@@ -115,6 +140,8 @@ async function signOut() {
 
 async function enter() {
   renderGate('Checking your account…', '<p class="adm-muted">Asking the server whether this account is an admin.</p>');
+  const second = await auth!.secondStepFactor().catch(() => null);
+  if (second) return renderCode(second);
   if (!consoleReady) {
     consoleReady = true;
     initConsole({

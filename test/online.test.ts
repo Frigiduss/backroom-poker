@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MemoryStorage, OnlineAccountStore, OnlineAuth, OnlineError, createProfile } from '../src/accounts';
+import { MemoryStorage, OnlineAccountStore, OnlineAuth, OnlineError, assuranceOf, createProfile } from '../src/accounts';
 import { FakeSupabase } from './fake-supabase';
 
 const config = { url: 'https://demo.supabase.co', anonKey: 'anon-key' };
@@ -109,4 +109,62 @@ test('session from an email link, then a new password', async () => {
   await new OnlineAuth(config, null, server.fetch).signIn('r@example.com', 'newpass');
   assert.deepEqual(await linked.fromRedirect('#error=access_denied&error_description=Email+link+is+invalid+or+has+expired'), { error: 'Email link is invalid or has expired' });
   assert.equal(await linked.fromRedirect('#something=else'), null);
+});
+
+test('two-step sign-in: set up an authenticator, then a password alone opens nothing', async () => {
+  const { server, auth, store } = setup();
+  await auth.signUp('fridge@example.com', 'secret12');
+  const p = createProfile('Fridge');
+  await store.put(p);
+  assert.equal(await auth.secondStepFactor(), null, 'nothing to ask before it is set up');
+
+  const setup1 = await auth.enrollTotp();
+  assert.match(setup1.qr, /^data:image\/svg\+xml;charset=utf-8,%3Csvg/, 'the QR code is an encoded SVG data URI');
+  await assert.rejects(auth.verifyTotp(setup1.id, '000000'), /didn't match/);
+  // Starting again clears the half-finished one.
+  const s = await auth.enrollTotp();
+  assert.equal(server.factors.get(auth.current!.userId)!.length, 1);
+  await auth.verifyTotp(s.id, '246810');
+  assert.equal(assuranceOf(auth.current!.accessToken), 'aal2');
+  assert.deepEqual((await auth.factors()).map((f) => f.verified), [true]);
+
+  // Another device with just the password.
+  const other = new OnlineAuth(config, new MemoryStorage(), server.fetch);
+  await other.signIn('fridge@example.com', 'secret12');
+  const otherStore = new OnlineAccountStore(other, null, server.fetch);
+  assert.equal((await other.secondStepFactor())?.id, s.id, 'it asks for the code');
+  assert.equal((await otherStore.list()).length, 0, 'the database shows nothing until then');
+  await assert.rejects(other.setPassword('hijacked1'));
+  await other.verifyTotp(s.id, '246810');
+  assert.equal(await other.secondStepFactor(), null);
+  assert.equal((await otherStore.list())[0]?.id, p.id);
+
+  // A refreshed sign-in stays finished.
+  server.expiresIn = 30;
+  await other.verifyTotp(s.id, '246810');
+  await other.token();
+  assert.equal(assuranceOf(other.current!.accessToken), 'aal2');
+
+  // Turning it off needs a fresh code.
+  await assert.rejects(auth.removeTotp(s.id, '123456'));
+  await auth.removeTotp(s.id, '246810');
+  assert.deepEqual(await auth.factors(), []);
+});
+
+test('sign out everywhere ends the sign-in on every device', async () => {
+  const { server, auth } = setup();
+  await auth.signUp('fridge@example.com', 'secret12');
+  const other = new OnlineAuth(config, new MemoryStorage(), server.fetch);
+  await other.signIn('fridge@example.com', 'secret12');
+  await auth.signOutEverywhere();
+  assert.equal(auth.current, null);
+  const store = new OnlineAccountStore(other, null, server.fetch);
+  await assert.rejects(store.list(), OnlineError);
+});
+
+test('the sign-in strength is read from the access token', () => {
+  const jwt = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+  assert.equal(assuranceOf(jwt({ aal: 'aal2', sub: 'x' })), 'aal2');
+  assert.equal(assuranceOf(jwt({ sub: 'x' })), 'aal1');
+  assert.equal(assuranceOf('not-a-jwt'), 'aal1');
 });

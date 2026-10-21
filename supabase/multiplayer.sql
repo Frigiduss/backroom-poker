@@ -1,5 +1,5 @@
 -- Back Room Poker: online tables with friends.
--- Run this once in your Supabase project (SQL Editor → New query → paste → Run).
+-- Run this once, after setup.sql, in your Supabase project (SQL Editor → New query → paste → Run).
 -- Safe to run again.
 --
 -- poker_tables holds each table's full state, including the deck and everyone's cards.
@@ -38,6 +38,9 @@ grant select on public.poker_views to authenticated;
 drop policy if exists "Poker views: read your own" on public.poker_views;
 create policy "Poker views: read your own" on public.poker_views
   for select to authenticated using (user_id = auth.uid());
+drop policy if exists "Poker views: two-step sign-in finished" on public.poker_views;
+create policy "Poker views: two-step sign-in finished" on public.poker_views as restrictive
+  for all to authenticated using ((select public.mfa_ok())) with check ((select public.mfa_ok()));
 
 -- Writes views without ever replacing a newer one with an older one. Only the server calls it.
 create or replace function public.put_poker_views(p_table uuid, p_views jsonb)
