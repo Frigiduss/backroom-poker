@@ -407,6 +407,21 @@ function statsHtml(p: Profile): string {
     .join('')}</div>`;
 }
 
+/** A link to the stats page with a tiny chip graph of the last 30 points. */
+function statsStripHtml(p: Profile): string {
+  const pts = p.history.slice(-30).map((x) => x[1]);
+  const lo = Math.min(...pts);
+  const span = Math.max(...pts) - lo || 1;
+  const line = pts.length > 1
+    ? pts.map((v, k) => `${k ? 'L' : 'M'}${((k / (pts.length - 1)) * 96 + 2).toFixed(1)},${(26 - ((v - lo) / span) * 22).toFixed(1)}`).join('')
+    : 'M2,15L98,15';
+  return `<button type="button" class="ach-strip stats-strip" id="open-stats">
+    <span class="sl">Stats</span>
+    <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="${line}"/></svg>
+    <span class="pb-more">Chip graph · VPIP, raise rate, style</span>
+  </button>`;
+}
+
 function achievementsStripHtml(p: Profile): string {
   const c = allCounters(p, serverAwards());
   const got = ACHIEVEMENTS.filter((a) => a.measure(c) >= a.goal).length;
@@ -419,7 +434,7 @@ function achievementsStripHtml(p: Profile): string {
 }
 
 /** Player profile: stats, name, colour, refill, and the online account. */
-export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void) {
+export async function renderProfile(app: HTMLElement, onBack: () => void, onAchievements?: () => void, onStats?: () => void) {
   const p = player();
   const refillable = canRefill(p);
   app.innerHTML = `
@@ -448,15 +463,18 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
         ${PROFILE_COLORS.map((c) => `<button type="button" class="swatch" data-color="${c}" style="--pfp:${c}" aria-pressed="${c === p.color}" aria-label="Colour ${c}"></button>`).join('')}
       </div>
       ${statsHtml(p)}
+      ${onStats ? statsStripHtml(p) : ''}
       ${onAchievements ? achievementsStripHtml(p) : ''}
     </section>
     ${accountPanelHtml()}
   </main>`;
 
-  const rerender = () => renderProfile(app, onBack, onAchievements);
+  const rerender = () => renderProfile(app, onBack, onAchievements, onStats);
   document.getElementById('back')!.onclick = onBack;
   const achBtn = document.getElementById('open-achievements');
   if (achBtn && onAchievements) achBtn.onclick = onAchievements;
+  const statsBtn = document.getElementById('open-stats');
+  if (statsBtn && onStats) statsBtn.onclick = onStats;
 
   const rename = document.getElementById('rename') as HTMLInputElement;
   const renameSave = document.getElementById('rename-save')!;

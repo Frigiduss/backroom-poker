@@ -6,3 +6,4 @@ export * from './achievements';
 export * from './looks';
 export * from './bonus';
 export * from './leaderboard';
+export * from './stats';

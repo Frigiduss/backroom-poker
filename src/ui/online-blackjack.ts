@@ -14,6 +14,8 @@ export interface BjScreenHooks {
   back(): void;
   sending(): boolean;
   secondsLeft(at: number | null): number;
+  /** A watcher takes a spot. */
+  sit(): void;
 }
 
 const NAMES: Record<BjAction, string> = { hit: 'Hit', stand: 'Stand', double: 'Double', split: 'Split' };
@@ -107,6 +109,10 @@ export class BjScreen {
     const sending = this.h.sending();
     const status = (html: string, buttons = '') => `<span class="status bj-status">${html}</span>${buttons ? `<div class="acts">${buttons}</div>` : ''}`;
     const clock = v.turnDeadline ? `<span class="turn-clock">${bj.phase === 'betting' ? 'Bets close in' : 'Your turn'} · <b id="turn-clock">${this.h.secondsLeft(v.turnDeadline)}s</b></span>` : '';
+    if (!me && v.watching) {
+      const why = v.canSit ? '' : ' Every spot is taken.';
+      return status(`<div class="watch-note">You're watching. The dealer's hole card stays hidden until it's turned over.${why}</div>`, v.canSit ? `<button type="button" class="act raise" id="sit-in" ${sending ? 'disabled' : ''}>Sit in</button>` : '');
+    }
     if (!me) return status(v.waitingForSeat ? 'You take a spot when the next round opens for bets.' : 'You are watching this table.');
     if (me.away) return status('You stepped away, so you sit out and a bot plays any hand still going.', `<button type="button" class="act raise" id="back-in" ${sending ? 'disabled' : ''}>I'm back</button>`);
     const r = bj.round;
@@ -187,6 +193,7 @@ export class BjScreen {
     on('bj-ins', () => this.h.move('insure'));
     on('bj-noins', () => this.h.move('noinsure'));
     on('bj-sitout', () => this.h.move('sitout'));
+    on('sit-in', () => this.h.sit());
     if (!me) return;
     const cap = Math.max(bj.min, Math.min(bj.max, me.stack));
     const setBet = (x: number) => {

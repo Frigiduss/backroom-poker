@@ -43,33 +43,45 @@ let active: OnlineTable | null = null;
 /** A table this account is still sitting at, found when the lobby opens. */
 let resumable: TableView | null = null;
 let checkedResume = false;
-/** A code from a shared link (?join=CODE), filled in for the player. */
+/** A code from a shared link (?join=CODE or ?watch=CODE), filled in for the player. */
 let linkCode = '';
+/** The shared link was to watch, not to sit down. */
+let linkWatch = false;
+/** Who the player sits down as, from the lobby, for a watcher taking a seat later. */
+let pickMe: (() => { name: string } & PlayerTag) | null = null;
 
 export function initOnlinePlay(h: Hooks) {
   hooks = h;
   client = h.auth ? new TableClient(h.auth) : null;
   try {
     const url = new URL(location.href);
-    const code = url.searchParams.get('join');
+    const watch = url.searchParams.get('watch');
+    const code = url.searchParams.get('join') ?? watch;
     if (code) {
       // Kept until used, so it survives signing up through an email link.
       localStorage.setItem(JOIN_KEY, code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8));
+      if (watch && !url.searchParams.get('join')) localStorage.setItem(WATCH_KEY, '1');
+      else localStorage.removeItem(WATCH_KEY);
       url.searchParams.delete('join');
+      url.searchParams.delete('watch');
       history.replaceState(null, '', url.toString());
     }
     linkCode = localStorage.getItem(JOIN_KEY) ?? '';
+    linkWatch = !!linkCode && localStorage.getItem(WATCH_KEY) === '1';
   } catch {
     /* no URL or storage to read */
   }
 }
 
 const JOIN_KEY = 'backroom-poker-join';
+const WATCH_KEY = 'backroom-poker-join-watch';
 
 function forgetLinkCode() {
   linkCode = '';
+  linkWatch = false;
   try {
     localStorage.removeItem(JOIN_KEY);
+    localStorage.removeItem(WATCH_KEY);
   } catch {
     /* nothing kept */
   }
@@ -93,13 +105,14 @@ export const activeTable = (): { tableId: string; code: string; game: 'poker' | 
 export function friendsPanelHtml(): string {
   if (!hooks?.auth) return '';
   const body = signedIn()
-    ? `<p>Make a private table with the game and settings above, then send the code to your friends. Bots take any seats nobody fills.</p>
-      ${resumable ? `<div class="resume-row"><span>You still have a seat at table <b>${esc(resumable.code)}</b> (${esc(gameName(resumable.settings))}).</span><button type="button" class="btn btn-sm btn-primary" id="resume-table">Back to the table</button></div>` : ''}
+    ? `<p>Make a private table with the game and settings above, then send the code to your friends. Bots take any seats nobody fills. Got a code? Join to play, or watch first and sit in when you're ready.</p>
+      ${resumable ? `<div class="resume-row"><span>${resumable.watching ? 'You were watching' : 'You still have a seat at'} table <b>${esc(resumable.code)}</b> (${esc(gameName(resumable.settings))}).</span><button type="button" class="btn btn-sm btn-primary" id="resume-table">${resumable.watching ? 'Back to watching' : 'Back to the table'}</button></div>` : ''}
       <div class="friends-actions">
         <button type="button" class="btn btn-primary" id="make-table">Make a table</button>
         <form class="join-form" id="join-form">
           <input class="text-input code-input" id="join-code" maxlength="8" placeholder="Table code" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(linkCode)}" aria-label="Table code">
           <button type="submit" class="btn">Join</button>
+          <button type="button" class="btn" id="watch-table" title="See the table without taking a seat">Watch</button>
         </form>
       </div>
       <p class="fine">Online tables play with table chips, so your bank stays as it is. Everyone gets ${TURN_SECONDS} seconds a turn.</p>
@@ -115,6 +128,7 @@ export function friendsPanelHtml(): string {
 /** Wires up the lobby panel. `pick` reads the table settings and name chosen in the lobby. */
 export function bindFriendsPanel(pick: () => { settings: TableSettings; name: string } & PlayerTag) {
   if (!hooks?.auth) return;
+  pickMe = pick;
   const err = (msg: string) => {
     const el = document.getElementById('friends-error');
     if (el) el.textContent = msg;
@@ -147,10 +161,19 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
     const { name, playerId, title } = pick();
     void go(async () => (await client!.send({ op: 'join', code, name, playerId, title })).view);
   };
+  const watchBtn = document.getElementById('watch-table');
+  const watch = () => {
+    const code = (document.getElementById('join-code') as HTMLInputElement).value.trim();
+    if (!code) return err('Type the code of the table you want to watch.');
+    const { name, playerId, title } = pick();
+    void go(async () => (await client!.send({ op: 'watch', code, name, playerId, title })).view);
+  };
+  if (watchBtn) watchBtn.onclick = watch;
   const resume = document.getElementById('resume-table');
   if (resume && resumable) resume.onclick = () => go(async () => {
     const { name, playerId, title } = pick();
-    return (await client!.send({ op: 'join', code: resumable!.code, name, playerId, title })).view;
+    // A watcher goes back to watching; joining would sit them down.
+    return (await client!.send({ op: resumable!.watching ? 'watch' : 'join', code: resumable!.code, name, playerId, title })).view;
   });
 
   if (signedIn() && !checkedResume) {
@@ -163,9 +186,11 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
   if (linkCode && signedIn() && form) {
     // Try the invite once; if it fails the code stays in the box with the reason.
     const code = linkCode;
+    const watching = linkWatch;
     forgetLinkCode();
     linkCode = code;
-    form.requestSubmit();
+    if (watching) watch();
+    else form.requestSubmit();
     linkCode = '';
   }
 }
@@ -210,6 +235,7 @@ class OnlineTable {
   private oddsValue: number | null = null;
   private turnCue = '';
   private copied = false;
+  private copiedWatch = false;
   private keyHandler = (e: KeyboardEvent) => this.onKey(e);
   private resizeHandler = () => this.render();
   /** The last finished hand checked for achievements the server credited. */
@@ -224,6 +250,7 @@ class OnlineTable {
     back: () => void this.send({ op: 'back', tableId: this.view.tableId }),
     sending: () => this.sending,
     secondsLeft: (at) => this.secondsLeft(at),
+    sit: () => this.sitIn(),
   });
   private chat: ChatDock | null = null;
 
@@ -363,6 +390,13 @@ class OnlineTable {
     }
   }
 
+  /** A watcher takes a seat: in the waiting room now, or at the next deal. */
+  private sitIn() {
+    const v = this.view;
+    const me = pickMe?.() ?? { name: v.members.find((m) => m.you)?.name ?? 'Player' };
+    void this.send({ op: 'join', code: v.code, name: me.name, playerId: me.playerId, title: me.title });
+  }
+
   private act(a: Action) {
     const v = this.view;
     if (!v.legal || !v.hand) return;
@@ -464,7 +498,7 @@ class OnlineTable {
       <header class="topbar">
         <div class="tb-game">
           <span class="title">${STRUCTURE_NAMES[hand.structure]} ${variant.name}</span>
-          <span class="chip-info">${stakes} · Hand <b>${v.handNumber}</b>${level} · Table <b class="code-tag">${esc(v.code)}</b>${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
+          <span class="chip-info">${stakes} · Hand <b>${v.handNumber}</b>${level} · Table <b class="code-tag">${esc(v.code)}</b>${this.watchersHtml()}${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
         </div>
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
@@ -495,7 +529,7 @@ class OnlineTable {
     return `<header class="topbar">
         <div class="tb-game">
           <span class="title">${title}</span>
-          <span class="chip-info">${info} · Table <b class="code-tag">${esc(v.code)}</b>${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
+          <span class="chip-info">${info} · Table <b class="code-tag">${esc(v.code)}</b>${this.watchersHtml()}${v.paused ? ' · <b class="paused-tag">Paused</b>' : ''}</span>
         </div>
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
@@ -504,6 +538,14 @@ class OnlineTable {
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
       </header>`;
+  }
+
+  /** How many people are watching, for the top bar, with their names on hover. */
+  private watchersHtml(): string {
+    const v = this.view;
+    const names = v.members.filter((m) => m.watching && !m.left).map((m) => m.name);
+    if (v.watching) return ` · <b class="watch-tag" title="${esc(names.join(', '))}">Watching</b>`;
+    return names.length ? ` · <span class="watch-count" title="${esc(names.join(', '))}">${names.length} watching</span>` : '';
   }
 
   private renderBlackjack() {
@@ -536,13 +578,15 @@ class OnlineTable {
   private renderRoom() {
     const v = this.view;
     const s = v.settings;
-    const seats: string[] = v.members.filter((m) => !m.left).map((m) =>
+    const watchers = v.members.filter((m) => !m.left && m.watching);
+    const seats: string[] = v.members.filter((m) => !m.left && !m.watching).map((m) =>
       `<li class="filled"><span class="avatar lv-human">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="rs-name">${esc(m.name)}${titleHtml(m.title)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
     const bj = s.game === 'blackjack';
     const open = bj ? Math.min(s.bots ?? 0, Math.max(0, s.seats - seats.length)) : Math.max(0, s.seats - seats.length);
     if (bj) for (let i = 0; i < open; i++) seats.push('<li class="open"><span class="avatar lv-medium">?</span><span class="rs-name">Bot</span><span class="rs-tag">Plays by the book</span></li>');
     else for (let i = 0; i < open; i++) seats.push(`<li class="open"><span class="avatar lv-${s.difficulty === 'mixed' ? 'medium' : s.difficulty}">?</span><span class="rs-name">Open seat</span><span class="rs-tag">${s.difficulty === 'mixed' ? 'Bot' : `${DIFFICULTY_NAMES[s.difficulty]} bot`} if nobody joins</span></li>`);
     const link = `${location.origin}${location.pathname}?join=${v.code}`;
+    const watchLink = `${location.origin}${location.pathname}?watch=${v.code}`;
     hooks.app.innerHTML = `
     <main class="lobby room">
       <section class="panel room-card">
@@ -553,30 +597,40 @@ class OnlineTable {
           <span class="sl">Table code</span>
           <span class="room-code" aria-label="Table code ${esc(v.code.split('').join(' '))}">${esc(v.code)}</span>
           <button type="button" class="btn btn-sm" id="copy-link">${this.copied ? 'Link copied' : 'Copy invite link'}</button>
+          <button type="button" class="btn btn-sm" id="copy-watch">${this.copiedWatch ? 'Link copied' : 'Copy watch link'}</button>
         </div>
-        <p>Send the code (or the link) to your friends. They open Back Room Poker, sign in, and enter it under <b>Play with friends</b>.</p>
+        <p>Send the code (or the link) to your friends. They open Back Room Poker, sign in, and enter it under <b>Play with friends</b>. A watch link lets them look on first and sit in when they're ready.</p>
         <ol class="room-seats">${seats.join('')}</ol>
+        ${watchers.length ? `<p class="room-watchers"><span class="sl">Watching</span> ${watchers.map((m) => `${esc(m.name)}${m.you ? ' (you)' : ''}`).join(', ')}</p>` : ''}
         ${this.problem ? `<p class="form-error" role="alert">${esc(this.problem)}</p>` : ''}
         <div class="row">
-          <button type="button" class="btn" id="room-leave">Leave</button>
+          <button type="button" class="btn" id="room-leave">${v.watching ? 'Stop watching' : 'Leave'}</button>
           ${v.isHost
             ? `<button type="button" class="btn btn-primary btn-lg" id="room-start" ${this.sending ? 'disabled' : ''}>${open ? `Start with ${open} bot${open === 1 ? '' : 's'}` : 'Start the game'}</button>`
-            : '<span class="room-wait">Waiting for the host to start…</span>'}
+            : v.watching && v.canSit
+              ? `<button type="button" class="btn btn-primary btn-lg" id="sit-in" ${this.sending ? 'disabled' : ''}>Take a seat</button>`
+              : `<span class="room-wait">${v.watching ? 'Every seat is taken. You can watch the game.' : 'Waiting for the host to start…'}</span>`}
         </div>
       </section>
     </main>`;
     document.getElementById('room-leave')!.onclick = () => void this.leave();
     const startBtn = document.getElementById('room-start');
     if (startBtn) startBtn.onclick = () => void this.send({ op: 'start', tableId: v.tableId });
-    document.getElementById('copy-link')!.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(link);
-      } catch {
-        prompt('Copy this link:', link);
-      }
-      this.copied = true;
-      this.render();
+    const sitBtn = document.getElementById('sit-in');
+    if (sitBtn) sitBtn.onclick = () => this.sitIn();
+    const copy = (id: string, url: string, done: () => void) => {
+      document.getElementById(id)!.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+        } catch {
+          prompt('Copy this link:', url);
+        }
+        done();
+        this.render();
+      };
     };
+    copy('copy-link', link, () => (this.copied = true));
+    copy('copy-watch', watchLink, () => (this.copiedWatch = true));
   }
 
   /** Seat positions, turned so the viewer always sits at the bottom. */
@@ -740,7 +794,13 @@ class OnlineTable {
     const seat = v.seats.find((s) => s.you);
     const status = (html: string, buttons = '') => `${mine}<span class="status">${html}</span>${buttons ? `<div class="acts">${buttons}</div>` : ''}`;
     if (!seat) {
-      return status(v.waitingForSeat ? 'You take a seat when the next hand is dealt.' : 'You are watching this table.');
+      if (!v.watching) return status(v.waitingForSeat ? 'You take a seat when the next hand is dealt.' : 'You are watching this table.');
+      const res = hand.result;
+      const who = hand.phase !== 'complete' && hand.toAct >= 0 ? hand.players[hand.toAct] : null;
+      const now = res
+        ? `${(res.summary ?? []).slice(1).map((l) => `<div>${esc(l)}</div>`).join('')}${v.nextDealAt ? `<div>Next hand in <b id="deal-clock">${this.secondsLeft(v.nextDealAt)}</b>s</div>` : ''}`
+        : who ? `<div>Waiting for <b>${esc(who.name)}</b>…</div>` : '';
+      return status(`${now}${watchNote(v)}`, sitButton(v, this.sending));
     }
     if (seat.away) {
       return status('You stepped away, so a bot is playing your chips.', `<button type="button" class="act raise" id="back-in" ${this.sending ? 'disabled' : ''}>I'm back</button>`);
@@ -865,6 +925,9 @@ class OnlineTable {
       this.render();
     });
     on('confirm-leave', () => void this.leave());
+    // Watchers have nothing at stake, so they leave without a question.
+    if (v.watching) on('leave', () => void this.leave());
+    on('sit-in', () => this.sitIn());
     on('back-in', () => void this.send({ op: 'back', tableId: v.tableId }));
     on('dev-toggle', toggleConsole);
     on('rebuy', () => void this.send({ op: 'rebuy', tableId: v.tableId }));
@@ -945,6 +1008,16 @@ class OnlineTable {
       this.render();
     }
   }
+}
+
+/** The line under the table for a watcher. */
+export function watchNote(v: TableView): string {
+  const why = v.canSit ? '' : v.handsUntilNextLevel !== null ? ' This tournament has started, so its seats are taken.' : ' Every seat is taken.';
+  return `<div class="watch-note">You're watching. Cards stay hidden unless they're shown down.${why}</div>`;
+}
+
+export function sitButton(v: TableView, sending: boolean): string {
+  return v.canSit ? `<button type="button" class="act raise" id="sit-in" ${sending ? 'disabled' : ''}>Sit in</button>` : '';
 }
 
 function ordinal(n: number): string {

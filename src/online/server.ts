@@ -29,6 +29,8 @@ export const DEAL_DELAY_MS = 4500;
 export const TURN_MS = TURN_SECONDS * 1000;
 /** Clock run-outs in a row before a bot takes over the seat. */
 const TIMEOUTS_TO_AWAY = 2;
+/** Most people watching one table at once. */
+export const WATCHERS_MAX = 12;
 const NAME_MAX = 14;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const BOT_NAMES = PERSONA_NAMES;
@@ -45,6 +47,8 @@ export interface Member {
   title?: string | null;
   /** Hands won in a row at this table. */
   run?: number;
+  /** Watching without a seat: sees only what the whole table sees. Joining sits them in. */
+  watching?: boolean;
 }
 
 /** Everything a table needs between hands, in plain data. */
@@ -85,6 +89,9 @@ export interface TableState {
   /** Table chat (src/online/chat.ts). */
   chat?: ChatState;
 }
+
+/** The people playing (or about to): everyone at the table who isn't just watching. */
+const players = (state: TableState): Member[] => state.members.filter((m) => !m.left && !m.watching);
 
 /** The poker table in play, or null in the lobby and at blackjack. */
 export const tableOf = (state: TableState): Table | null => (state.phase === 'lobby' || state.bj ? null : rebuild(state));
@@ -298,14 +305,14 @@ const bjCredits = (credits: AwardCredit[] | undefined): BjCredits => (m, tally) 
 function startGame(state: TableState, now: number, seed: number, credits?: AwardCredit[]) {
   const s = state.settings;
   if (s.game === 'blackjack') {
-    const people = state.members.filter((m) => !m.left).slice(0, s.seats);
-    for (const m of state.members) if (!people.includes(m)) m.seat = null;
+    const people = players(state).slice(0, s.seats);
+    seatOthersAsWatchers(state, people);
     bjStart(state, people, now, seed);
     creditGameStart(state, people, credits);
     return;
   }
   const rng = createRng(seed ^ 0x5bd1e995);
-  const people = state.members.filter((m) => !m.left).slice(0, s.seats);
+  const people = players(state).slice(0, s.seats);
   const taken = new Set(people.map((m) => m.name.toLowerCase()));
   const names = shuffle(BOT_NAMES.filter((n) => !taken.has(n.toLowerCase())), rng);
   const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rng.next() * xs.length)];
@@ -328,8 +335,7 @@ function startGame(state: TableState, now: number, seed: number, credits?: Award
     seed,
   };
   people.forEach((m, i) => (m.seat = `p${order.indexOf(i)}`));
-  // Anyone over the seat limit watches instead.
-  for (const m of state.members) if (!people.includes(m)) m.seat = null;
+  seatOthersAsWatchers(state, people);
   state.config = config;
   state.phase = 'playing';
   const t = new Table(config);
@@ -337,6 +343,15 @@ function startGame(state: TableState, now: number, seed: number, credits?: Award
   state.events = [];
   creditGameStart(state, people, credits);
   dealNext(state, t, now, credits);
+}
+
+/** Anyone over the seat limit watches instead. */
+function seatOthersAsWatchers(state: TableState, people: Member[]) {
+  for (const m of state.members) {
+    if (people.includes(m)) continue;
+    m.seat = null;
+    if (!m.left) m.watching = true;
+  }
 }
 
 /** Settles the last hand and deals the next one. False when there aren't two players with chips. */
@@ -468,7 +483,8 @@ function tickAt(state: TableState, t: Table | null, stalled: boolean): number | 
 
 export function viewFor(row: { id: string; code: string; version: number }, state: TableState, t: Table | null, userId: string, now: number): TableView {
   const me = state.members.find((m) => m.userId === userId);
-  const mySeat = me?.seat ?? null;
+  // A watcher has no seat, so everything below shows them only what the whole table sees.
+  const mySeat = me?.watching ? null : me?.seat ?? null;
   const hand = t?.hand ?? null;
   const hi = hand && mySeat ? t!.handIndexOf(mySeat) : -1;
   const myTurn = !!hand && !hand.isComplete && hi >= 0 && hand.toAct === hi && !state.away[mySeat!];
@@ -484,11 +500,13 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     code: row.code,
     phase: state.phase,
     settings: state.settings,
-    members: state.members.map((m) => ({ name: m.name, title: m.title ?? null, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left })),
+    members: state.members.map((m) => ({ name: m.name, title: m.title ?? null, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left, watching: !!m.watching })),
     isHost: state.host === userId,
     seats,
     mySeat,
     waitingForSeat: state.pendingSits.some((p) => p.userId === userId),
+    watching: !!me?.watching,
+    canSit: !!me?.watching && !noSeat(state, t),
     handNumber: t?.handNumber ?? 0,
     level: t?.level ?? 0,
     handsUntilNextLevel: t && t.isTournament ? t.handsUntilNextLevel() : null,
@@ -522,6 +540,7 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
     const req = (raw ?? {}) as Request;
     if (req.op === 'create') return await create(db, userId, req, now(), seed);
     if (req.op === 'join') return await join(db, userId, req, now());
+    if (req.op === 'watch') return await watch(db, userId, req, now());
     if (req.op === 'admin' || req.op === 'tables') {
       if (!(await db.isAdmin(userId))) throw new TableError('Only admin accounts can do that.', 403);
       return req.op === 'tables' ? await listTables(db) : await adminChange(db, userId, req, now);
@@ -561,6 +580,25 @@ async function create(db: TableDb, userId: string, req: Extract<Request, { op: '
 
 const findCode = (code: unknown) => String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+/** A bot's seat nobody has claimed yet, for someone joining a cash game in progress. */
+const freeSeat = (state: TableState, t: Table): Seat | undefined => t.seats.find((s) => !s.isHuman && !state.pendingSits.some((p) => p.seat === s.id));
+
+/** Why someone new (or a watcher) can't sit down now, or null if they can. */
+function noSeat(state: TableState, t: Table | null): string | null {
+  if (state.phase === 'over') return 'That table has finished its game.';
+  if (state.phase === 'lobby') return players(state).length >= state.settings.seats ? 'That table is full.' : null;
+  if (state.bj) return bjFreeSpot(state) ? null : 'That table is full.';
+  if (t!.isTournament) return 'That tournament has already started.';
+  return freeSeat(state, t!) ? null : 'That table is full.';
+}
+
+/** Gives a person a place at the table: in the waiting room, or a seat at the next deal. */
+function sitDown(state: TableState, t: Table | null, userId: string) {
+  const why = noSeat(state, t);
+  if (why) throw new TableError(why, 409);
+  if (state.phase === 'playing') state.pendingSits.push({ userId, seat: state.bj ? bjFreeSpot(state)! : freeSeat(state, t!)!.id });
+}
+
 async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'join' }>, now: number): Promise<Outcome> {
   const code = findCode(req.code);
   const tag = await checkTitle(db, userId, req);
@@ -572,9 +610,14 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
     const t = tableOf(state);
     let m = state.members.find((x) => x.userId === userId);
     if (m) {
+      // A watcher sitting in takes a seat like anyone new.
+      if (m.watching) {
+        sitDown(state, t, userId);
+        m.watching = false;
+      }
       m.left = false;
       m.title = tag.title;
-      if (state.phase === 'lobby') {
+      if (state.phase === 'lobby' || !m.seat) {
         m.name = name;
         m.playerId = tag.playerId;
       }
@@ -583,19 +626,7 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
         delete state.timeouts[m.seat];
       }
     } else {
-      if (state.phase === 'over') throw new TableError('That table has finished its game.', 409);
-      if (state.phase === 'lobby') {
-        if (state.members.filter((x) => !x.left).length >= state.settings.seats) throw new TableError('That table is full.', 409);
-      } else if (state.bj) {
-        const free = bjFreeSpot(state);
-        if (!free) throw new TableError('That table is full.', 409);
-        state.pendingSits.push({ userId, seat: free });
-      } else {
-        if (t!.isTournament) throw new TableError('That tournament has already started.', 409);
-        const free = t!.seats.find((s) => !s.isHuman && !state.pendingSits.some((p) => p.seat === s.id));
-        if (!free) throw new TableError('That table is full.', 409);
-        state.pendingSits.push({ userId, seat: free.id });
-      }
+      sitDown(state, t, userId);
       m = { userId, name, seat: null, left: false, ...tag };
       state.members.push(m);
     }
@@ -605,7 +636,35 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
   throw new TableError('The table is busy. Try again.', 503);
 }
 
-async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'admin' | 'tables' }>, now: () => number, seed: () => number): Promise<Outcome> {
+/** Watching a table: no seat and no cards but the ones everybody sees. Works at any point in the game. */
+async function watch(db: TableDb, userId: string, req: Extract<Request, { op: 'watch' }>, now: number): Promise<Outcome> {
+  const code = findCode(req.code);
+  const tag = await checkTitle(db, userId, req);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await db.byCode(code);
+    if (!row) throw new TableError(`No table has the code ${code || '(blank)'}. Check it with whoever made the table.`, 404);
+    const state = row.state;
+    const t = tableOf(state);
+    let m = state.members.find((x) => x.userId === userId);
+    // Already here (watching or playing): nothing changes.
+    if (m && !m.left) return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, now) } };
+    if (m) {
+      // Someone back after leaving keeps their seat, if they had one; a bot plays it until they say they're back.
+      m.left = false;
+      m.title = tag.title;
+      if (!m.seat) m.watching = true;
+    } else {
+      if (state.members.filter((x) => x.watching && !x.left).length >= WATCHERS_MAX) throw new TableError('That table has as many people watching as it can take.', 409);
+      m = { userId, name: cleanName(req.name), seat: null, left: false, watching: true, ...tag };
+      state.members.push(m);
+    }
+    if (!(await db.update(row.id, row.version, state))) continue;
+    return publish(db, { ...row, version: row.version + 1 }, state, t, now, userId);
+  }
+  throw new TableError('The table is busy. Try again.', 503);
+}
+
+async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'watch' | 'admin' | 'tables' }>, now: () => number, seed: () => number): Promise<Outcome> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await db.byId(String(req.tableId ?? ''));
     if (!row) throw new TableError('That table is gone.', 404);
@@ -674,16 +733,17 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
       case 'leave': {
         if (state.phase === 'lobby') {
           state.members = state.members.filter((x) => x !== m);
-          if (!state.members.length) {
+          // A waiting room with only watchers left has nobody to start the game.
+          if (!players(state).length) {
             await db.remove(row.id);
             return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: null } };
           }
-          if (state.host === userId) state.host = state.members[0].userId;
+          if (state.host === userId) state.host = players(state)[0].userId;
         } else {
           m.left = true;
           if (m.seat) state.away[m.seat] = true;
           state.pendingSits = state.pendingSits.filter((p) => p.userId !== userId);
-          if (state.host === userId) state.host = state.members.find((x) => !x.left)?.userId ?? state.host;
+          if (state.host === userId) state.host = players(state)[0]?.userId ?? state.host;
         }
         break;
       }
@@ -758,7 +818,7 @@ export function adminInfo(row: { id: string; code: string; version: number }, st
     phase: state.phase,
     paused: !!state.paused,
     settings: state.settings,
-    members: state.members.map((m) => ({ name: m.name, userId: m.userId, seat: m.seat, host: m.userId === state.host, left: m.left, away: !!(m.seat && state.away[m.seat]) })),
+    members: state.members.map((m) => ({ name: m.name, userId: m.userId, seat: m.seat, host: m.userId === state.host, left: m.left, away: !!(m.seat && state.away[m.seat]), watching: !!m.watching })),
     handNumber: t?.handNumber ?? 0,
     level: t?.level ?? 0,
     seats: (t?.seats ?? []).map((s) => ({ id: s.id, name: s.name, isHuman: s.isHuman, difficulty: s.difficulty, style: s.style, stack: s.stack, busted: s.busted })),
@@ -958,7 +1018,7 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         m.left = true;
         if (m.seat) state.away[m.seat] = true;
         state.pendingSits = state.pendingSits.filter((p) => p.userId !== m.userId);
-        if (state.host === m.userId) state.host = state.members.find((x) => !x.left)?.userId ?? state.host;
+        if (state.host === m.userId) state.host = players(state)[0]?.userId ?? state.host;
         message = `${m.name} is off the table; a bot plays their chips.`;
         break;
       }
