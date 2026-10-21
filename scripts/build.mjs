@@ -1,9 +1,11 @@
-// Builds the browser game into dist/ (dist/index.html is fully self-contained), the admin
+// Builds the browser game into dist/ (dist/index.html is fully self-contained, plus the
+// manifest, icons and service worker that make it installable), the admin
 // dashboard into dist/admin.html (published as admin/), and the online table server into supabase/functions/poker-table/index.ts,
 // opens the built game in the default browser with --open, serves it for development
 // with --serve, or runs the test suite with --test.
 import * as esbuild from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,10 +56,18 @@ function icons() {
     + `<link rel="apple-touch-icon" href="data:image/png;base64,${png}">`;
 }
 
-function page(js, css, template = 'src/ui/index.html') {
+/** Install-to-home-screen tags. The game registers sw.js only when the manifest link is there. */
+const APP_TAGS = '\n<link rel="manifest" href="manifest.webmanifest">'
+  + '\n<meta name="apple-mobile-web-app-capable" content="yes">'
+  + '\n<meta name="mobile-web-app-capable" content="yes">'
+  + '\n<meta name="apple-mobile-web-app-title" content="Back Room">'
+  + '\n<meta name="apple-mobile-web-app-status-bar-style" content="black">';
+const APP_FILES = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
+
+function page(js, css, template = 'src/ui/index.html', app = false) {
   const html = readFileSync(join(root, template), 'utf8');
   return html
-    .replace('<!--__ICONS__-->', icons)
+    .replace('<!--__ICONS__-->', () => icons() + (app ? APP_TAGS : ''))
     .replace('/*__CSS__*/', () => css)
     .replace('<script src="game.js"></script>', () => `<script>${js.replace(/<\/script/g, '<\\/script')}</script>`);
 }
@@ -69,10 +79,12 @@ async function buildOnce() {
   });
   const js = result.outputFiles[0].text;
   const css = readFileSync(join(root, 'src/ui/styles.css'), 'utf8');
-  const html = page(js, css);
+  const html = page(js, css, 'src/ui/index.html', true);
   writeFileSync(join(dist, 'index.html'), html);
-  // Same page without the outer document, for publishing as a hosted page.
+  writeAppFiles(html);
+  // Same page without the outer document (or the app install tags), for publishing as a hosted page.
   writeFileSync(join(dist, 'fragment.html'), html
+    .replace(APP_TAGS, '')
     .replace(/^[\s\S]*?<head>/, '')
     .replace(/<meta charset[^>]*>\s*|<meta name="viewport"[^>]*>\s*/g, '')
     .replace(/<\/head>\s*<body>/, '')
@@ -80,6 +92,13 @@ async function buildOnce() {
   console.log(`Built dist/index.html (${(html.length / 1024).toFixed(0)} KB)`);
   await buildAdmin(css);
   await buildServer();
+}
+
+/** The manifest, icons and service worker, whose version changes whenever the page does. */
+function writeAppFiles(html) {
+  for (const file of APP_FILES) copyFileSync(join(root, 'src/ui', file), join(dist, file));
+  const version = createHash('sha256').update(html).update(readFileSync(join(root, 'src/ui/sw.js'))).digest('hex').slice(0, 12);
+  writeFileSync(join(dist, 'sw.js'), readFileSync(join(root, 'src/ui/sw.js'), 'utf8').replace('__VERSION__', version));
 }
 
 /** The admin dashboard: the developer console and live panels on a page of their own. */

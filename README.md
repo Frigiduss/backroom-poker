@@ -16,6 +16,12 @@ split and insurance).
 (also at https://claude.ai/artifact/YZLtoQAHrSgdDmg59Noiox). Every push to `main` redeploys the
 GitHub Pages site.
 
+**As an app on your phone or computer:** open the site, then on iPhone/iPad tap Share >
+Add to Home Screen (Safari); on Android tap the menu > Install app (Chrome); on desktop Chrome
+or Edge click the install icon in the address bar. The installed app opens full screen and plays
+against bots offline. A service worker (`src/ui/sw.js`) always asks the server first, so a new
+deploy shows up the next time the app opens; it never touches online play.
+
 **From this folder:** double-click `play.bat` (Windows) or `play.command` (Mac/Linux),
 or run `npm start`. It installs what it needs the first time, builds the game and opens it
 in your browser. Needs [Node.js](https://nodejs.org).

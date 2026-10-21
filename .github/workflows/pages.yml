@@ -30,7 +30,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: mkdir -p _site/admin && cp dist/index.html _site/index.html && cp dist/admin.html _site/admin/index.html
+      - run: mkdir -p _site/admin && cp dist/index.html _site/index.html && cp dist/admin.html _site/admin/index.html && cp dist/sw.js dist/manifest.webmanifest dist/icon-*.png _site/
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

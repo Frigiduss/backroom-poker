@@ -1269,4 +1269,16 @@ async function migrateLegacySettings(local: LocalAccountStore) {
   else setWelcomeSettings(settings);
 }
 
+/** Installed-app support: the deployed page carries a manifest link, and then the service worker makes it work offline. */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !document.querySelector('link[rel="manifest"]')) return;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    // A phone can keep the app open for days, so look for a new deploy whenever it comes back to the front.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch(() => {});
+}
+
+registerServiceWorker();
 boot();
