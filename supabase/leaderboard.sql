@@ -1,5 +1,5 @@
 -- Back Room Poker: the daily chip bonus and the leaderboard.
--- Run this once, after setup.sql and admin.sql, in the SQL Editor (New query → paste → Run).
+-- Run this once, after setup.sql and admin.sql (or security.sql on an older project), in the SQL Editor (New query → paste → Run).
 -- Running it again is safe.
 --
 --   * daily_bonus          when each online player last collected the daily bonus. Browsers can

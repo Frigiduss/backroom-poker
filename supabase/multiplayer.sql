@@ -1,5 +1,5 @@
 -- Back Room Poker: online tables with friends.
--- Run this once, after setup.sql, in your Supabase project (SQL Editor → New query → paste → Run).
+-- Run this once, after setup.sql (or security.sql on an older project), in your Supabase project (SQL Editor → New query → paste → Run).
 -- Safe to run again.
 --
 -- poker_tables holds each table's full state, including the deck and everyone's cards.
