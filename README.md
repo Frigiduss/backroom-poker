@@ -1,93 +1,154 @@
 # Back Room Poker
 
-A browser poker game against computer opponents.
+Poker and blackjack in your browser, against computer opponents or with friends online.
 
-**Games:** Texas Hold'em (no-limit, pot-limit, fixed-limit), Omaha, Omaha Hi-Lo,
-Short Deck, Five Card Draw, Seven Card Stud, Stud Hi-Lo and Razz, plus **Blackjack**
-against the dealer (six decks, dealer stands on all 17s, blackjack pays 3 to 2, double,
-split and insurance).
-**Formats:** cash game (rebuys), Sit & Go tournament (rising blinds), heads-up duel.
-**Bots:** Beginner, Easy, Medium, Hard, Expert (or Mixed), each with a play style
-(balanced, tight, loose, aggressive, passive).
+**Play now:** https://frigiduss.github.io/backroom-poker/ (nothing to install, no account needed)
 
-## Play
+## What's in it
 
-**In your browser, nothing to install:** https://frigiduss.github.io/backroom-poker/
-(also at https://claude.ai/artifact/YZLtoQAHrSgdDmg59Noiox). Every push to `main` redeploys the
-GitHub Pages site.
+- **Eight poker games:** Texas Hold'em (no-limit, pot-limit, fixed-limit), Omaha,
+  Omaha Hi-Lo, Short Deck, Five Card Draw, Seven Card Stud, Stud Hi-Lo and Razz. The game
+  picker groups them into Hold'em & Omaha, Stud and Draw tabs, each with an example hand.
+- **Blackjack** against the dealer: six decks, dealer stands on all 17s, blackjack pays
+  3 to 2, with double, split and insurance. Play it solo or at an online table with friends.
+- **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
+  heads-up duel.
+- **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
+  Mixed) and five styles (balanced, tight, loose, aggressive, passive). 24 named bot
+  characters have their own faces and table talk; turn the talk off in Settings, or switch
+  on Fast bots if you'd rather not wait.
+- **Practice mode:** a switch on the table setup card adds advice, your equity and pot odds
+  on every decision. Practice uses free chips, so it never touches your bank, stats or
+  achievements.
+- **Chip bank:** 10,000 chips to start, carried between games. A bank under 1,000 can be
+  refilled, and a daily bonus grows with your streak.
+- **Achievements and titles** to unlock and show off at the table.
+- **Stats page:** a chip graph over time plus VPIP and other numbers from your hands.
+- **Looks:** pick a felt and card back for the poker and blackjack tables.
+- **Sounds** for cards, chips and wins.
 
-**As an app on your phone or computer:** open the site, then on iPhone/iPad tap Share >
-Add to Home Screen (Safari); on Android tap the menu > Install app (Chrome); on desktop Chrome
-or Edge click the install icon in the address bar. The installed app opens full screen and plays
-against bots offline. A service worker (`src/ui/sw.js`) always asks the server first, so a new
-deploy shows up the next time the app opens; it never touches online play.
+### With an online account (optional)
 
-**From this folder:** double-click `play.bat` (Windows) or `play.command` (Mac/Linux),
-or run `npm start`. It installs what it needs the first time, builds the game and opens it
-in your browser. Needs [Node.js](https://nodejs.org).
+Sign up with an email and password to keep your chips, stats and achievements on every device.
+Signed in, you can also:
 
-The built game is a single file, `dist/index.html` (made by `npm start` or `npm run build`;
-build output isn't kept in git). Copy it anywhere and double-click it to play offline.
+- **Play with friends** at a private table: make one, then send its five-letter code or invite
+  link. Bots fill the empty seats, and a bot plays for anyone who steps away. The cards are
+  shuffled and dealt on the server, so nobody's browser ever sees anyone else's hand.
+- **Watch a table** without taking a seat, from its code or watch link.
+- **Chat** at the table.
+- **Climb the leaderboard** for chip bank, biggest pot and achievements (players appear
+  after 10 hands; you can take yourself off it).
 
-Keys: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand. At blackjack: `H` hit,
-`S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
+Online tables use table chips, so your bank isn't at stake there.
 
-## Players and chip bank
+### Keyboard
 
-On first visit the game asks who's playing. Each player has a chip bank (10,000 to start)
-that carries between games, lifetime stats, and their own lobby choices and table settings.
+Poker: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
+Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
 
-- **Cash games** take the buy-in (and any rebuys) from the bank; leaving the table puts
-  your stack back. Closing the tab mid-game returns your stack as of the last finished hand.
-- **Sit & Go and heads-up** cost a 500-chip entry. Every seat pays in, and the pool goes to
-  the top finisher (2–3 players), the top two (4–6), or the top three (7+). Leaving early
-  forfeits the entry.
-- **Blackjack** bets straight from the bank: each wager leaves it when placed and winnings
-  land back in it, so bets on an unfinished hand are lost if you leave or close the tab.
-- A bank under 1,000 can be refilled to 10,000.
-- Each online account is one player. Playing offline keeps a single player in this browser;
-  signing in to a new account brings that player along.
-- **Online accounts** (optional): sign in with an email and password to keep your chips and
-  stats on every device. Off until a Supabase project is connected; see
-  [supabase/README.md](supabase/README.md) for the five-minute setup.
+## Install it as an app
 
-## Develop
+Open https://frigiduss.github.io/backroom-poker/, then:
+
+- **iPhone / iPad (Safari):** tap Share, then **Add to Home Screen**.
+- **Android (Chrome):** tap the ⋮ menu, then **Install app**.
+- **Computer (Chrome or Edge):** click the install icon at the right of the address bar.
+
+The installed app opens full screen and plays against bots offline. It checks for a new
+version every time it opens, so updates arrive on their own. Online play still needs a
+connection.
+
+## Run it from this folder
+
+Double-click `play.bat` (Windows) or `play.command` (Mac/Linux), or run `npm start`. It
+installs what it needs the first time, builds the game and opens it in your browser. Needs
+[Node.js](https://nodejs.org).
+
+The built game is a single file, `dist/index.html`. Copy it anywhere and double-click it to
+play against bots offline.
+
+---
+
+## For developers
+
+### Commands
 
 ```
 npm install
 npm run dev        # http://localhost:8000, rebuilds on save (restart to pick up CSS changes)
-npm start          # build and open the game in your browser
+npm start          # install, build and open the game in your browser
 npm run build      # writes dist/ and supabase/functions/poker-table/index.ts
-npm test           # rules tests + thousands of bot-vs-bot hands in every game
+npm test           # rules tests, online/server tests and thousands of bot-vs-bot hands (~3 min)
 npm run typecheck
 ```
 
-Every pull request runs the **Checks** workflow (`.github/workflows/checks.yml`): type check,
-build and the full test suite (about 3 minutes). Build output (`dist/` and
-`supabase/functions/poker-table/index.ts`) is not committed, so parallel pull requests don't
-conflict over it; the Pages and Supabase deploy workflows build it from source.
+`npm run build` (`scripts/build.mjs`, esbuild) produces:
 
-### Required checks
+- `dist/index.html`: the whole game in one file, with CSS, icons and the bot worker inlined.
+- `dist/sw.js`, `dist/manifest.webmanifest`, `dist/icon-*.png`: what makes the site installable.
+- `dist/admin.html`: the admin dashboard, published at `/admin/`.
+- `supabase/functions/poker-table/index.ts`: the online table server (a Supabase Edge Function).
 
-To block merging until Checks passes: repo **Settings > Branches > Add branch ruleset** (or
-"Add classic branch protection rule") for `main`, turn on **Require status checks to pass**,
-and add the `checks` check.
+**Build output is never committed** (it's in `.gitignore`), so parallel pull requests don't
+conflict over it. The deploy workflows build everything from source.
 
-## Layout
+### Layout
 
-- `src/engine/` – pure game logic with no browser code: cards, hand evaluator
-  (high, ace-to-five low, Omaha, short deck), variants, a `Hand` state machine
-  (blinds, antes, stud bring-in, draws, NL/PL/FL betting, side pots, hi-lo splits)
-  and a `Table` (button, blind levels, busts, rebuys, public player stats), plus
-  `blackjack.ts` (shoe, dealer, splits, doubles, insurance and basic strategy).
-- `src/bots/` – bot opponents. Bots only see a `PlayerView` (what that seat may know).
-  Decisions use Monte Carlo equity, pot odds, position, starting-hand charts, and at
-  Hard/Expert, opponent ranges from their betting; Expert also adapts to each
-  player's observed tendencies.
-- `src/accounts/` – player profiles: chip bank rules, stats, and the
-  `AccountStore` interface. `LocalAccountStore` keeps profiles in browser storage;
-  `OnlineAccountStore` keeps them in Supabase (`online.ts`, configured in `config.ts`).
-- `src/ui/` – the browser front end (plain TypeScript + DOM).
+- `src/engine/`: pure game logic, no browser code. Cards, hand evaluator (high, ace-to-five
+  low, Omaha, short deck), variants, a `Hand` state machine (blinds, antes, stud bring-in,
+  draws, NL/PL/FL betting, side pots, hi-lo splits), a `Table` (button, blind levels, busts,
+  rebuys) and `blackjack.ts` (shoe, dealer, splits, doubles, insurance, basic strategy).
+- `src/bots/`: bot opponents. Bots only see a `PlayerView` (what that seat may know).
+  Decisions use Monte Carlo equity, pot odds, position, starting-hand charts and, at
+  Hard/Expert, opponent ranges; Expert also adapts to each player's tendencies. `persona.ts`
+  holds the named characters, and `worker.ts`/`brain.ts` run bot thinking in a web worker.
+- `src/accounts/`: player profiles behind the `AccountStore` interface (`LocalAccountStore`
+  in browser storage, `OnlineAccountStore` in Supabase), plus chip bank rules, stats,
+  achievements, daily bonus, leaderboard and looks. Supabase URL and public key are in
+  `config.ts`.
+- `src/online/`: online play. `server.ts` and `blackjack.ts` are the table server (bundled
+  into the Edge Function), `client.ts` talks to it, plus the shared protocol and table chat.
+- `src/ui/`: the browser front end (plain TypeScript + DOM), the PWA manifest, icons and
+  service worker (`sw.js`).
+- `src/admin/`: the admin dashboard page.
+- `test/`: Node test runner tests. `fake-supabase.ts` and `memory-db.ts` stand in for the
+  real backend.
 
-The engine and bots have no DOM dependencies, so they can be reused for other
-platforms (desktop wrapper, mobile, or a server for multiplayer).
+The engine and bots have no DOM dependencies, so they can be reused on other platforms.
+
+### Deploys and checks (GitHub Actions)
+
+- **Checks** (`.github/workflows/checks.yml`) runs on every pull request: type check, build
+  and the full test suite. To block merging until it passes, add a branch ruleset for `main`
+  with **Require status checks to pass** and the `checks` check.
+- **Pages** (`.github/workflows/pages.yml`) builds and publishes the site to GitHub Pages on
+  every push to `main`.
+- **Table server** (`.github/workflows/supabase-functions.yml`) builds and deploys the
+  `poker-table` Edge Function to Supabase when `main` changes. It needs a
+  `SUPABASE_ACCESS_TOKEN` repository secret and skips the deploy (with a notice) without one.
+
+### Supabase backend
+
+Online accounts, tables, achievements, the leaderboard and the daily bonus run on
+[Supabase](https://supabase.com). Without it the game still works fully offline against bots.
+Setup is a handful of SQL files run once in the Supabase SQL editor:
+
+| File | Turns on |
+| --- | --- |
+| `supabase/setup.sql` | Accounts and saved players |
+| `supabase/multiplayer.sql` | Online tables (plus deploying the `poker-table` function) |
+| `supabase/achievements.sql` | Achievements earned at online tables |
+| `supabase/leaderboard.sql` | Daily bonus and leaderboard |
+| `supabase/admin.sql` | Admin accounts |
+
+Step-by-step instructions are in [supabase/README.md](supabase/README.md). Only the public
+(anon/publishable) key belongs in the code; the database's row security rules are what keep
+accounts apart. Never put the `service_role` key in the repository.
+
+### Admin tools
+
+Admin accounts (made with `supabase/admin.sql`) get a developer console in the game and the
+dashboard at `/admin/`, for looking after players, tables and the lobby announcement. Admin
+powers are checked by the database and the table server, not the page, and every change is
+logged. See [supabase/README.md](supabase/README.md#the-developer-console).
