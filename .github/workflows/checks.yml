@@ -1,6 +1,6 @@
 # Runs on every pull request so broken code can't slip in:
-# type check, the test suite, a build, and a check that the committed build output
-# (dist/ and the bundled table server) matches the source.
+# type check, a build, and the test suite. Build output (dist/ and the bundled table server)
+# isn't committed; the deploy workflows build it themselves.
 # To make this required before merging, see "Required checks" in README.md.
 name: Checks
 
@@ -31,12 +31,5 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
-      - name: Build output is up to date
-        run: |
-          if ! git diff --quiet -- dist supabase/functions; then
-            git diff --stat -- dist supabase/functions
-            echo "::error::The committed build output is out of date. Run 'npm run build' and commit dist/ and supabase/functions/poker-table/index.ts."
-            exit 1
-          fi
       - name: Tests
         run: npm test

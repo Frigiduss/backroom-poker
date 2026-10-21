@@ -20,8 +20,8 @@ GitHub Pages site.
 or run `npm start`. It installs what it needs the first time, builds the game and opens it
 in your browser. Needs [Node.js](https://nodejs.org).
 
-The built game is a single file, `dist/index.html`. Copy it anywhere and double-click it to
-play offline.
+The built game is a single file, `dist/index.html` (made by `npm start` or `npm run build`;
+build output isn't kept in git). Copy it anywhere and double-click it to play offline.
 
 Keys: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand. At blackjack: `H` hit,
 `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
@@ -51,14 +51,15 @@ that carries between games, lifetime stats, and their own lobby choices and tabl
 npm install
 npm run dev        # http://localhost:8000, rebuilds on save (restart to pick up CSS changes)
 npm start          # build and open the game in your browser
-npm run build      # writes dist/index.html
+npm run build      # writes dist/ and supabase/functions/poker-table/index.ts
 npm test           # rules tests + thousands of bot-vs-bot hands in every game
 npm run typecheck
 ```
 
 Every pull request runs the **Checks** workflow (`.github/workflows/checks.yml`): type check,
-build, a check that the committed `dist/` and `supabase/functions/poker-table/index.ts` match
-the source, and the full test suite (about 3 minutes).
+build and the full test suite (about 3 minutes). Build output (`dist/` and
+`supabase/functions/poker-table/index.ts`) is not committed, so parallel pull requests don't
+conflict over it; the Pages and Supabase deploy workflows build it from source.
 
 ### Required checks
 

@@ -92,10 +92,11 @@ To switch it on, do these once:
    workflow**. From then on it redeploys on its own whenever the server code changes.
 
 Rather not use GitHub? In Supabase open **Edge Functions → Deploy a new function → Via
-Editor**, name it `poker-table`, replace the sample code with everything in
-[`functions/poker-table/index.ts`](functions/poker-table/index.ts), and click **Deploy**.
+Editor**, name it `poker-table`, run `npm run build` in the repository to
+make `supabase/functions/poker-table/index.ts`, replace the sample code with everything in that
+file, and click **Deploy**.
 Then open the function's **Details** and turn **Verify JWT** off (the function checks each
-player's sign-in itself). Repeat the paste whenever that file changes.
+player's sign-in itself). Repeat the build and paste whenever the server code changes.
 
 Tables nobody has played at for three days are cleared out when someone makes a new one.
 
@@ -108,8 +109,8 @@ never write, so nobody can hand themselves one. To switch that on:
 1. In Supabase, open **SQL Editor → New query**, paste everything from
    [`achievements.sql`](achievements.sql), and click **Run**.
 2. Redeploy the `poker-table` function (merging to `main` does this through the GitHub
-   workflow, or paste the new [`functions/poker-table/index.ts`](functions/poker-table/index.ts)
-   into the dashboard as before).
+   workflow, or run `npm run build` and paste the new `supabase/functions/poker-table/index.ts` into
+   the dashboard as before).
 
 Until both are done, online tables play as usual and simply don't count achievements.
 Titles shown at online tables are checked by the function too: a title only shows if the
