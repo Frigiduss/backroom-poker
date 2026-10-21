@@ -965,7 +965,7 @@ const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'edit', usage: 'edit <player> bank <n> | name <new> | stat <name> <n> | resetstats', group: 'Accounts',
+    name: 'edit', usage: 'edit <player> bank <n> | name <new> | stat <name> <n> | resetstats | board on|off', group: 'Accounts',
     help: 'Changes any player, in any account. If they are playing right now, their next save can undo it.',
     async run(args, out) {
       const target = await findPlayer(args[0]);
@@ -991,8 +991,14 @@ const COMMANDS: Command[] = [
       } else if (what === 'resetstats') {
         await changePlayer(target, resetStats, 'reset stats', {});
         out(`${name}'s stats reset.`, 'ok');
+      } else if (what === 'board') {
+        const on = (args[2] ?? '').toLowerCase();
+        if (on !== 'on' && on !== 'off') throw new UsageError('Say board on or board off.');
+        await onlineAdmin().setLeaderboardHidden(target.profile.id, on === 'off');
+        await admin?.log(on === 'off' ? 'hide from leaderboard' : 'show on leaderboard', { player: target.profile.id, name: target.profile.name });
+        out(on === 'off' ? `${name} is off the leaderboard.` : `${name} can show on the leaderboard again.`, 'ok');
       } else {
-        throw new UsageError('Say what to change: bank, name, stat or resetstats.');
+        throw new UsageError('Say what to change: bank, name, stat, resetstats or board.');
       }
     },
   },

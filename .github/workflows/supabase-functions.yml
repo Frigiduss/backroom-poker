@@ -1,4 +1,5 @@
-# Deploys the online table server (supabase/functions/poker-table) to Supabase whenever it
+# Builds the online table server (supabase/functions/poker-table, bundled from src/online and
+# the engine, bots and accounts code it uses) and deploys it to Supabase whenever that code
 # changes on main. One-time setup: add a repository secret named SUPABASE_ACCESS_TOKEN
 # (see supabase/README.md). Without it this workflow skips the deploy.
 name: Deploy table server to Supabase
@@ -6,7 +7,15 @@ name: Deploy table server to Supabase
 on:
   push:
     branches: [main]
-    paths: ['supabase/functions/**', 'supabase/config.toml', '.github/workflows/supabase-functions.yml']
+    paths:
+      - 'src/online/**'
+      - 'src/engine/**'
+      - 'src/bots/**'
+      - 'src/accounts/**'
+      - 'scripts/build.mjs'
+      - 'package-lock.json'
+      - 'supabase/config.toml'
+      - '.github/workflows/supabase-functions.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,6 +31,14 @@ jobs:
       - name: Skip when no access token is set
         if: env.SUPABASE_ACCESS_TOKEN == ''
         run: echo "::notice::Add the SUPABASE_ACCESS_TOKEN secret to deploy the table server (see supabase/README.md)."
+      - uses: actions/setup-node@v4
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: npm ci --no-audit --no-fund && npm run build
       - uses: supabase/setup-cli@v1
         if: env.SUPABASE_ACCESS_TOKEN != ''
         with:
