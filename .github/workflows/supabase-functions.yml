@@ -27,11 +27,11 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Skip when no access token is set
         if: env.SUPABASE_ACCESS_TOKEN == ''
         run: echo "::notice::Add the SUPABASE_ACCESS_TOKEN secret to deploy the table server (see supabase/README.md)."
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: env.SUPABASE_ACCESS_TOKEN != ''
         with:
           node-version: 22
@@ -39,10 +39,12 @@ jobs:
       - name: Build
         if: env.SUPABASE_ACCESS_TOKEN != ''
         run: npm ci --no-audit --no-fund && npm run build
-      - uses: supabase/setup-cli@v1
+      # Pinned: "latest" made setup-cli look up GitHub releases, which hit API rate limits.
+      # v3 installs the CLI from npm. Bump this when a newer CLI is needed.
+      - uses: supabase/setup-cli@v3
         if: env.SUPABASE_ACCESS_TOKEN != ''
         with:
-          version: latest
+          version: 2.121.0
       - name: Deploy poker-table
         if: env.SUPABASE_ACCESS_TOKEN != ''
         run: supabase functions deploy poker-table --project-ref yqvizfunfdxtlozvtqfs --no-verify-jwt --use-api
