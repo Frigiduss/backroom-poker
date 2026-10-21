@@ -1,6 +1,6 @@
 # Back Room Poker
 
-Poker, blackjack, roulette and baccarat in your browser, against computer opponents or with friends online.
+Poker, blackjack, roulette, baccarat and video poker in your browser, against computer opponents or with friends online.
 
 **Play now:** https://frigiduss.github.io/backroom-poker/ (nothing to install, no account needed)
 
@@ -14,6 +14,9 @@ Poker, blackjack, roulette and baccarat in your browser, against computer oppone
 - **Roulette** on a European (single zero) or American (double zero) wheel, with every
   standard inside and outside bet, and **baccarat** (punto banco: Player, Banker, Tie and
   pair bets). Both are you against the house, in the Casino tab next to blackjack.
+- **Video poker** machines: Jacks or Better, Bonus Poker and Double Double Bonus, all on
+  their full-pay tables. Bet one to five coins of 5 to 500 chips, hold, draw, and a royal
+  flush on five coins pays 4,000.
 - **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
   heads-up duel.
 - **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
@@ -50,6 +53,7 @@ Online tables use table chips, so your bank isn't at stake there.
 Poker: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
 Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
 Roulette and baccarat: `1`–`3` pick a chip, `U` undo, `C` clear, `R` rebet, `Space` spin or deal.
+Video poker: `1`–`5` hold a card, `B` bet one, `X` bet max, `Space` deal or draw.
 
 ## Install it as an app
 
