@@ -14,6 +14,7 @@ import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
 import { Card, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, rigProblem } from '../engine/hand';
+import { dealtAsSeen } from '../engine/history';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjView, checkBjSettings } from './blackjack';
@@ -458,6 +459,7 @@ function handView(hand: Hand, me: number): HandView {
       stack: p.stack,
       cards: p.cards.map((c, k) => (i === me || p.shown || p.faceUp[k] ? c : null)),
       faceUp: [...p.faceUp],
+      dealt: dealtAsSeen(p, i === me),
       status: p.status,
       streetBet: p.streetBet,
       totalBet: p.totalBet,

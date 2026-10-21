@@ -210,6 +210,8 @@ export interface HandPlayerView {
   /** null for a card this viewer can't see. */
   cards: (Card | null)[];
   faceUp: boolean[];
+  /** Every card dealt to this player in order, null where this viewer can't see it (for the hand history). */
+  dealt?: (Card | null)[];
   status: PlayerStatus;
   streetBet: number;
   totalBet: number;

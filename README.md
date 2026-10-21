@@ -27,6 +27,10 @@ Poker, blackjack, roulette and baccarat in your browser, against computer oppone
   refilled, and a daily bonus grows with your streak.
 - **Achievements and titles** to unlock and show off at the table.
 - **Stats page:** a chip graph over time plus VPIP and other numbers from your hands.
+- **Hand history and replay:** your last 50 poker hands are saved on your device. Open
+  History at the table (or from your profile) to step through any of them street by street,
+  or press Play to watch it again. You see what you saw at the table: your own cards,
+  face-up cards and hands shown at the end.
 - **Looks:** pick a felt and card back for the poker and blackjack tables.
 - **Sounds** for cards, chips and wins.
 
@@ -47,7 +51,8 @@ Online tables use table chips, so your bank isn't at stake there.
 
 ### Keyboard
 
-Poker: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand.
+Poker: `F` fold, `C` check/call, `R` bet/raise, `Space` next hand, `H` hand history.
+Hand history: `←`/`→` step, `Space` play/pause, `↑`/`↓` other hands, `Esc` close.
 Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
 Roulette and baccarat: `1`–`3` pick a chip, `U` undo, `C` clear, `R` rebet, `Space` spin or deal.
 
