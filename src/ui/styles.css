@@ -1727,24 +1727,34 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .chat-error { margin: 0; padding: 0 12px 10px; color: var(--bad); font-size: 13px; }
 .chat-float-layer { position: fixed; inset: 0; pointer-events: none; z-index: 14; overflow: hidden; }
 .chat-float {
-  position: absolute; transform: translate(-50%, -100%); max-width: 220px; width: max-content;
+  position: absolute; translate: -50% -100%; max-width: 220px; width: max-content;
   background: var(--ivory); color: var(--ink); font: 500 14px/1.25 var(--body);
   padding: 7px 11px; border-radius: 12px; box-shadow: 0 8px 22px rgba(0, 0, 0, .5);
   overflow-wrap: anywhere; text-align: center;
-  animation: chat-float 4.6s ease-out both;
+  transform-origin: 50% 100%;
+  animation: chat-say 4.6s ease-out both;
 }
 .chat-float::after {
   content: ''; position: absolute; left: 50%; bottom: -6px; margin-left: -6px;
   border: 6px solid transparent; border-bottom: 0; border-top-color: var(--ivory);
 }
-.chat-float.emote { background: none; box-shadow: none; padding: 0; font-size: 42px; line-height: 1; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .55)); animation-name: chat-emote; animation-duration: 2.6s; }
-.chat-float.emote::after { display: none; }
-@keyframes chat-float {
-  0% { opacity: 0; transform: translate(-50%, -80%) scale(.9); }
-  6% { opacity: 1; transform: translate(-50%, -100%) scale(1); }
-  85% { opacity: 1; transform: translate(-50%, -110%); }
-  100% { opacity: 0; transform: translate(-50%, -125%); }
+/* Beside the name plate, pointing back at it. */
+.chat-float.side { text-align: left; }
+.chat-float.side.to-right { translate: 0 -50%; transform-origin: 0 50%; }
+.chat-float.side.to-left { translate: -100% -50%; transform-origin: 100% 50%; }
+.chat-float.side::after { bottom: auto; top: 50%; left: auto; margin: -6px 0 0; border: 6px solid transparent; }
+.chat-float.side.to-right::after { left: -6px; border-left: 0; border-right-color: var(--ivory); }
+.chat-float.side.to-left::after { right: -6px; border-right: 0; border-left-color: var(--ivory); }
+@keyframes chat-say {
+  0% { opacity: 0; transform: scale(.85); }
+  5% { opacity: 1; transform: scale(1.03); }
+  9% { transform: scale(1); }
+  88% { opacity: 1; }
+  100% { opacity: 0; }
 }
+.chat-float.emote { translate: none; background: none; box-shadow: none; padding: 0; font-size: 42px; line-height: 1; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .55)); animation-name: chat-emote; animation-duration: 2.6s; }
+.chat-float.emote::after { display: none; }
+
 @keyframes chat-emote {
   0% { opacity: 0; transform: translate(-50%, -60%) scale(.4); }
   15% { opacity: 1; transform: translate(-50%, -105%) scale(1.25); }
