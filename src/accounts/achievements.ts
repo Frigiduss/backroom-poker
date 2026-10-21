@@ -381,6 +381,20 @@ export function handTally(hand: Hand, i: number, opts: HandTallyOptions = {}): T
   }
   if (!res.showdown && won > 0 && hand.actions.some((a) => a.player === i && a.aggressive)) add('steals');
 
+  // How the player plays, for the stats page: the first betting round is pre-flop in flop
+  // games, third street in stud and before the draw in draw games.
+  const mine = hand.actions.filter((a) => a.player === i);
+  const decisions = mine.filter((a) => a.type === 'fold' || a.type === 'check' || a.type === 'call' || a.type === 'raise');
+  add('style.dealt');
+  if (decisions.some((a) => a.street === 0 && (a.type === 'call' || a.type === 'raise'))) add('style.vpip');
+  if (decisions.some((a) => a.street === 0 && a.aggressive)) add('style.pfr');
+  if (decisions.length) add('style.decisions', decisions.length);
+  const raises = decisions.filter((a) => a.aggressive).length;
+  if (raises) add('style.raises', raises);
+  const calls = decisions.filter((a) => a.type === 'call').length;
+  if (calls) add('style.calls', calls);
+  if (res.showdown && p.shown) add('style.showdowns');
+
   if (res.showdown && p.shown) {
     // Only contested pots count: a side pot nobody else could win proves nothing.
     const contested = res.pots.filter((pot) => pot.eligible.length > 1);

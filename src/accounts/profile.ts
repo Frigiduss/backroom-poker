@@ -67,7 +67,15 @@ export interface Profile {
   title: string | null;
   /** The daily chip bonus: when it was last collected and the streak. */
   bonus: BonusRecord;
+  /** The player's chips over time as [time, chips] points, oldest first. See noteChips. */
+  history: ChipPoint[];
 }
+
+/** When the player's chips (bank plus any cash-game stack) changed, and what they came to. */
+export type ChipPoint = [time: number, chips: number];
+
+/** Once the chip history reaches this many points, every other older point is dropped. */
+export const HISTORY_MAX = 240;
 
 export const emptyProfileStats = (bank = STARTING_BANK): ProfileStats => ({
   hands: 0, handsWon: 0, showdownsWon: 0, biggestPot: 0, cashNet: 0, cashSessions: 0,
@@ -98,6 +106,7 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     achievements: { counters: {}, unlocked: {}, run: 0 },
     title: null,
     bonus: { last: null, streak: 0 },
+    history: [[now, STARTING_BANK]],
   };
 }
 
@@ -124,6 +133,15 @@ function normalizeAchievements(raw: unknown, stats: ProfileStats): AchievementRe
 
 const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
+function normalizeHistory(raw: unknown): ChipPoint[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChipPoint[] = [];
+  for (const x of raw) {
+    if (Array.isArray(x) && typeof x[0] === 'number' && typeof x[1] === 'number' && Number.isFinite(x[0]) && Number.isFinite(x[1])) out.push([x[0], x[1]]);
+  }
+  return out.sort((a, b) => a[0] - b[0]).slice(-HISTORY_MAX);
+}
+
 /** Fills in anything missing from stored or imported data, so older saves keep loading. */
 export function normalizeProfile(raw: unknown): Profile | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -143,7 +161,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
   const table: TableSession | null = t && (t.kind === 'cash' || t.kind === 'tournament')
     ? { kind: t.kind, paidIn: num(t.paidIn, 0), stack: num(t.stack, 0) }
     : null;
-  return {
+  const p: Profile = {
     id: r.id,
     name: cleanName(r.name) || 'Player',
     color: typeof r.color === 'string' ? r.color : PROFILE_COLORS[0],
@@ -156,14 +174,35 @@ export function normalizeProfile(raw: unknown): Profile | null {
     achievements: normalizeAchievements(r.achievements, stats),
     title: typeof r.title === 'string' ? r.title : null,
     bonus: { last: typeof r.bonus?.last === 'number' ? r.bonus.last : null, streak: Math.max(0, Math.floor(num(r.bonus?.streak, 0))) },
+    history: normalizeHistory(r.history),
   };
+  // Players saved before the chip graph existed start it from where they are now.
+  if (!p.history.length) p.history.push([p.updatedAt, chipsOf(p)]);
+  return p;
 }
 
 // ---------- bank ----------
 
+/** Everything the player owns: the bank plus a cash-game stack still at the table. */
+export const chipsOf = (p: Profile): number => p.bank + (p.table?.kind === 'cash' ? p.table.stack : 0);
+
+/**
+ * Adds a point to the chip history when the player's chips have changed. When it fills up,
+ * every other point is dropped (the first and newest stay), so the graph always covers the
+ * whole time played, with older stretches in less detail.
+ */
+export function noteChips(p: Profile, now = Date.now()): void {
+  const h = p.history;
+  const chips = chipsOf(p);
+  if (h.length && h[h.length - 1][1] === chips) return;
+  h.push([now, chips]);
+  if (h.length >= HISTORY_MAX) p.history = h.filter((_, k) => k === 0 || k === h.length - 1 || k % 2 === 0);
+}
+
 function touch(p: Profile) {
   p.updatedAt = Date.now();
   p.stats.peakBank = Math.max(p.stats.peakBank, p.bank);
+  noteChips(p, p.updatedAt);
 }
 
 export const canAfford = (p: Profile, amount: number): boolean => p.bank >= amount;

@@ -13,7 +13,7 @@ import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table } fro
 import { VARIANTS, VariantDef } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { AdminCommand, AdminTableInfo } from '../online/protocol';
-import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, cleanName, emptyProfileStats } from '../accounts';
+import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer } from './profiles';
 import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
@@ -359,12 +359,14 @@ function setStat(p: Profile, field: string | undefined, value: string | undefine
 function resetStats(p: Profile) {
   p.stats = emptyProfileStats(p.bank);
   p.updatedAt = Date.now();
+  p.history = [[p.updatedAt, chipsOf(p)]];
 }
 
 function setBank(p: Profile, n: number) {
   p.bank = n;
   p.stats.peakBank = Math.max(p.stats.peakBank, n);
   p.updatedAt = Date.now();
+  noteChips(p, p.updatedAt);
 }
 
 const shortId = (id: string) => id.replace(/^pr_/, '').slice(0, 8);
