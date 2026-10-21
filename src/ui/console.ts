@@ -665,7 +665,7 @@ const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'reveal', usage: 'reveal [on | off]', group: 'Table', help: 'Shows the bots\' cards on the table (the practice mode setting).',
+    name: 'reveal', usage: 'reveal [on | off]', group: 'Table', help: 'Shows the bots\' cards at any table until you turn it off or reload. A Cards up tag in the top bar turns it off.',
     run(args, out) {
       const on = args[0] ? args[0] === 'on' : !hooks.reveal();
       out(`Bots' cards ${hooks.reveal(on) ? 'face up' : 'face down'}.`, 'ok');
