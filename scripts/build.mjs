@@ -64,12 +64,33 @@ const APP_TAGS = '\n<link rel="manifest" href="manifest.webmanifest">'
   + '\n<meta name="apple-mobile-web-app-status-bar-style" content="black">';
 const APP_FILES = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
+/**
+ * The page's Content Security Policy. Only the page's own script (by its hash) runs, so text
+ * that ever slipped into the page as HTML couldn't run code or read the sign-in kept in
+ * browser storage. Pages can only talk to this site, Supabase and Google Fonts.
+ */
+const csp = (script) => '\n<meta http-equiv="Content-Security-Policy" content="' + [
+  "default-src 'self'",
+  `script-src 'sha256-${createHash('sha256').update(script).digest('base64')}'`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "connect-src 'self' https://*.supabase.co",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join('; ') + '">';
+
 function page(js, css, template = 'src/ui/index.html', app = false) {
   const html = readFileSync(join(root, template), 'utf8');
+  const script = js.replace(/<\/script/g, '<\\/script');
   return html
-    .replace('<!--__ICONS__-->', () => icons() + (app ? APP_TAGS : ''))
+    .replace('<!--__ICONS__-->', () => icons() + (app ? APP_TAGS : '') + csp(script))
     .replace('/*__CSS__*/', () => css)
-    .replace('<script src="game.js"></script>', () => `<script>${js.replace(/<\/script/g, '<\\/script')}</script>`);
+    .replace('<script src="game.js"></script>', () => `<script>${script}</script>`);
 }
 
 async function buildOnce() {
@@ -85,6 +106,8 @@ async function buildOnce() {
   // Same page without the outer document (or the app install tags), for publishing as a hosted page.
   writeFileSync(join(dist, 'fragment.html'), html
     .replace(APP_TAGS, '')
+    // The hosted page sets its own policy.
+    .replace(/\n<meta http-equiv="Content-Security-Policy"[^>]*>/, '')
     .replace(/^[\s\S]*?<head>/, '')
     .replace(/<meta charset[^>]*>\s*|<meta name="viewport"[^>]*>\s*/g, '')
     .replace(/<\/head>\s*<body>/, '')

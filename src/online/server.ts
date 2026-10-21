@@ -12,7 +12,7 @@ import { PERSONA_NAMES, personaFor } from '../bots/persona';
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
-import { Card, createRng, shuffle } from '../engine/cards';
+import { Card, Seed, createRng, secureSeed, shuffle, subSeed } from '../engine/cards';
 import { Action, Hand, rigProblem } from '../engine/hand';
 import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
@@ -58,7 +58,7 @@ export interface Checkpoint {
   button: number;
   handNumber: number;
   level: number;
-  rng: number;
+  rng: Seed;
 }
 
 export interface TableState {
@@ -302,7 +302,7 @@ export function rebuild(state: TableState): Table {
 /** Blackjack credits go into the same list as poker's. */
 const bjCredits = (credits: AwardCredit[] | undefined): BjCredits => (m, tally) => addCredit(credits, m, tally);
 
-function startGame(state: TableState, now: number, seed: number, credits?: AwardCredit[]) {
+function startGame(state: TableState, now: number, seed: Seed, credits?: AwardCredit[]) {
   const s = state.settings;
   if (s.game === 'blackjack') {
     const people = players(state).slice(0, s.seats);
@@ -311,7 +311,7 @@ function startGame(state: TableState, now: number, seed: number, credits?: Award
     creditGameStart(state, people, credits);
     return;
   }
-  const rng = createRng(seed ^ 0x5bd1e995);
+  const rng = createRng(subSeed(seed, 0x5bd1e995));
   const people = players(state).slice(0, s.seats);
   const taken = new Set(people.map((m) => m.name.toLowerCase()));
   const names = shuffle(BOT_NAMES.filter((n) => !taken.has(n.toLowerCase())), rng);
@@ -529,13 +529,14 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
 
 export interface ServerOptions {
   now?: () => number;
-  seed?: () => number;
+  /** Table seeds. Tests pass numbers to get the same cards every run; live tables use secureSeed(). */
+  seed?: () => Seed;
 }
 
 /** Handles one request from a signed-in person. */
 export async function handle(db: TableDb, userId: string, raw: unknown, opts: ServerOptions = {}): Promise<Outcome> {
   const now = opts.now ?? Date.now;
-  const seed = opts.seed ?? (() => (Math.random() * 2 ** 32) >>> 0);
+  const seed = opts.seed ?? secureSeed;
   try {
     const req = (raw ?? {}) as Request;
     if (req.op === 'create') return await create(db, userId, req, now(), seed);
@@ -562,7 +563,7 @@ async function publish(db: TableDb, row: TableRow, state: TableState, t: Table |
   return { status: 200, body: { ok: true, tableId: row.id, code: row.code, view: viewFor(row, state, t, userId, now) } };
 }
 
-async function create(db: TableDb, userId: string, req: Extract<Request, { op: 'create' }>, now: number, seed: () => number): Promise<Outcome> {
+async function create(db: TableDb, userId: string, req: Extract<Request, { op: 'create' }>, now: number, seed: () => Seed): Promise<Outcome> {
   const settings = checkSettings(req.settings);
   const tag = await checkTitle(db, userId, req);
   const state: TableState = {
@@ -664,7 +665,7 @@ async function watch(db: TableDb, userId: string, req: Extract<Request, { op: 'w
   throw new TableError('The table is busy. Try again.', 503);
 }
 
-async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'watch' | 'admin' | 'tables' }>, now: () => number, seed: () => number): Promise<Outcome> {
+async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'watch' | 'admin' | 'tables' }>, now: () => number, seed: () => Seed): Promise<Outcome> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await db.byId(String(req.tableId ?? ''));
     if (!row) throw new TableError('That table is gone.', 404);
