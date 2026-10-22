@@ -118,6 +118,10 @@ $$;
 
 revoke all on function public.guard_bonus() from public, anon, authenticated;
 
-drop trigger if exists guard_bonus on public.daily_bonus;
-create trigger guard_bonus after update on public.daily_bonus
-  for each row execute function public.guard_bonus();
+do $$ begin
+  if to_regclass('public.daily_bonus') is not null then
+    drop trigger if exists guard_bonus on public.daily_bonus;
+    create trigger guard_bonus after update on public.daily_bonus
+      for each row execute function public.guard_bonus();
+  end if;
+end $$;

@@ -1,5 +1,6 @@
 -- Back Room Poker: achievements earned at online tables.
--- Run this once, after multiplayer.sql, in the SQL Editor (New query → paste → Run).
+-- Run this once, after multiplayer.sql and setup.sql (or security.sql on an older project),
+-- in the SQL Editor (New query → paste → Run).
 -- Running it again is safe.
 --
 -- Achievements from games against bots are kept with each player. Achievements from online
