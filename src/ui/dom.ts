@@ -58,3 +58,11 @@ export function save(key: string, value: unknown): void {
     /* storage unavailable: settings just won't persist */
   }
 }
+
+/** Phone-sized screen: the player's own cards leave the felt for their own row above the dock. */
+export const isPhone = (): boolean => window.matchMedia('(max-width: 720px)').matches;
+
+/** A table with the player's own seat beside it in a row of its own (phones), or just the table. */
+export function withHero(table: string, hero: string): string {
+  return hero ? `<div class="felt-box">${table}</div><div class="hero-row">${hero}</div>` : table;
+}

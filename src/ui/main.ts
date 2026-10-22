@@ -10,7 +10,7 @@ import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
   finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally,
 } from '../accounts';
-import { cardHtml, chipsHtml, esc, fmt, store } from './dom';
+import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
 import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice } from './profiles';
 import { announce, checkAchievements, renderAchievements } from './achievements';
@@ -756,13 +756,14 @@ class Game implements DevGame {
 
   private seatLayout(): { x: number; y: number }[] {
     const n = this.table.seats.length;
-    const narrow = window.matchMedia('(max-width: 720px)').matches;
+    const narrow = isPhone();
     const rx = narrow ? 40 : 44;
-    const ry = narrow ? 40 : 37;
+    const ry = narrow ? 41 : 37;
     return this.table.seats.map((_, i) => {
       const a = Math.PI / 2 + (i * 2 * Math.PI) / n;
       // The player's own seat sits a little higher so their bigger cards stay on the table.
-      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) - (i === 0 ? 6 : 0) };
+      // On a phone it leaves the felt for the row below, so it needs no room here.
+      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) - (i === 0 && !narrow ? 6 : 0) };
     });
   }
 
@@ -774,6 +775,8 @@ class Game implements DevGame {
     const cy = 47;
     const res = hand.result;
     const parts: string[] = [];
+    const phone = isPhone();
+    let heroHtml = '';
     // Winners of contested pots (an uncalled bet coming back is not a win).
     const winners = new Set<number>();
     for (const pot of res?.pots ?? []) {
@@ -826,7 +829,8 @@ class Game implements DevGame {
       const handName = res && winners.has(hi) && res.showdown && res.handNames[hi] ? `<span class="bubble handname">${esc(res.handNames[hi]!)}</span>` : '';
       const level = isMe ? 'human' : seat.difficulty!;
 
-      parts.push(`<div class="${classes.join(' ')}" data-seat="${seat.id}" style="left:${p.x}%;top:${p.y}%">
+      const hero = isMe && phone;
+      const seatHtml = `<div class="${classes.join(' ')}" data-seat="${seat.id}"${hero ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(isMe ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
           ${avatarHtml(seat.name, level, !isMe)}
@@ -834,12 +838,15 @@ class Game implements DevGame {
           ${isMe ? (currentTitle() ? `<span class="lvl lv-human ttl">${esc(currentTitle()!)}</span>` : '') : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>
         <div class="bubbles">${handName}${bubble}</div>
-      </div>`);
+      </div>`;
+      if (hero) heroHtml = seatHtml;
+      else parts.push(seatHtml);
 
       if (hp && hp.streetBet > 0 && !hand.isComplete && hand.phase !== 'draw') {
-        // The player's chips go beside their cards rather than on top of them.
-        const bx = isMe ? p.x + 13 : cx + (p.x - cx) * 0.55;
-        const by = isMe ? p.y - 6 : cy + (p.y - cy) * 0.52;
+        // The player's chips go beside their cards rather than on top of them (on a phone,
+        // where their cards are below the table, at the bottom of the felt).
+        const bx = hero ? 62 : isMe ? p.x + 13 : cx + (p.x - cx) * 0.55;
+        const by = hero ? 80 : isMe ? p.y - 6 : cy + (p.y - cy) * 0.52;
         parts.push(`<div class="bet" style="left:${bx}%;top:${by}%">${chipsHtml(hp.streetBet)}<span>${fmt(hp.streetBet)}</span></div>`);
       }
       if (hi === hand.button && hand.variant.family !== 'stud') {
@@ -862,11 +869,11 @@ class Game implements DevGame {
 
     const potLabel = hand.isComplete || hand.pot === 0 ? '<div class="pot empty"></div>' : `<div class="pot">${chipsHtml(hand.pot, 7)}<span>Pot <b>${fmt(hand.pot)}</b></span></div>`;
     const result = res ? `<div class="result" role="status">${esc(this.speak(res.summary[0] ?? ''))}</div>` : '';
-    return `<div class="table">
+    return withHero(`<div class="table">
       <div class="rail"><div class="felt"></div></div>
       <div class="center"><div class="board">${board}</div>${result || potLabel}</div>
       ${parts.join('')}
-    </div>`;
+    </div>`, heroHtml);
   }
 
   private myHandHtml(): string {

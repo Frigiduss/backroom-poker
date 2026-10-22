@@ -14,7 +14,7 @@ import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../
 import { checkAchievements } from './achievements';
 import { HISTORY_ICON, openHandHistory, saveHand } from './history';
 import { recordHistory } from '../engine/history';
-import { cardHtml, chipsHtml, esc, fmt, titleHtml } from './dom';
+import { cardHtml, chipsHtml, esc, fmt, isPhone, titleHtml, withHero } from './dom';
 import { SoundName, play } from './sound';
 import { consoleEnabled, toggleConsole } from './console';
 import { BjScreen } from './online-blackjack';
@@ -666,13 +666,14 @@ class OnlineTable {
     const v = this.view;
     const n = v.seats.length;
     const mine = Math.max(0, v.seats.findIndex((s) => s.you));
-    const narrow = window.matchMedia('(max-width: 720px)').matches;
+    const narrow = isPhone();
     const rx = narrow ? 40 : 44;
-    const ry = narrow ? 40 : 37;
+    const ry = narrow ? 41 : 37;
     return v.seats.map((_, i) => {
       const k = (i - mine + n) % n;
       const a = Math.PI / 2 + (k * 2 * Math.PI) / n;
-      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) - (k === 0 && v.mySeat ? 6 : 0) };
+      // On a phone the viewer's own seat sits below the table, so it needs no room here.
+      return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) - (k === 0 && v.mySeat && !narrow ? 6 : 0) };
     });
   }
 
@@ -685,6 +686,8 @@ class OnlineTable {
     const res = hand.result;
     const complete = hand.phase === 'complete';
     const parts: string[] = [];
+    const phone = isPhone();
+    let heroHtml = '';
     const winners = new Set<number>();
     for (const pot of res?.pots ?? []) {
       if (pot.eligible.length > 1 || !res!.showdown) for (const w of [...pot.winnersHi, ...pot.winnersLo]) winners.add(w);
@@ -735,7 +738,8 @@ class OnlineTable {
       const clock = hi >= 0 && hand.toAct === hi && !complete && v.turnDeadline ? `<span class="clock" title="Seconds left">${this.secondsLeft(v.turnDeadline)}</span>` : '';
       const badge = seat.isHuman
         ? seat.away ? '<span class="lvl lv-human">Away</span>' : seat.title ? `<span class="lvl lv-human ttl" title="Title">${esc(seat.title)}</span>` : isMe ? '' : '<span class="lvl lv-human">Friend</span>' : `<span class="lvl lv-${level}">${BOT_LABEL(seat.difficulty)}</span>`;
-      parts.push(`<div class="${classes.join(' ')}" data-seat="${seat.id}" style="left:${p.x}%;top:${p.y}%">
+      const hero = isMe && phone;
+      const seatHtml = `<div class="${classes.join(' ')}" data-seat="${seat.id}"${hero ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(seat.isHuman ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
           ${avatarHtml(seat.name, level, !seat.isHuman)}
@@ -743,10 +747,14 @@ class OnlineTable {
           ${badge}${clock}
         </div>
         <div class="bubbles">${handName}${bubble}</div>
-      </div>`);
+      </div>`;
+      if (hero) heroHtml = seatHtml;
+      else parts.push(seatHtml);
       if (hp && hp.streetBet > 0 && !complete && hand.phase !== 'draw') {
-        const bx = isMe ? p.x + 13 : cx + (p.x - cx) * 0.55;
-        const by = isMe ? p.y - 6 : cy + (p.y - cy) * 0.52;
+        // The player's chips go beside their cards rather than on top of them (on a phone,
+        // where their cards are below the table, at the bottom of the felt).
+        const bx = hero ? 62 : isMe ? p.x + 13 : cx + (p.x - cx) * 0.55;
+        const by = hero ? 80 : isMe ? p.y - 6 : cy + (p.y - cy) * 0.52;
         parts.push(`<div class="bet" style="left:${bx}%;top:${by}%">${chipsHtml(hp.streetBet)}<span>${fmt(hp.streetBet)}</span></div>`);
       }
       if (hi === hand.button && variant.family !== 'stud') {
@@ -767,11 +775,11 @@ class OnlineTable {
     if (this.seenCards.size > 4000) this.seenCards.clear();
     const potLabel = complete || hand.pot === 0 ? '<div class="pot empty"></div>' : `<div class="pot">${chipsHtml(hand.pot, 7)}<span>Pot <b>${fmt(hand.pot)}</b></span></div>`;
     const result = res ? `<div class="result" role="status">${esc(res.summary[0] ?? '')}</div>` : '';
-    return `<div class="table">
+    return withHero(`<div class="table">
       <div class="rail"><div class="felt"></div></div>
       <div class="center"><div class="board">${board}</div>${result || potLabel}</div>
       ${parts.join('')}
-    </div>`;
+    </div>`, heroHtml);
   }
 
   /** What the bots would know in this seat, for the pot-share meter. */

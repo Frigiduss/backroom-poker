@@ -7,7 +7,7 @@ import { createRng, shuffle } from '../engine/cards';
 import { announce } from './achievements';
 import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
 import type { DevBlackjack } from './console-blackjack';
-import { cardHtml, chipsHtml, esc, fmt } from './dom';
+import { cardHtml, chipsHtml, esc, fmt, isPhone, withHero } from './dom';
 import { currentTitle, player, savePlayer, serverAwards } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../bots/persona';
@@ -154,8 +154,14 @@ export class BjFelt {
   html(o: { round: RoundView | null; spots: FeltSpot[]; roundNo: number; opening: boolean; msg: string; shoeTitle: string }): string {
     const r = o.round;
     const n = r ? r.seats.length : o.spots.length;
-    const pos = spotLayout(o.spots.length);
+    // On a phone the player's own spot sits below the table, and the others share the arc.
+    const phone = isPhone();
+    const hero = phone && o.spots.some((s) => s.me);
+    const arc = spotLayout(o.spots.length - (hero ? 1 : 0), hero);
+    let k = 0;
+    const pos = o.spots.map((s) => (hero && s.me ? { x: 50, y: 50 } : arc[k++]));
     const parts: string[] = [];
+    let heroHtml = '';
     if (this.seen.size > 3000) this.seen.clear();
 
     let dealer = '<div class="bj-cards dealer-cards empty"></div>';
@@ -193,7 +199,8 @@ export class BjFelt {
       }
       const circle = `<div class="bj-circle ${wager ? 'has-bet' : ''}">${wager ? `${chipsHtml(wager, 6)}<span>${fmt(wager)}</span>` : ''}</div>`;
       const label = spot.label ? `<span class="lvl lv-${spot.level}${spot.me ? ' ttl' : ''}">${esc(spot.label)}</span>` : '';
-      parts.push(`<div class="${classes.join(' ')}"${spot.id ? ` data-seat="${esc(spot.id)}"` : ''} style="left:${p.x}%;top:${p.y}%">
+      const mine = hero && spot.me;
+      const spotHtml = `<div class="${classes.join(' ')}"${spot.id ? ` data-seat="${esc(spot.id)}"` : ''}${mine ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="bj-hands">${hands}</div>
         ${circle}
         <div class="pod" title="${esc(spot.name)}">
@@ -202,10 +209,12 @@ export class BjFelt {
           ${label}
         </div>
         <div class="bubbles">${tag}</div>
-      </div>`);
+      </div>`;
+      if (mine) heroHtml = spotHtml;
+      else parts.push(spotHtml);
     });
 
-    return `<div class="bj-table">
+    return withHero(`<div class="bj-table${hero ? ' has-hero' : ''}">
       <div class="bj-rail"><div class="bj-felt">
         <svg class="bj-print" viewBox="0 0 1000 500" aria-hidden="true">
           <defs>
@@ -220,7 +229,7 @@ export class BjFelt {
       <div class="bj-tray" aria-hidden="true">${[5000, 1000, 500, 100, 25, 5].map((v) => `<i class="v${v}"></i>`).join('')}</div>
       ${o.msg ? `<div class="bj-msg">${esc(o.msg)}</div>` : ''}
       ${parts.join('')}
-    </div>`;
+    </div>`, heroHtml);
   }
 
   /** A card, with the deal animation the first time it shows (staggered for the opening deal). */
@@ -254,15 +263,18 @@ export class BjFelt {
   }
 }
 
-/** Where each spot sits on the arc, first base (dealt first) on the right. */
-function spotLayout(n: number): { x: number; y: number }[] {
-  const narrow = window.matchMedia('(max-width: 720px)').matches;
-  const spread = n === 1 ? 0 : narrow ? Math.min(130, 50 * (n - 1)) : Math.min(120, 34 * (n - 1));
+/** Where each spot sits on the arc, first base (dealt first) on the right. With the player's
+ *  own spot below the table (phones), the rest share a shorter felt. */
+function spotLayout(n: number, hero = false): { x: number; y: number }[] {
+  const narrow = isPhone();
+  const spread = n <= 1 ? 0 : hero ? Math.min(140, 46 * (n - 1)) : narrow ? Math.min(130, 50 * (n - 1)) : Math.min(120, 34 * (n - 1));
   return Array.from({ length: n }, (_, i) => {
     const a = ((90 - spread / 2 + (n === 1 ? 0 : (spread * i) / (n - 1))) * Math.PI) / 180;
-    return narrow
-      ? { x: 50 + 38 * Math.cos(a), y: 10 + 68 * Math.sin(a) }
-      : { x: 50 + 42 * Math.cos(a), y: 7 + 73 * Math.sin(a) };
+    return hero
+      ? { x: 50 + 39 * Math.cos(a), y: 22 + 56 * Math.sin(a) }
+      : narrow
+        ? { x: 50 + 38 * Math.cos(a), y: 10 + 68 * Math.sin(a) }
+        : { x: 50 + 42 * Math.cos(a), y: 7 + 73 * Math.sin(a) };
   });
 }
 
