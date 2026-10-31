@@ -123,6 +123,25 @@ player's sign-in itself). Repeat the build and paste whenever the server code ch
 
 Tables nobody has played at for three days are cleared out when someone makes a new one.
 
+## Friends
+
+Players can add each other as friends, see which friends have the game open, and invite a
+friend to their online table in one tap. Each account gets a six-character **friend code**
+(Friends button in the lobby); a friend request needs that code, and both players have to say
+yes before either sees the other's name or online status. Invites go only to friends and only
+to a table the sender is at, and they last 15 minutes. A player who turns down a request isn't
+asked again by the same person unless they add them back themselves.
+
+To switch it on, open **SQL Editor → New query**, paste everything from
+[`friends.sql`](friends.sql), and click **Run**. Running it again is safe. It works on its own,
+but invites to a table also need `multiplayer.sql`. Until it's run, the Friends button says
+friends aren't switched on yet.
+
+Browsers can't read the friends tables at all: everything goes through the `friends_*`
+functions, which only ever return friend codes, names, colours and titles, never an email or
+account id. While the game is open it checks in every 20 seconds, which is what shows a player
+as online (anyone seen in the last 75 seconds).
+
 ## Achievements from online tables
 
 Achievements earned against bots are saved with each player. Achievements earned at online

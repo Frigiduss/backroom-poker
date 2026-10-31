@@ -18,7 +18,8 @@ import { renderStats } from './stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './history';
 import { recordHistory, sourceOfHand } from '../engine/history';
 import { SoundName, play, setVolume } from './sound';
-import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, stopOnline } from './online';
+import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online';
+import { bindLobbyFriends, friendsButtonHtml, initFriends } from './friends';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './blackjack';
@@ -159,7 +160,7 @@ function renderSetup() {
         <span class="eyebrow">Card room · open all night</span>
         <h1>Back Room <em>Poker</em></h1>
       </div>
-      <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${playerBadgeHtml()}</div>
+      <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
     </header>
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
@@ -275,6 +276,7 @@ function renderSetup() {
   }));
   bindConsoleButton();
   bindLobbyExtras(app, renderSetup);
+  bindLobbyFriends(app, renderSetup);
   void refreshConsoleAccess();
   if (awardsChecked !== me.id) {
     // Once per player: pick up achievements the table server credited since last time.
@@ -1305,6 +1307,7 @@ async function boot() {
       play('chips');
     },
   });
+  initFriends({ app, auth, lobby: renderSetup, busy: () => !!(game || blackjack || house), join: joinTable });
   await migrateLegacySettings(local);
 
   // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.

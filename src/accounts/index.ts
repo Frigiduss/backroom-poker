@@ -7,3 +7,4 @@ export * from './looks';
 export * from './bonus';
 export * from './leaderboard';
 export * from './stats';
+export * from './friends';
