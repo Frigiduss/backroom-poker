@@ -63,6 +63,8 @@ interface Prefs {
   reveal: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
+  /** The blackjack dealer and the roulette croupier chat now and then. */
+  dealerTalk: boolean;
   sound: boolean;
   volume: number;
 }
@@ -73,7 +75,7 @@ const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
   game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
-const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, sound: true, volume: 0.7 };
+const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, dealerTalk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
 let prefs: Prefs = { ...DEFAULT_PREFS };
 /** The console's `reveal`: bots' cards face up at any table, until turned off or the page reloads. */

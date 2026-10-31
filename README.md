@@ -14,6 +14,10 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
 - **Roulette** on a European (single zero) or American (double zero) wheel, with every
   standard inside and outside bet, and **baccarat** (punto banco: Player, Banker, Tie and
   pair bets). Both are you against the house, in the Casino tab next to blackjack.
+- **Dealers with personality:** the blackjack dealer and the roulette croupier are one of
+  eight named characters, each with a face and a way of talking about the big moments
+  (a natural, a dealer bust, a straight-up hit, a zero). On a bad run they may, very rarely,
+  lean in and whisper you a piece of advice. Turn dealer chat off in the table's Settings.
 - **Video poker** machines: Jacks or Better, Bonus Poker and Double Double Bonus, all on
   their full-pay tables. Bet one to five coins of 5 to 500 chips, hold, draw, and a royal
   flush on five coins pays 4,000.
@@ -118,7 +122,7 @@ conflict over it. The deploy workflows build everything from source.
 - `src/bots/`: bot opponents. Bots only see a `PlayerView` (what that seat may know).
   Decisions use Monte Carlo equity, pot odds, position, starting-hand charts and, at
   Hard/Expert, opponent ranges; Expert also adapts to each player's tendencies. `persona.ts`
-  holds the named characters, and `worker.ts`/`brain.ts` run bot thinking in a web worker.
+  holds the named characters, `dealers.ts` the blackjack dealers and roulette croupiers, and `worker.ts`/`brain.ts` run bot thinking in a web worker.
 - `src/accounts/`: player profiles behind the `AccountStore` interface (`LocalAccountStore`
   in browser storage, `OnlineAccountStore` in Supabase), plus chip bank rules, stats,
   achievements, daily bonus, leaderboard and looks. Supabase URL and public key are in

@@ -10,6 +10,8 @@ import {
 import { chipsHtml, esc, fmt } from './dom';
 import { HouseHooks, HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
 import { play } from './sound';
+import { floatOver } from './talk';
+import { Dealer, DealerMoment, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../bots/dealers';
 
 // ---------- lobby settings ----------
 
@@ -173,10 +175,44 @@ export class RouletteTable extends HouseTable<RlSetup> {
   private note = '';
   private noteTimer: number | undefined;
   private spinTimer: number | undefined;
+  /** The croupier tonight, how many spins ago they last spoke, and their line waiting to float up. */
+  private readonly talkRng = createRng();
+  private readonly dealer: Dealer = pickDealer('roulette', this.talkRng);
+  private spins = 0;
+  private dealerLast = -10;
+  private dealerSays = '';
+  /** The bank when the player sat down, to tell how far down they are; and whether the croupier has whispered yet. */
+  private readonly startBank = this.profile.bank;
+  private whispered = false;
+  private whisper = '';
 
   constructor(h: HouseHooks<RlSetup>) {
     super(h);
     h.setup.recent = (h.setup.recent ?? []).filter((p) => p !== DOUBLE_ZERO || h.setup.wheel === 'american');
+    this.dealerSay('hello');
+  }
+
+  /** Now and then the croupier says something; nearly always about the big moments. */
+  private dealerSay(m: DealerMoment, n = '') {
+    if (this.h.prefs.dealerTalk === false || !dealerSpeaks(m, this.spins - this.dealerLast, this.talkRng.next())) return;
+    const line = dealerLine(this.dealer, m, this.talkRng, n);
+    if (!line) return;
+    this.dealerLast = this.spins;
+    this.dealerSays = line;
+  }
+
+  /** Floats the croupier's line, once the table is drawn. */
+  private flushDealer() {
+    const line = this.dealerSays;
+    this.dealerSays = '';
+    const whisper = this.whisper;
+    this.whisper = '';
+    if (whisper) requestAnimationFrame(() => floatOver('dealer', whisper, { at: 'below', whisper: true }));
+    else if (line) requestAnimationFrame(() => floatOver('dealer', line, { at: 'below' }));
+  }
+
+  protected settingsExtraHtml(): string {
+    return `<label class="toggle"><input type="checkbox" data-pref="dealerTalk" ${this.h.prefs.dealerTalk !== false ? 'checked' : ''}> Let the croupier chat</label>`;
   }
 
   private get limits() {
@@ -277,7 +313,10 @@ export class RouletteTable extends HouseTable<RlSetup> {
     this.h.save();
     this.spinning = { result };
     this.note = '';
+    this.spins++;
     super.render();
+    this.dealerSay('noMore');
+    this.flushDealer();
 
     // The rotor turns clockwise and the ball runs the other way, then drops into the pocket.
     const order = WHEEL_ORDER[wheel];
@@ -319,6 +358,16 @@ export class RouletteTable extends HouseTable<RlSetup> {
     const r = s.result;
     setBlackjackBank(this.profile, this.bank + r.paid);
     credit(this.profile, rouletteTally(r));
+    this.dealerSay(rlMoment({
+      pocket: r.pocket, previous: this.h.setup.recent[0], zero: isZero(r.pocket),
+      straightHit: r.spots.some((x) => x.key.startsWith('straight:') && x.paid > 0),
+      net: r.net, staked: r.staked, min: this.limits.min,
+    }), pocketLabel(r.pocket));
+    // Well down for the night, the croupier may (very rarely) lean in with some advice.
+    if (this.h.prefs.dealerTalk !== false && shouldWhisper(this.startBank - this.bank, this.limits.min, this.whispered, this.talkRng.next())) {
+      this.whispered = true;
+      this.whisper = whisperLine('roulette', this.talkRng);
+    }
     this.h.setup.recent = [r.pocket, ...this.h.setup.recent].slice(0, 16);
     this.h.save();
     this.last = { bets: this.bets, result: r };
@@ -346,6 +395,7 @@ export class RouletteTable extends HouseTable<RlSetup> {
     // A redraw mid-spin would restart the wheel; the spin redraws when it lands.
     if (this.spinning && document.querySelector('.rl-wheel')) return;
     super.render();
+    this.flushDealer();
   }
 
   // ---------- drawing ----------
@@ -391,6 +441,7 @@ export class RouletteTable extends HouseTable<RlSetup> {
         <div class="rl-wheel-box">${wheelSvg(wheel, this.rotor, this.ball, this.ball !== null)}</div>
         ${badge}
         <ol class="rl-recent" aria-label="Last numbers">${recent.map((p, i) => `<li class="${pocketColor(p)}${i === 0 && result ? ' new' : ''}">${pocketLabel(p)}</li>`).join('')}</ol>
+        <div class="dealer-plate" data-seat="dealer" title="${esc(`${this.dealer.name} · Croupier\n${this.dealer.bio}`)}"><span class="dealer-face" aria-hidden="true">${this.dealer.face}</span><span class="dealer-who"><b>${esc(this.dealer.name)}</b><small>Croupier</small></span></div>
       </div>
       <div class="rl-board-wrap">
         <div class="rl-board ${upright ? 'upright' : ''} ${wheel}">${cells}${hot}</div>

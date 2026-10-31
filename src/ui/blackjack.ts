@@ -12,6 +12,7 @@ import { currentTitle, player, savePlayer, serverAwards } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../bots/persona';
 import { avatarHtml, floatOver } from './talk';
+import { Dealer, DealerMoment, bjMoment, dealerLine, dealerSpeaks, pickDealer, shouldWhisper, whisperLine } from '../bots/dealers';
 
 // ---------- lobby settings ----------
 
@@ -39,6 +40,8 @@ export interface BjPrefs {
   fourColor: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
+  /** The dealer says something now and then. Missing on older saved settings, which means on. */
+  dealerTalk?: boolean;
 }
 
 export const limitText = (l: BjLimits) => `${fmt(BJ_LIMITS[l].min)} – ${fmt(BJ_LIMITS[l].max)}`;
@@ -151,7 +154,7 @@ const DEAL_GAP = 0.13;
 export class BjFelt {
   private seen = new Set<string>();
 
-  html(o: { round: RoundView | null; spots: FeltSpot[]; roundNo: number; opening: boolean; msg: string; shoeTitle: string }): string {
+  html(o: { round: RoundView | null; spots: FeltSpot[]; roundNo: number; opening: boolean; msg: string; shoeTitle: string; dealer?: Dealer }): string {
     const r = o.round;
     const n = r ? r.seats.length : o.spots.length;
     // On a phone the player's own spot sits below the table, and the others share the arc.
@@ -176,7 +179,10 @@ export class BjFelt {
       const natural = r.holeShown && isNatural(shown);
       dealerTotal = `<span class="bj-total ${handTotal(shown).total > 21 ? 'bust' : ''} ${natural ? 'natural' : ''}">${describeTotal(shown, natural)}</span>`;
     }
-    parts.push(`<div class="bj-dealer">${dealer}<div class="bj-dealer-tag"><span class="bj-dealer-name">Dealer</span>${dealerTotal}</div></div>`);
+    const who = o.dealer
+      ? `<span class="dealer-face" aria-hidden="true">${o.dealer.face}</span><span class="bj-dealer-name" title="${esc(`${o.dealer.name} · Dealer\n${o.dealer.bio}`)}">${esc(o.dealer.name)}</span>`
+      : '<span class="bj-dealer-name">Dealer</span>';
+    parts.push(`<div class="bj-dealer">${dealer}<div class="bj-dealer-tag" data-seat="dealer">${who}${dealerTotal}</div></div>`);
 
     o.spots.forEach((spot, i) => {
       const p = pos[i];
@@ -312,6 +318,14 @@ export class BlackjackTable {
   private lastTalk = -10;
   private talkRng = createRng();
   private talkQueue: { seat: string; text: string }[] = [];
+  /** Who deals tonight, the round of their last remark, and their line waiting to float up. */
+  private readonly dealer: Dealer = pickDealer('blackjack', this.talkRng);
+  private dealerLast = -10;
+  private dealerSays = '';
+  /** The bank when the player sat down, to tell how far down they are; and whether the dealer has whispered yet. */
+  private readonly startBank = this.profile.bank;
+  private whispered = false;
+  private dealerWhispers = '';
   /** Developer console: cards to deal next round, by spot id. */
   private nextRig: RoundRig | null = null;
 
@@ -344,6 +358,7 @@ export class BlackjackTable {
   start() {
     document.addEventListener('keydown', this.keyHandler);
     play('shuffle');
+    this.dealerSay('hello');
     this.render();
   }
 
@@ -386,6 +401,7 @@ export class BlackjackTable {
     if (this.shoe.shuffles !== this.lastShuffles) {
       this.lastShuffles = this.shoe.shuffles;
       this.shuffleNote = true;
+      if (this.rounds > 1) this.dealerSay('shuffle');
       cues.push('shuffle');
     } else this.shuffleNote = false;
     cues.push('chips');
@@ -538,10 +554,30 @@ export class BlackjackTable {
     if (net > 0) this.run++;
     else if (net < 0) this.run = 0;
     credit(this.profile, blackjackTally(r, this.humanSpot, this.run));
-    this.talk(r);
+    this.dealerSay(bjMoment({
+      outcomes: r.seats[this.humanSpot].hands.map((h) => h.outcome ?? ''), net, min: this.limits.min,
+      dealerNatural: isNatural(r.dealer), dealerBusted: handTotal(r.dealer).total > 21,
+    }));
+    // Well down for the night, the dealer may (very rarely) lean in with some advice.
+    if (this.h.prefs.dealerTalk !== false && shouldWhisper(this.startBank - this.bank, this.limits.min, this.whispered, this.talkRng.next())) {
+      this.whispered = true;
+      this.dealerWhispers = whisperLine('blackjack', this.talkRng);
+      this.dealerSays = '';
+    }
+    // The dealer and a bot don't talk over each other.
+    if (!this.dealerSays && !this.dealerWhispers) this.talk(r);
     // A bet the bank can no longer cover comes down to what's left.
     this.bet = this.clampBet(Math.min(this.bet, this.profile.bank));
     announce(takeUnlocks(this.profile, serverAwards()));
+  }
+
+  /** Now and then the dealer says something about the round; nearly always about the big moments. */
+  private dealerSay(m: DealerMoment) {
+    if (this.h.prefs.dealerTalk === false || !dealerSpeaks(m, this.rounds - this.dealerLast, this.talkRng.next())) return;
+    const line = dealerLine(this.dealer, m, this.talkRng);
+    if (!line) return;
+    this.dealerLast = this.rounds;
+    this.dealerSays = line;
   }
 
   /** Now and then a bot says something about how their round went. */
@@ -587,10 +623,17 @@ export class BlackjackTable {
       <div class="actionbar">${this.actionsHtml(r)}</div>
     </div>
     ${this.modalHtml()}`;
+    const opened = this.opening;
     this.opening = false;
     this.bind();
     const said = this.talkQueue.splice(0);
     if (said.length) requestAnimationFrame(() => said.forEach((l) => floatOver(l.seat, l.text)));
+    const dealerSays = this.dealerSays;
+    this.dealerSays = '';
+    if (dealerSays) requestAnimationFrame(() => floatOver('dealer', dealerSays, { at: 'right', delay: opened ? 0.6 : 0 }));
+    const whisper = this.dealerWhispers;
+    this.dealerWhispers = '';
+    if (whisper) requestAnimationFrame(() => floatOver('dealer', whisper, { at: 'right', whisper: true }));
   }
 
   private feltHtml(r: Round | null): string {
@@ -601,7 +644,7 @@ export class BlackjackTable {
       bet: s.isHuman && (!r || r.isComplete) ? this.bet : 0,
     }));
     const msg = !r ? 'Place your bet' : this.shuffleNote && this.opening ? 'Fresh shoe, shuffled' : '';
-    return this.felt.html({ round: r ? r.view() : null, spots, roundNo: this.rounds, opening: this.opening, msg, shoeTitle: `${this.shoe.remaining} cards left in the shoe` });
+    return this.felt.html({ round: r ? r.view() : null, spots, roundNo: this.rounds, opening: this.opening, msg, shoeTitle: `${this.shoe.remaining} cards left in the shoe`, dealer: this.dealer });
   }
 
   private actionsHtml(r: Round | null): string {
@@ -684,6 +727,7 @@ export class BlackjackTable {
         <label class="toggle"><input type="checkbox" id="pref-sound" ${p.sound ? 'checked' : ''}> Play table sounds</label>
         <label class="toggle"><input type="checkbox" id="pref-hints" ${this.h.setup.hints ? 'checked' : ''}> Show the by-the-book play</label>
         <label class="toggle"><input type="checkbox" id="pref-talk" ${p.talk ? 'checked' : ''}> Let the bots chat at the table</label>
+        <label class="toggle"><input type="checkbox" id="pref-dealer" ${p.dealerTalk !== false ? 'checked' : ''}> Let the dealer chat</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${p.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
@@ -744,6 +788,7 @@ export class BlackjackTable {
     pref('pref-hints', (v) => (this.h.setup.hints = v));
     pref('pref-four', (v) => (this.h.prefs.fourColor = v));
     pref('pref-talk', (v) => (this.h.prefs.talk = v));
+    pref('pref-dealer', (v) => (this.h.prefs.dealerTalk = v));
     const vol = document.getElementById('pref-volume') as HTMLInputElement | null;
     if (vol) {
       vol.oninput = () => {
