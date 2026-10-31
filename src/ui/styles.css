@@ -2508,3 +2508,64 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 @media (max-width: 560px) {
   .sec-row { flex-direction: column; align-items: stretch; }
 }
+
+/* ---------- Friends ---------- */
+.pfp.sm { width: 30px; height: 30px; font-size: 14px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 2px var(--panel-solid); }
+.dot.on { background: var(--good); }
+.fr-btn { display: inline-flex; align-items: center; gap: 7px; }
+.fr-online-count { display: inline-flex; align-items: center; gap: 4px; color: var(--good); font-family: var(--body); letter-spacing: 0; }
+.fr-online-count .dot { width: 7px; height: 7px; box-shadow: none; }
+.fr-badge {
+  min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center;
+  background: var(--bad); color: #fff; font-family: var(--body); font-size: 11.5px; letter-spacing: 0;
+}
+.fr-card { display: grid; gap: 14px; max-width: 760px; width: 100%; justify-self: center; }
+.friends-page .profile-top { max-width: 760px; width: 100%; justify-self: center; }
+#friends-body { display: grid; gap: 14px; }
+.fr-code-box { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.fr-code { font-size: clamp(26px, 5vw, 34px); }
+.fr-add { max-width: 420px; }
+.fr-section { display: grid; gap: 8px; }
+.fr-section h3 { margin: 4px 0 0; font-weight: 500; }
+.fr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.fr-row {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--line); background: rgba(0, 0, 0, .2); border-radius: 12px; padding: 7px 10px 7px 8px;
+}
+.fr-face { position: relative; flex: none; display: grid; }
+.fr-face .dot { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; }
+.fr-who { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; }
+.fr-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-seen { flex-basis: 100%; font-size: 13px; color: var(--faint); }
+.fr-seen.on { color: var(--good); }
+.fr-btns { display: flex; gap: 6px; flex: none; }
+.fr-remove { color: var(--muted); }
+.fr-list.compact { max-height: 260px; overflow-y: auto; }
+.fr-list.compact .fr-row { padding-block: 5px; }
+.fr-list.compact .pfp { width: 32px; height: 32px; font-size: 15px; }
+.fr-table-invites { display: grid; gap: 8px; }
+.fr-picker .fr-list.compact { max-height: 50vh; }
+.fr-x { padding-inline: 10px; }
+
+.fr-invites { display: grid; gap: 8px; }
+.fr-invite, .fr-pop {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+  padding: 10px 12px; border: 1px solid rgba(95, 211, 138, .4); border-radius: 12px; background: rgba(95, 211, 138, .08);
+}
+.fr-invite-text, .fr-pop-text { flex: 1 1 180px; min-width: 0; color: var(--text); }
+.fr-invite-btns, .fr-pop-btns { display: flex; gap: 6px; margin-left: auto; }
+#invite-pops {
+  position: fixed; z-index: 40; bottom: 16px; right: 16px;
+  width: min(460px, calc(100% - 24px)); display: grid; gap: 8px; pointer-events: none;
+}
+@media (max-width: 720px) { #invite-pops { right: 12px; bottom: 12px; } }
+.fr-pop {
+  pointer-events: auto; background: linear-gradient(180deg, #1b2b22, #121c17); box-shadow: var(--shadow);
+  animation: rise .25s cubic-bezier(.2, .8, .2, 1);
+}
+@media (max-width: 720px) {
+  .fr-row { gap: 9px; }
+  .fr-row .pfp { width: 34px; height: 34px; font-size: 16px; }
+  .fr-online-count { display: none; }
+}

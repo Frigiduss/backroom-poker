@@ -21,6 +21,10 @@ import { BjScreen } from './online-blackjack';
 import { ChatDock } from './chat';
 import { BJ_RULES_LINE, limitText } from './blackjack';
 import { avatarHtml, botTitle } from './talk';
+import { bindTableInvites, lobbyInvitesHtml, openInvitePicker, tableInvitesHtml } from './friends';
+
+/** A person with a plus, for the table's Invite button. */
+const INVITE_ICON = 'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm10-2v6m3-3h-6';
 
 export interface TablePrefs {
   fourColor: boolean;
@@ -93,6 +97,13 @@ function forgetLinkCode() {
 
 const signedIn = () => !!(client && hooks.auth?.current);
 
+/** Sits down at (or watches) a table from a friend's invite, through the lobby like an invite link. */
+export function joinTable(code: string, watch: boolean) {
+  linkCode = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  linkWatch = watch;
+  hooks.lobby();
+}
+
 /** Leaves the online table screen (the seat stays; a bot plays it until the player is back). */
 export function stopOnline() {
   active?.stop();
@@ -111,6 +122,7 @@ export function friendsPanelHtml(solo?: string): string {
   if (!hooks?.auth) return '';
   const body = signedIn()
     ? `<p>Make a private table with the game and settings above, then send the code to your friends. Bots take any seats nobody fills. Got a code? Join to play, or watch first and sit in when you're ready.</p>
+      ${lobbyInvitesHtml()}
       ${resumable ? `<div class="resume-row"><span>${resumable.watching ? 'You were watching' : 'You still have a seat at'} table <b>${esc(resumable.code)}</b> (${esc(gameName(resumable.settings))}).</span><button type="button" class="btn btn-sm btn-primary" id="resume-table">${resumable.watching ? 'Back to watching' : 'Back to the table'}</button></div>` : ''}
       <div class="friends-actions">
         <button type="button" class="btn btn-primary" id="make-table" ${solo ? 'disabled' : ''}>Make a table</button>
@@ -531,6 +543,7 @@ class OnlineTable {
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
           ${v.watching ? '' : `<button type="button" class="icon-btn" id="open-history" title="Hand history (H)">${icon(HISTORY_ICON)}<span>History</span></button>`}
+          <button type="button" class="icon-btn" id="invite-friends" title="Invite friends">${icon(INVITE_ICON)}<span>Invite</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
@@ -562,6 +575,7 @@ class OnlineTable {
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
           ${log ? `<button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>` : ''}
+          <button type="button" class="icon-btn" id="invite-friends" title="Invite friends">${icon(INVITE_ICON)}<span>Invite</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
         </div>
@@ -627,8 +641,9 @@ class OnlineTable {
           <button type="button" class="btn btn-sm" id="copy-link">${this.copied ? 'Link copied' : 'Copy invite link'}</button>
           <button type="button" class="btn btn-sm" id="copy-watch">${this.copiedWatch ? 'Link copied' : 'Copy watch link'}</button>
         </div>
-        <p>Send the code (or the link) to your friends. They open Back Room Poker, sign in, and enter it under <b>Play with friends</b>. A watch link lets them look on first and sit in when they're ready.</p>
+        <p>Invite friends below in one tap, or send the code (or the link). They open Back Room Poker, sign in, and enter it under <b>Play with friends</b>. A watch link lets them look on first and sit in when they're ready.</p>
         <ol class="room-seats">${seats.join('')}</ol>
+        ${tableInvitesHtml(v.code)}
         ${watchers.length ? `<p class="room-watchers"><span class="sl">Watching</span> ${watchers.map((m) => `${esc(m.name)}${m.you ? ' (you)' : ''}`).join(', ')}</p>` : ''}
         ${this.problem ? `<p class="form-error" role="alert">${esc(this.problem)}</p>` : ''}
         <div class="row">
@@ -659,6 +674,7 @@ class OnlineTable {
     };
     copy('copy-link', link, () => (this.copied = true));
     copy('copy-watch', watchLink, () => (this.copiedWatch = true));
+    bindTableInvites(v.code);
   }
 
   /** Seat positions, turned so the viewer always sits at the bottom. */
@@ -967,6 +983,7 @@ class OnlineTable {
     on('sit-in', () => this.sitIn());
     on('back-in', () => void this.send({ op: 'back', tableId: v.tableId }));
     on('dev-toggle', toggleConsole);
+    on('invite-friends', () => openInvitePicker(v.code));
     on('rebuy', () => void this.send({ op: 'rebuy', tableId: v.tableId }));
     on('do-fold', () => this.act({ type: 'fold' }));
     on('do-check', () => this.act({ type: 'check' }));

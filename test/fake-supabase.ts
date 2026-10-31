@@ -28,6 +28,13 @@ export class FakeSupabase {
   calls: string[] = [];
   private n = 0;
 
+  /** supabase/friends.sql: friend codes and last-seen times by user id, links "from>to", invites by "from>to". Null until set up. */
+  friendAccounts: Map<string, { code: string; seen: number }> | null = new Map();
+  friendLinks = new Map<string, { declined: boolean; hidden: boolean; at: number }>();
+  invites = new Map<string, { code: string; game: string; variant?: string; structure?: string; at: number }>();
+  /** Table codes each user is at, standing in for poker_views (code → user ids). */
+  seated = new Map<string, { users: string[]; game: string; variant?: string; structure?: string }>();
+
   /** Authenticator apps by user id. The right code is always 246810. */
   factors = new Map<string, { id: string; status: 'verified' | 'unverified' }[]>();
   /** Access tokens that finished two-step sign-in. */
@@ -203,6 +210,7 @@ export class FakeSupabase {
           })),
       };
     }
+    if (p.startsWith('/rest/v1/rpc/friends_') && this.friendAccounts) return this.friends(p.slice('/rest/v1/rpc/'.length), uid, bearer, body);
     if (p === '/rest/v1/leaderboard_hidden') {
       if (!admin) return denied;
       if (method === 'POST') this.hidden.add(body.player_id);
@@ -226,6 +234,98 @@ export class FakeSupabase {
       return { status: 200, body: this.log.slice(0, Number(u.searchParams.get('limit') ?? 20)) };
     }
     return { status: 404, body: { message: `no route ${method} ${p}` } };
+  }
+
+  /** The friend code of a user, made on first use like friend_code_of(). */
+  friendCode(uid: string): string {
+    const fa = this.friendAccounts!;
+    let a = fa.get(uid);
+    if (!a) {
+      const n = fa.size + 1;
+      const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      a = { code: `K${A[n % 32]}${A[(n * 7 + 3) % 32]}7M${A[(n * 13 + 5) % 32]}`, seen: 0 };
+      fa.set(uid, a);
+    }
+    return a.code;
+  }
+
+  private friends(fn: string, uid: string | undefined, bearer: string, body: Record<string, unknown>): FakeReply {
+    if (!uid) return { status: 401, body: { code: '42501', message: 'Sign in to an online account to use friends.' } };
+    if (!this.mfaOk(bearer, uid)) return { status: 403, body: { code: '42501', message: 'Finish two-step sign-in first.' } };
+    const fa = this.friendAccounts!;
+    const now = this.now ?? Date.now();
+    const bad = (message: string, status = 400) => ({ status, body: { code: 'P0001', message } });
+    const byCode = (c: unknown) => [...fa].find(([, a]) => a.code === String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''))?.[0];
+    const link = (a: string, b: string) => this.friendLinks.get(`${a}>${b}`);
+    const friends = (a: string, b: string) => !!link(a, b) && !!link(b, a);
+    const card = (u: string) => {
+      const row = this.rows.filter((r) => r.owner === u).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+      const d = (row?.data ?? {}) as { name?: string; color?: string; title?: string; achievements?: { unlocked?: Record<string, unknown> } };
+      return { name: (d.name || 'Player').slice(0, 14), color: d.color ?? null, title: d.title && d.achievements?.unlocked && d.title in d.achievements.unlocked ? d.title : null };
+    };
+    const mine = this.friendCode(uid);
+    if (fn === 'friends_sync') {
+      fa.get(uid)!.seen = now;
+      for (const [k, i] of [...this.invites]) if (i.at < now - 15 * 60_000) this.invites.delete(k);
+      const users = [...fa.keys()].filter((u) => u !== uid);
+      return {
+        status: 200,
+        body: {
+          code: mine,
+          friends: users.filter((u) => friends(uid, u)).sort((a, b) => fa.get(b)!.seen - fa.get(a)!.seen)
+            .map((u) => ({ ...card(u), code: fa.get(u)!.code, online: fa.get(u)!.seen > now - 75_000, seen: fa.get(u)!.seen })),
+          incoming: users.filter((u) => link(u, uid) && !link(u, uid)!.declined && !link(uid, u)).map((u) => ({ ...card(u), code: fa.get(u)!.code })),
+          outgoing: users.filter((u) => link(uid, u) && !link(uid, u)!.hidden && !link(u, uid)).map((u) => ({ ...card(u), code: fa.get(u)!.code })),
+          invites: users.filter((u) => this.invites.has(`${u}>${uid}`) && friends(uid, u)).map((u) => {
+            const i = this.invites.get(`${u}>${uid}`)!;
+            return { from: fa.get(u)!.code, name: card(u).name, color: card(u).color, table: i.code, game: i.game, variant: i.variant ?? null, structure: i.structure ?? null, at: i.at };
+          }),
+        },
+      };
+    }
+    const them = byCode(body.p_code);
+    if (!them) return bad(`No player has the friend code ${String(body.p_code ?? '') || '(blank)'}. Check it with your friend.`);
+    if (fn === 'friends_add') {
+      if (them === uid) return bad("That's your own friend code. Send it to a friend so they can add you.");
+      if (!link(uid, them)) this.friendLinks.set(`${uid}>${them}`, { declined: false, hidden: false, at: now });
+      link(uid, them)!.hidden = false;
+      if (link(them, uid)) {
+        link(them, uid)!.declined = false;
+        return { status: 200, body: { status: 'friends', name: card(them).name } };
+      }
+      return { status: 200, body: { status: 'requested', name: card(them).name } };
+    }
+    if (fn === 'friends_answer') {
+      if (!link(them, uid)) return bad("That friend request isn't there any more.");
+      if (body.p_accept) {
+        if (!link(uid, them)) this.friendLinks.set(`${uid}>${them}`, { declined: false, hidden: false, at: now });
+        link(them, uid)!.declined = false;
+      } else link(them, uid)!.declined = true;
+      return { status: 204 };
+    }
+    if (fn === 'friends_remove') {
+      if (link(uid, them)?.declined) link(uid, them)!.hidden = true;
+      else {
+        this.friendLinks.delete(`${uid}>${them}`);
+        this.friendLinks.delete(`${them}>${uid}`);
+      }
+      this.invites.delete(`${uid}>${them}`);
+      this.invites.delete(`${them}>${uid}`);
+      return { status: 204 };
+    }
+    if (fn === 'friends_invite') {
+      if (!friends(uid, them)) return { status: 403, body: { code: '42501', message: 'You can only invite friends to a table.' } };
+      const code = String(body.p_table ?? '').toUpperCase();
+      const t = this.seated.get(code);
+      if (!t || !t.users.includes(uid)) return { status: 403, body: { code: '42501', message: "You can only invite friends to a table you're at." } };
+      this.invites.set(`${uid}>${them}`, { code, game: t.game, variant: t.variant, structure: t.structure, at: now });
+      return { status: 204 };
+    }
+    if (fn === 'friends_dismiss') {
+      this.invites.delete(`${them}>${uid}`);
+      return { status: 204 };
+    }
+    return { status: 404, body: { code: 'PGRST202', message: `no function ${fn}` } };
   }
 
   /** A fetch function that answers from this fake. */

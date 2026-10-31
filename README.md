@@ -49,6 +49,9 @@ Signed in, you can also:
 - **Play with friends** at a private table: make one, then send its five-letter code or invite
   link. Bots fill the empty seats, and a bot plays for anyone who steps away. The cards are
   shuffled and dealt on the server, so nobody's browser ever sees anyone else's hand.
+- **Add friends** with their six-character friend code (or friend link), see who's online,
+  and invite them to your table in one tap. Invites pop up on their screen with Join and
+  Watch buttons. Only friends who've both said yes see each other's name and online status.
 - **Watch a table** without taking a seat, from its code or watch link.
 - **Chat** at the table.
 - **Climb the leaderboard** for chip bank, biggest pot and achievements (players appear
@@ -125,7 +128,7 @@ conflict over it. The deploy workflows build everything from source.
   holds the named characters, `dealers.ts` the blackjack dealers and roulette croupiers, and `worker.ts`/`brain.ts` run bot thinking in a web worker.
 - `src/accounts/`: player profiles behind the `AccountStore` interface (`LocalAccountStore`
   in browser storage, `OnlineAccountStore` in Supabase), plus chip bank rules, stats,
-  achievements, daily bonus, leaderboard and looks. Supabase URL and public key are in
+  achievements, daily bonus, leaderboard, friends and looks. Supabase URL and public key are in
   `config.ts`.
 - `src/online/`: online play. `server.ts` and `blackjack.ts` are the table server (bundled
   into the Edge Function), `client.ts` talks to it, plus the shared protocol and table chat.
@@ -150,7 +153,7 @@ The engine and bots have no DOM dependencies, so they can be reused on other pla
 
 ### Supabase backend
 
-Online accounts, tables, achievements, the leaderboard and the daily bonus run on
+Online accounts, tables, achievements, the leaderboard, the daily bonus and friends run on
 [Supabase](https://supabase.com). Without it the game still works fully offline against bots.
 Setup is a handful of SQL files run once in the Supabase SQL editor:
 
@@ -161,6 +164,7 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/achievements.sql` | Achievements earned at online tables |
 | `supabase/leaderboard.sql` | Daily bonus and leaderboard |
 | `supabase/admin.sql` | Admin accounts |
+| `supabase/friends.sql` | Friends, who's online, and table invites |
 | `supabase/banks.sql` | Limits on how fast an online chip bank can grow, so a save can't be edited to cheat |
 | `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
