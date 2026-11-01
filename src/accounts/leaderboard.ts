@@ -2,6 +2,7 @@
 // supabase/leaderboard.sql. The leaderboard is readable without signing in and only ever
 // returns a player's name, colour, title and score, never who owns them.
 import { BonusClaim } from './bonus';
+import { ChallengeClaim, ChallengeSlot } from './challenges';
 import { OnlineAuth, OnlineError, restRequest } from './online';
 import { safeColor } from './profile';
 import { cleanAvatar } from './avatars';
@@ -69,4 +70,20 @@ export async function claimOnlineBonus(auth: OnlineAuth, playerId: string, fetch
     throw err;
   }
   return { amount: Number(r?.amount ?? 0), streak: Number(r?.streak ?? 0), last: Number(r?.last ?? Date.now()) };
+}
+
+/**
+ * Claims a finished weekly challenge for one of the signed-in account's players. The server
+ * checks the week on its own clock, pays each goal once per account and sets the amount;
+ * a goal already paid comes back with amount 0.
+ */
+export async function claimOnlineChallenge(auth: OnlineAuth, playerId: string, week: number, slot: ChallengeSlot, fetchFn: Fetch = (...a) => fetch(...a)): Promise<ChallengeClaim> {
+  let r: Record<string, unknown>;
+  try {
+    r = (await restRequest(auth, 'rpc/claim_challenge', { method: 'POST', body: { p_player: playerId, p_week: week, p_slot: slot } }, fetchFn)) as Record<string, unknown>;
+  } catch (err) {
+    if (notSetUp(err)) throw new NotSetUpError('Weekly challenge rewards aren\'t switched on yet.', 404);
+    throw err;
+  }
+  return { amount: Number(r?.amount ?? 0), week, slot };
 }

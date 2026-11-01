@@ -208,6 +208,22 @@ limits so it saves cleanly. To stop chips being farmed with spare accounts:
 Browsers can't read the `chip_gifts` table. `select * from chip_gifts order by created_at desc`
 in the SQL Editor shows every gift.
 
+## Weekly challenges
+
+Every Monday at midnight UTC the lobby's **Weekly** button shows three new goals: an easy one
+(2,500 chips), a medium one (5,000) and a hard poker one (10,000). The game picks them from the
+week number, so everyone gets the same three, and counts progress from the achievement counters
+(practice tables, rigged hands and autopilot never count). Players kept only in the browser
+collect with no setup. For online accounts, run [`challenges.sql`](challenges.sql) once in the
+SQL Editor (after `banks.sql`). Running it again is safe. Until then, Collect says rewards
+aren't switched on yet.
+
+`claim_challenge()` uses the server's clock for the week, pays each goal once per account and
+sets the amounts itself, then adds the chips to the bank limits so they save cleanly. Progress
+on games against bots is counted in the browser, like everything else about those games, so
+the most anyone can take from challenges is 17,500 chips a week, whatever they edit.
+`select * from weekly_challenges order by claimed_at desc` in the SQL Editor shows every payout.
+
 ## Faces and profile pictures
 
 Players pick a face for their badge from the profile page: their first letter, one of the

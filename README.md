@@ -33,8 +33,8 @@ src/
                neural.ts + neural-weights.ts (Master), persona.ts (24 named bots),
                rivals.ts (grudges), dealers.ts (casino dealers), worker.ts/brain.ts (web worker)
   accounts/    profiles behind AccountStore (local or Supabase), bank rules, stats,
-               achievements, bonus, leaderboard, friends, gifts, avatars, crash reports,
-               notifications (push.ts),
+               achievements, bonus, weekly challenges, leaderboard, friends, gifts, avatars,
+               crash reports, notifications (push.ts),
                seasons.ts (seasonal events: dates, free looks, the event achievement)
   online/      table server (server.ts, blackjack.ts, bundled into the Edge Function by
                edge.ts), client.ts, protocol, table chat, push.ts + webpush.ts (notifications)
@@ -45,8 +45,8 @@ src/
     app/       PWA files: icons, manifest, service worker (sw.js)
     casino/    blackjack, roulette, baccarat, video poker, slots, house.ts (their shared frame)
     player/    profile and sign-in, stats, achievements, looks, faces and pictures,
-               leaderboard, friends, hand history (with its Share button and shared-hand view),
-               season.ts (lobby event banner), notify.ts (notifications panel)
+               leaderboard, weekly challenges, friends, hand history (with its Share button and
+               shared-hand view), season.ts (lobby event banner), notify.ts (notifications panel)
     online/    online tables, online blackjack, table chat
     guides/    how to play: guide-data.ts (rules + first-hand walkthroughs, no DOM) and the
                guide screen. Keep it in step with the engines; test/guide.test.ts checks it
@@ -84,6 +84,7 @@ Run each once in the Supabase SQL editor. Order matters where noted.
 | `gifts.sql` | chip gifts | yes |
 | `avatars.sql` | uploaded pictures | yes |
 | `crashes.sql` | crash reports (after `admin.sql`), then type `crashtest` in the console | yes |
+| `challenges.sql` | chips for weekly challenges (after `banks.sql`) | not yet |
 | `push.sql` | "your turn" and invite notifications (after `friends.sql`) | not yet |
 
 ## Gotchas

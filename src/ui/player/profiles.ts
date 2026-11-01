@@ -1,7 +1,8 @@
 import {
   ACHIEVEMENTS, Achievement, AccountStore, Counters, Factor, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PASSWORD_MIN, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
   BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
-  takeUnlocks, titleFor, FACES, OnlineError, avatarLook, clearOldPictures, deletePicture, pictureKey, uploadPicture,
+  takeUnlocks, titleFor, ChallengeClaim, ChallengeSlot, ChallengeStatus, applyChallenge, challengeStatus, claimChallengeLocally, claimOnlineChallenge,
+  profileCounters, startWeek, FACES, OnlineError, avatarLook, clearOldPictures, deletePicture, pictureKey, uploadPicture,
 } from '../../accounts';
 import { faceHtml, installFaceFallback } from './faces';
 import { shrinkPicture } from './picture';
@@ -175,6 +176,38 @@ export async function claimDailyBonus(): Promise<BonusClaim> {
     if (current !== p) return claim;
     applyBonus(p, claim);
   } else claim = claimLocally(p);
+  await savePlayer();
+  return claim;
+}
+
+// ---------- weekly challenges ----------
+
+/** Whether the table server's progress for the current player is in (always, for players on this device). */
+const serverKnown = (): boolean => !(store instanceof OnlineAccountStore) || (!!current && awardsFor === current.id);
+
+/**
+ * This week's challenges with the current player's progress. Starts a new week for them when
+ * one began (saving it), and notes the server's progress once it has been fetched.
+ */
+export function weeklyChallenges(now = Date.now()): ChallengeStatus[] {
+  const p = current;
+  if (!p) return [];
+  if (startWeek(p, profileCounters(p), serverAwards(), serverKnown(), now)) void savePlayer();
+  return challengeStatus(p, profileCounters(p), serverAwards(), now);
+}
+
+/** Collects a finished challenge's chips. Online players ask the server, which pays each goal once. */
+export async function claimWeeklyChallenge(slot: ChallengeSlot): Promise<ChallengeClaim> {
+  const p = player();
+  const st = weeklyChallenges()[slot];
+  if (!st) throw new Error('This week\'s challenges are over. Have a look at the new ones.');
+  if (st.state === 'open') throw new Error('That challenge isn\'t finished yet.');
+  let claim: ChallengeClaim;
+  if (store instanceof OnlineAccountStore && auth) {
+    claim = await claimOnlineChallenge(auth, p.id, p.challenges.week, slot);
+    if (current !== p) return claim;
+    applyChallenge(p, claim);
+  } else claim = claimChallengeLocally(p, slot, profileCounters(p));
   await savePlayer();
   return claim;
 }

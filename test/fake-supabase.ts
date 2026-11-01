@@ -19,6 +19,8 @@ export class FakeSupabase {
   crashes: { id: number; message: string; stack: string; games: string[]; browsers: string[]; builds: string[]; account: string | null; fixed_at: string | null; last_at: string; sender: string }[] = [];
   /** daily_bonus rows by `owner/player`, as supabase/leaderboard.sql keeps them. Null until set up. */
   bonus: Map<string, { last: number; streak: number }> | null = new Map();
+  /** weekly_challenges rows as `owner/week/slot`, as supabase/challenges.sql keeps them. Null until set up. */
+  weekly: Set<string> | null = new Set();
   /** Player ids an admin took off the leaderboard. */
   hidden = new Set<string>();
   /** The server's clock (epoch ms); defaults to the real time. */
@@ -203,6 +205,18 @@ export class FakeSupabase {
       const day = b && b.last >= now - 48 * 3_600_000 ? b.streak + 1 : 1;
       this.bonus.set(key, { last: now, streak: day });
       return { status: 200, body: { amount: 1000 + 500 * (Math.min(day, 7) - 1), streak: day, last: now } };
+    }
+    if (p === '/rest/v1/rpc/claim_challenge' && this.weekly) {
+      if (!uid) return denied;
+      if (!this.rows.some((r) => r.id === body.p_player && r.owner === uid)) return { status: 403, body: { code: '42501', message: "That player isn't in your account." } };
+      const slot = Number(body.p_slot);
+      if (![0, 1, 2].includes(slot)) return { status: 400, body: { code: 'P0001', message: "There's no such challenge." } };
+      const week = Math.floor((Math.floor((this.now ?? Date.now()) / 86_400_000) + 3) / 7);
+      if (body.p_week !== week) return { status: 400, body: { code: 'P0001', message: "That week's challenges are over. Have a look at the new ones." } };
+      const key = `${uid}/${week}/${slot}`;
+      if (this.weekly.has(key)) return { status: 200, body: { amount: 0, week, slot } };
+      this.weekly.add(key);
+      return { status: 200, body: { amount: [2500, 5000, 10000][slot], week, slot } };
     }
     if (p === '/rest/v1/rpc/leaderboard' && this.bonus) {
       const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
