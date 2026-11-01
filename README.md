@@ -27,13 +27,15 @@ The workflows build everything from source.
 ```
 src/
   engine/      pure game rules, no browser code: cards, hand evaluator, variants, the Hand
-               state machine, Table, blackjack, roulette, baccarat, video poker, slots, history
+               state machine, Table, blackjack, roulette, baccarat, video poker, slots, history,
+               share.ts (a hand packed into a #hand= link, checked before it is shown)
   bots/        bot opponents. Bots only see a PlayerView. bot.ts (5 levels x 5 styles),
                neural.ts + neural-weights.ts (Master), persona.ts (24 named bots),
                rivals.ts (grudges), dealers.ts (casino dealers), worker.ts/brain.ts (web worker)
   accounts/    profiles behind AccountStore (local or Supabase), bank rules, stats,
                achievements, bonus, leaderboard, friends, gifts, avatars, crash reports,
-               notifications (push.ts)
+               notifications (push.ts),
+               seasons.ts (seasonal events: dates, free looks, the event achievement)
   online/      table server (server.ts, blackjack.ts, bundled into the Edge Function by
                edge.ts), client.ts, protocol, table chat, push.ts + webpush.ts (notifications)
   ui/          the poker table and app shell: main.ts (startup + poker table), index.html,
@@ -43,7 +45,8 @@ src/
     app/       PWA files: icons, manifest, service worker (sw.js)
     casino/    blackjack, roulette, baccarat, video poker, slots, house.ts (their shared frame)
     player/    profile and sign-in, stats, achievements, looks, faces and pictures,
-               leaderboard, friends, hand history, notify.ts (notifications panel)
+               leaderboard, friends, hand history (with its Share button and shared-hand view),
+               season.ts (lobby event banner), notify.ts (notifications panel)
     online/    online tables, online blackjack, table chat
     guides/    how to play: guide-data.ts (rules + first-hand walkthroughs, no DOM) and the
                guide screen. Keep it in step with the engines; test/guide.test.ts checks it

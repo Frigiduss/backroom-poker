@@ -1,17 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEALERS, DealerMoment, WHISPER_CHANCE, WHISPER_DOWN_MINS, bjMoment, dealerByName, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../src/bots/dealers';
+import { DEALERS, DealerMoment, WHISPER_CHANCE, WHISPER_DOWN_MINS, bacMoment, bjMoment, dealerByName, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../src/bots/dealers';
 import { createRng } from '../src/engine/cards';
 
 const BJ: DealerMoment[] = ['hello', 'shuffle', 'playerBj', 'dealerBj', 'dealerBust', 'bigWin', 'win', 'lose', 'push'];
 const RL: DealerMoment[] = ['hello', 'noMore', 'zero', 'straight', 'repeat', 'bigWin', 'win', 'lose'];
+const BAC: DealerMoment[] = ['hello', 'shuffle', 'natural', 'tie', 'pair', 'bigWin', 'win', 'lose', 'push'];
+const MOMENTS = { blackjack: BJ, roulette: RL, baccarat: BAC };
 
 test('every dealer has a unique name, a face, a story and a line for every moment of their game', () => {
   assert.equal(new Set(DEALERS.map((d) => d.name.toLowerCase())).size, DEALERS.length);
   const rng = createRng(5);
   for (const d of DEALERS) {
     assert.ok(d.face && d.bio && d.name.length <= 10, d.name);
-    for (const m of d.game === 'blackjack' ? BJ : RL) {
+    for (const m of MOMENTS[d.game]) {
       for (let i = 0; i < 20; i++) {
         const line = dealerLine(d, m, rng, '17');
         assert.ok(line.length > 0, `${d.name} ${m}`);
@@ -21,6 +23,7 @@ test('every dealer has a unique name, a face, a story and a line for every momen
   }
   assert.ok(DEALERS.filter((d) => d.game === 'blackjack').length >= 3);
   assert.ok(DEALERS.filter((d) => d.game === 'roulette').length >= 3);
+  assert.ok(DEALERS.filter((d) => d.game === 'baccarat').length >= 3);
 });
 
 test('a table gets a dealer for its own game', () => {
@@ -28,7 +31,9 @@ test('a table gets a dealer for its own game', () => {
   for (let i = 0; i < 30; i++) {
     assert.equal(pickDealer('blackjack', rng).game, 'blackjack');
     assert.equal(pickDealer('roulette', rng).game, 'roulette');
+    assert.equal(pickDealer('baccarat', rng).game, 'baccarat');
   }
+  assert.equal(dealerByName('Hugo')?.game, 'baccarat');
   assert.equal(dealerByName('étienne')?.game, 'roulette');
 });
 
@@ -60,6 +65,21 @@ test('roulette: the most notable thing about a spin', () => {
   assert.equal(rlMoment({ ...base, net: -5 }), 'lose');
 });
 
+test('baccarat: the most notable thing about a coup', () => {
+  const base = { winner: 'player' as const, natural: false, pairHit: false, net: 10, min: 10 };
+  assert.equal(bacMoment({ ...base, pairHit: true, net: 110 }), 'pair');
+  assert.equal(bacMoment({ ...base, winner: 'tie', net: 0 }), 'tie');
+  assert.equal(bacMoment({ ...base, net: 100 }), 'bigWin');
+  assert.equal(bacMoment({ ...base, natural: true }), 'natural');
+  assert.equal(bacMoment(base), 'win');
+  assert.equal(bacMoment({ ...base, winner: 'banker', net: -10 }), 'lose');
+  assert.equal(bacMoment({ ...base, net: 0 }), 'push');
+  const hugo = dealerByName('Hugo')!;
+  const rng = createRng(3);
+  const ties = new Set(Array.from({ length: 40 }, () => dealerLine(hugo, 'tie', rng, '6')));
+  assert.ok(ties.has('Tie hand, 6 all.'));
+});
+
 test('small talk waits a few rounds; big moments do not', () => {
   assert.equal(dealerSpeaks('win', 1, 0), false);
   assert.equal(dealerSpeaks('win', 5, 0), true);
@@ -77,5 +97,5 @@ test('the dealer whispers advice only when the player is well down, rarely, and 
   assert.equal(shouldWhisper(down, min, false, WHISPER_CHANCE), false);
   assert.equal(WHISPER_CHANCE, 0.001);
   const rng = createRng(4);
-  for (const g of ['blackjack', 'roulette'] as const) assert.ok(whisperLine(g, rng).length > 0);
+  for (const g of ['blackjack', 'roulette', 'baccarat'] as const) assert.ok(whisperLine(g, rng).length > 0);
 });

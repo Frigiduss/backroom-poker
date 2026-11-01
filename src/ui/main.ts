@@ -9,7 +9,7 @@ import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Forma
 import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
-  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally,
+  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally, allCounters,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
@@ -19,12 +19,15 @@ import { renderStats } from './player/stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './player/history';
 import { GUIDE_ICON, guideOpen, openGuide } from './guides/guide';
 import { recordHistory, sourceOfHand } from '../engine/history';
+import { decodeSharedHand, sharedCodeIn } from '../engine/share';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online/online';
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
 import { initNotify } from './player/notify';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './player/leaderboard';
+import { bindSeasonBanner, seasonBannerHtml } from './player/season';
+import { applyLook } from './player/looks';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './casino/blackjack';
 import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './casino/roulette';
 import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './casino/baccarat';
@@ -73,7 +76,7 @@ interface Prefs {
   reveal: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
-  /** The blackjack dealer and the roulette croupier chat now and then. */
+  /** The blackjack dealer and the roulette and baccarat croupiers chat now and then. */
   dealerTalk: boolean;
   sound: boolean;
   volume: number;
@@ -177,6 +180,7 @@ function renderSetup() {
       <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
     </header>
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
+    ${seasonBannerHtml(me, allCounters(me, serverAwards()))}
 
     <div class="lobby-grid">
       ${gamePickerHtml(setup.game === 'poker' ? setup.variant : setup.game)}
@@ -291,6 +295,11 @@ function renderSetup() {
       ...(setup.game === 'blackjack' ? { game: 'blackjack' as const, bjLimits: setup.bj.limits, bots: setup.bj.bots } : {}),
     },
   }));
+  bindSeasonBanner(app, me, allCounters(me, serverAwards()), () => {
+    applyLook(me, serverAwards());
+    savePlayer();
+    renderSetup();
+  });
   bindConsoleButton();
   bindLobbyExtras(app, renderSetup);
   bindLobbyFriends(app, renderSetup);
@@ -580,6 +589,11 @@ class Game implements DevGame {
     this.thinkKey = key;
     this.thinkMs = base * k;
     return this.thinkMs;
+  }
+
+  /** Picks the game back up after something opened over it (a shared hand) closes. */
+  resume() {
+    if (!this.stopped) this.schedule();
   }
 
   private schedule() {
@@ -1459,9 +1473,13 @@ async function boot() {
   } });
   await migrateLegacySettings(local);
 
+  // A hand a friend shared (#hand=…) opens straight away, signed in or not.
+  void openSharedHand();
+  window.addEventListener('hashchange', () => void openSharedHand());
+
   // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.
   let resetPassword = false;
-  if (auth && /access_token|error_description/.test(location.hash)) {
+  if (auth && sharedCodeIn(location.hash) === null && /access_token|error_description/.test(location.hash)) {
     const hash = location.hash;
     history.replaceState(null, '', location.href.split('#')[0]);
     const r = await auth.fromRedirect(hash).catch(() => null);
@@ -1499,6 +1517,16 @@ async function boot() {
   const open = () => (auth?.current ? goOnline(renderSetup, app) : auth ? renderAuth(app, renderSetup) : openPlayer(renderSetup, app));
   if (resetPassword) renderNewPassword(app, open);
   else await open();
+}
+
+/** Replays the hand in the address's #hand=… part, if there is one, then takes it off the address. */
+async function openSharedHand() {
+  const code = sharedCodeIn(location.hash);
+  if (code === null) return;
+  history.replaceState(null, '', location.href.split('#')[0]);
+  const hand = await decodeSharedHand(code);
+  // Over a local table, the game waits while it's open and carries on after.
+  openHandHistory({ playerId: '', shared: hand, fourColor: prefs.fourColor, onClose: () => game?.resume() });
 }
 
 /** Before accounts existed, one name and its settings lived under older keys. They become the first player. */

@@ -1853,6 +1853,7 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 [data-felt="sahara"] { --felt-hi: #9c7a47; --felt: #735630; --felt-deep: #3d2c15; --felt-line: rgba(255, 238, 200, .22); }
 [data-felt="velvet"] { --felt-hi: #6b3b97; --felt: #4a256f; --felt-deep: #220f39; --felt-line: rgba(246, 214, 142, .2); }
 [data-felt="onyx"] { --felt-hi: #2c2c2c; --felt: #171717; --felt-deep: #050505; --felt-line: rgba(230, 184, 92, .34); }
+[data-felt="snowfall"] { --felt-hi: #3d7aa3; --felt: #245276; --felt-deep: #0d263e; --felt-line: rgba(236, 246, 255, .3); }
 
 [data-back="classic"] {
   --back-a: #7d1a2a; --back-b: #57101c; --back-edge: var(--ivory); --back-ink: rgba(246, 214, 142, .5);
@@ -1903,6 +1904,14 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
     linear-gradient(200deg, rgba(255, 196, 230, .55), transparent 60%);
 }
 
+[data-back="snowflake"] {
+  --back-a: #b3263a; --back-b: #5e0f1c; --back-edge: #f4f8ff; --back-ink: rgba(244, 248, 255, .6);
+  --back-art:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f4f8ff' stroke-width='1.4' stroke-linecap='round'%3E%3Cpath d='M12 2v20M3.3 7l17.4 10M3.3 17l17.4-10'/%3E%3Cpath d='M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5M3.6 10.2l3.4-.9-.9-3.4M20.4 13.8l-3.4.9.9 3.4M6.1 17.1l.9-3.4-3.4-.9M17.9 6.9l-.9 3.4 3.4.9'/%3E%3Ccircle cx='12' cy='12' r='1.6' fill='%23f4f8ff' stroke='none'/%3E%3C/svg%3E") center / 58% no-repeat,
+    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, .55) 0 1.2px, transparent 1.6px) 0 0 / 9px 9px,
+    radial-gradient(circle at 70% 64%, rgba(255, 255, 255, .35) 0 1px, transparent 1.4px) 0 0 / 7px 7px;
+}
+
 .looks .look-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
 .looks .look-row + .sl { margin-top: 14px; }
 .look-opt {
@@ -1926,6 +1935,38 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .look-name { font-size: 13.5px; font-weight: 600; }
 .look-how { font-size: 11.5px; color: var(--faint); line-height: 1.25; }
 .look-opt[aria-pressed="true"] .look-how { color: var(--gold-hi); }
+
+/* ---------- Seasonal event banner ---------- */
+.season-banner {
+  display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-radius: 14px;
+  border: 1px solid rgba(236, 246, 255, .22);
+  background:
+    radial-gradient(circle at 12% 30%, rgba(255, 255, 255, .16) 0 1px, transparent 1.6px) 0 0 / 23px 23px,
+    radial-gradient(circle at 60% 70%, rgba(255, 255, 255, .1) 0 1px, transparent 1.6px) 0 0 / 31px 31px,
+    linear-gradient(120deg, rgba(36, 82, 118, .55), rgba(13, 38, 62, .7));
+}
+.season-felt {
+  flex: none; width: 74px; height: 50px; border-radius: 999px; display: grid; place-items: center;
+  background: radial-gradient(ellipse 70% 65% at 50% 40%, var(--felt-hi), var(--felt) 50%, var(--felt-deep));
+  box-shadow: 0 0 0 2px var(--wood), 0 0 0 3px var(--wood-hi), inset 0 4px 12px rgba(0, 0, 0, .5);
+}
+.season-felt .card { --w: 26px; transform: rotate(-8deg); }
+.season-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.season-text b { font-family: var(--display); font-size: 21px; line-height: 1.15; }
+.season-text > span:last-child { font-size: 14px; color: var(--muted); }
+.season-text > span:last-child b { font-family: var(--body); font-size: inherit; color: var(--text); }
+.season-side { flex: none; display: grid; gap: 6px; justify-items: end; min-width: 150px; }
+.season-side .bar { width: 100%; }
+.season-done { font-size: 13px; color: var(--gold-hi); font-weight: 600; }
+@media (max-width: 640px) {
+  .season-banner { flex-wrap: wrap; gap: 10px 12px; padding: 10px 12px; }
+  .season-felt { width: 58px; height: 40px; }
+  .season-felt .card { --w: 20px; }
+  .season-text { flex-basis: calc(100% - 80px); }
+  .season-side { flex-basis: 100%; grid-template-columns: 1fr auto; align-items: center; justify-items: stretch; min-width: 0; }
+  .season-side .ach-num { grid-row: 2; }
+  .season-side .btn, .season-side .season-done { grid-column: 2; grid-row: 1 / span 2; }
+}
 
 /* ---------- Daily bonus and leaderboard ---------- */
 .bonus-btn {
@@ -2186,6 +2227,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   font-family: var(--display); font-weight: 700; letter-spacing: .3em; font-size: clamp(14px, 2.4cqw, 30px);
   color: rgba(246, 214, 142, .16);
 }
+.bac-croupier { position: absolute; left: 8%; top: 3%; z-index: 2; }
 .bac-hands { position: relative; z-index: 1; display: flex; justify-content: center; gap: clamp(18px, 6cqw, 90px); width: 100%; }
 .bac-hand { display: grid; justify-items: center; gap: 6px; padding: 8px 12px 10px; border-radius: 14px; min-width: calc(var(--cw) * 3.3); transition: background .2s, box-shadow .2s; }
 .bac-hand-head { display: flex; align-items: center; gap: 8px; }
@@ -2247,6 +2289,11 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .bac-felt { border-radius: 12px; }
   .bac-hands { gap: 8px; }
   .bac-table .bj-shoe, .bac-felt::after { display: none; }
+  .bac-croupier { position: relative; left: auto; top: auto; align-self: flex-start; margin: 0 0 8px 4px; }
+  .bac-croupier .dealer-plate { padding: 2px 10px 2px 4px; }
+  .bac-croupier .dealer-face { font-size: 18px; }
+  /* Chips sit in the spot's corner so a bet doesn't push the scoreboard off the felt. */
+  .bac-spot .rl-stake { position: absolute; right: 8px; top: 50%; margin: 0; transform: translateY(-50%) scale(.75); transform-origin: right center; }
   .bac-hand { min-width: 0; padding: 6px; }
   .bac-spots { grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
   .bac-spot.player, .bac-spot.banker { min-height: 86px; }
@@ -2314,6 +2361,10 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 .hh-info { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .hh-info b { font-size: 15px; }
 .hh-info span { color: var(--muted); font-size: 13px; }
+.hh-share { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
+.hh-info .hh-share span { color: inherit; font-size: inherit; }
+.hh-share svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.hh-body.solo { grid-template-columns: minmax(0, 1fr); }
 .hh-felt {
   --cw: clamp(26px, 3.4vw, 42px);
   position: relative; min-height: 0; border-radius: 999px;
@@ -2387,6 +2438,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .hh-overlay { padding: 0; }
   .hh { height: 100%; border-radius: 0; border: 0; }
   .hh-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow-y: auto; }
+  .hh-body.solo { grid-template-rows: auto; }
   .hh-list { display: flex; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; }
   .hh-item { flex: none; width: 230px; border-color: var(--line); }
   .hh-replay { grid-template-rows: auto 300px auto auto auto 180px; padding: 12px; }
