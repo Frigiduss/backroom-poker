@@ -72,3 +72,10 @@ test('slot spins count toward the slot achievements', () => {
   assert.equal(ACHIEVEMENT_BY_ID.get('sl-sevens')?.group, 'slots');
   assert.deepEqual(slotsTally({ ...settleSpin(top, 1, 5), staked: 0 }).sum, {});
 });
+
+test('the console high roll lands three sevens on the middle line', async () => {
+  const { highRollStops } = await import('../src/engine/slots');
+  const s = settleSpin(highRollStops(), 1, 5);
+  assert.deepEqual(s.wins.map((w) => w.pay), ['sevens']);
+  assert.equal(s.paid, 500 * 5);
+});
