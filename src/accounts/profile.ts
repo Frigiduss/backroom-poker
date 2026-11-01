@@ -3,6 +3,7 @@
 // browser storage today and an online backend later.
 import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
 import type { BonusRecord } from './bonus';
+import { ChallengeRecord, emptyChallenges, normalizeChallenges } from './challenges';
 import { cleanAvatar } from './avatars';
 import { PERSONA_NAMES } from '../bots/persona';
 import { Rivals, normalizeRivals } from '../bots/rivals';
@@ -79,6 +80,8 @@ export interface Profile {
   title: string | null;
   /** The daily chip bonus: when it was last collected and the streak. */
   bonus: BonusRecord;
+  /** This week's challenges: where the counters started and which goals were paid. */
+  challenges: ChallengeRecord;
   /** The player's chips over time as [time, chips] points, oldest first. See noteChips. */
   history: ChipPoint[];
   /** What each bot regular remembers about this player, by regular's name. */
@@ -121,6 +124,7 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     achievements: { counters: {}, unlocked: {}, run: 0 },
     title: null,
     bonus: { last: null, streak: 0 },
+    challenges: emptyChallenges(),
     history: [[now, STARTING_BANK]],
     rivals: {},
   };
@@ -191,6 +195,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
     achievements: normalizeAchievements(r.achievements, stats),
     title: typeof r.title === 'string' ? r.title : null,
     bonus: { last: typeof r.bonus?.last === 'number' ? r.bonus.last : null, streak: Math.max(0, Math.floor(num(r.bonus?.streak, 0))) },
+    challenges: normalizeChallenges(r.challenges),
     history: normalizeHistory(r.history),
     rivals: normalizeRivals(r.rivals, PERSONA_NAMES),
   };

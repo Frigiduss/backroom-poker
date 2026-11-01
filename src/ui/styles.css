@@ -1925,6 +1925,37 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .look-how { font-size: 11.5px; color: var(--faint); line-height: 1.25; }
 .look-opt[aria-pressed="true"] .look-how { color: var(--gold-hi); }
 
+/* ---------- Weekly challenges ---------- */
+.ch-panel { display: grid; gap: 16px; }
+.ch-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ch-head h2 { margin: 0; font-family: var(--display); font-size: clamp(26px, 4vw, 34px); }
+.ch-left { color: var(--muted); font-size: 14px; }
+.ch-left b { color: var(--gold); font-variant-numeric: tabular-nums; }
+.ch-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ch-card {
+  display: grid; grid-template-rows: auto 1fr auto auto; gap: 10px;
+  border: 1px solid var(--line); background: rgba(0, 0, 0, .2); border-radius: 14px; padding: 16px;
+}
+.ch-card.ch-ready { border-color: rgba(230, 184, 92, .7); background: rgba(230, 184, 92, .08); }
+.ch-card.ch-claimed { opacity: .72; }
+.ch-level { font-family: var(--label); text-transform: uppercase; letter-spacing: .1em; font-size: 12px; color: var(--muted); }
+.ch-l1 .ch-level { color: #9fc3d6; }
+.ch-l2 .ch-level { color: var(--gold); }
+.ch-desc { margin: 0; font-size: 17px; line-height: 1.35; color: var(--text); }
+.ch-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+.ch-num { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ch-action { min-height: 40px; display: flex; align-items: center; }
+.ch-action .btn { width: 100%; }
+.ch-reward { font-weight: 600; color: var(--gold); font-variant-numeric: tabular-nums; }
+.ch-paid { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-weight: 600; }
+.ch-paid svg { width: 18px; height: 18px; fill: none; stroke: var(--gold); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.ch-count { font-family: var(--body); letter-spacing: 0; color: var(--text); }
+@media (max-width: 720px) {
+  .ch-list { grid-template-columns: 1fr; }
+  .ch-card { grid-template-rows: none; padding: 14px; gap: 8px; }
+  .ch-desc { font-size: 16px; }
+}
+
 /* ---------- Daily bonus and leaderboard ---------- */
 .bonus-btn {
   font-family: var(--label); text-transform: uppercase; letter-spacing: .08em; font-size: 12.5px;

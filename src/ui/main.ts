@@ -13,7 +13,7 @@ import {
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
-import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice } from './player/profiles';
+import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice, weeklyChallenges } from './player/profiles';
 import { announce, checkAchievements, renderAchievements } from './player/achievements';
 import { renderStats } from './player/stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './player/history';
@@ -24,6 +24,7 @@ import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTa
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './player/leaderboard';
+import { bindChallengesButton, challengesButtonHtml } from './player/challenges';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './casino/blackjack';
 import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './casino/roulette';
 import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './casino/baccarat';
@@ -173,7 +174,7 @@ function renderSetup() {
         <span class="eyebrow">Card room · open all night</span>
         <h1>Back Room <em>Poker</em></h1>
       </div>
-      <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
+      <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${challengesButtonHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
     </header>
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
 
@@ -292,6 +293,7 @@ function renderSetup() {
   }));
   bindConsoleButton();
   bindLobbyExtras(app, renderSetup);
+  bindChallengesButton(app, renderSetup);
   bindLobbyFriends(app, renderSetup);
   void refreshConsoleAccess();
   if (awardsChecked !== me.id) {
@@ -299,6 +301,8 @@ function renderSetup() {
     awardsChecked = me.id;
     const before = currentTitle();
     void checkAchievements().then(() => {
+      // The server's progress is in now: weekly challenges start counting it from here.
+      weeklyChallenges();
       if (currentTitle() !== before && !game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();
     });
   }
