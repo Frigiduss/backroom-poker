@@ -15,6 +15,8 @@ export class FakeSupabase {
   admins = new Set<string>();
   site = new Map<string, unknown>();
   log: { at: string; admin: string; action: string; detail: unknown }[] = [];
+  /** supabase/crashes.sql, much simplified: one row per report_crash() call, and who sent it. */
+  crashes: { id: number; message: string; stack: string; games: string[]; browsers: string[]; builds: string[]; account: string | null; fixed_at: string | null; last_at: string; sender: string }[] = [];
   /** daily_bonus rows by `owner/player`, as supabase/leaderboard.sql keeps them. Null until set up. */
   bonus: Map<string, { last: number; streak: number }> | null = new Map();
   /** Player ids an admin took off the leaderboard. */
@@ -224,6 +226,24 @@ export class FakeSupabase {
       if (method === 'POST') this.site.set(body.key, body.value);
       if (method === 'DELETE' && keyEq) this.site.delete(keyEq);
       return { status: 201 };
+    }
+    if (p === '/rest/v1/rpc/report_crash') {
+      this.crashes.push({
+        id: this.crashes.length + 1, message: String(body.p_message).slice(0, 300), stack: String(body.p_stack ?? ''),
+        games: [body.p_game], browsers: [body.p_browser], builds: [body.p_build], account: uid || null, fixed_at: null,
+        last_at: new Date().toISOString(), sender: uid ? 'account' : bearer === 'anon-key' ? 'visitor' : 'bad token',
+      });
+      return { status: 204 };
+    }
+    if (p === '/rest/v1/crash_reports') {
+      if (!admin) return method === 'GET' ? { status: 200, body: [] } : { status: 204 };
+      const idEq = Number(u.searchParams.get('id')?.replace(/^eq\./, '') ?? NaN);
+      const fixedOnly = u.searchParams.get('fixed_at') === 'not.is.null';
+      const hit = this.crashes.filter((c) => (Number.isNaN(idEq) || c.id === idEq) && (!fixedOnly || c.fixed_at));
+      if (method === 'GET') return { status: 200, body: hit.map(({ sender: _s, ...c }) => ({ ...c, count: 1, people: 1, first_at: c.last_at })) };
+      if (method === 'PATCH') for (const c of hit) c.fixed_at = body.fixed_at;
+      if (method === 'DELETE') this.crashes = this.crashes.filter((c) => !hit.includes(c));
+      return { status: 204 };
     }
     if (p === '/rest/v1/admin_log') {
       if (!admin) return method === 'GET' ? { status: 200, body: [] } : denied;
