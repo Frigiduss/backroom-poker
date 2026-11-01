@@ -1,13 +1,15 @@
-// The house's own staff: who deals blackjack and who spins the roulette wheel. Each has a
+// The house's own staff: who deals blackjack, who spins the roulette wheel and who runs the
+// baccarat shoe. Each has a
 // name, a face, a short story and a way of talking. They speak now and then about what just
 // happened, never about what to do: a dealer gives no advice.
 import { Rng } from '../engine/cards';
 
-export type DealerGame = 'blackjack' | 'roulette';
+export type DealerGame = 'blackjack' | 'roulette' | 'baccarat';
 
 export type BjMoment = 'hello' | 'shuffle' | 'playerBj' | 'dealerBj' | 'dealerBust' | 'bigWin' | 'win' | 'lose' | 'push';
 export type RlMoment = 'hello' | 'noMore' | 'zero' | 'straight' | 'repeat' | 'bigWin' | 'win' | 'lose';
-export type DealerMoment = BjMoment | RlMoment;
+export type BacMoment = 'hello' | 'shuffle' | 'natural' | 'tie' | 'pair' | 'bigWin' | 'win' | 'lose' | 'push';
+export type DealerMoment = BjMoment | RlMoment | BacMoment;
 
 export interface Dealer {
   name: string;
@@ -15,7 +17,10 @@ export interface Dealer {
   game: DealerGame;
   /** One line about them, shown when you hover their name. */
   bio: string;
-  /** Their own lines; the house lines for the game fill in the rest. `{n}` is the number that came up. */
+  /**
+   * Their own lines; the house lines for the game fill in the rest. `{n}` is the number that came
+   * up at roulette, and at baccarat the winning total (or the side that won, for `win`/`lose`).
+   */
   lines: Partial<Record<DealerMoment, string[]>>;
 }
 
@@ -88,10 +93,47 @@ export const DEALERS: readonly Dealer[] = [
     win: ['Yay! There’s your chips.', 'A winner!'],
     lose: ['Aw. Next spin!'],
   } },
+  // Baccarat
+  { name: 'Lorenzo', face: '🥂', game: 'baccarat', bio: 'Ran the salon privé in Macau. Treats every coup like a ceremony.', lines: {
+    hello: ['Good evening. Player, Banker or Tie. The shoe is waiting.', 'Welcome to the salon. Please, be seated.'],
+    shuffle: ['A fresh shoe. Eight decks, and a new scoreboard.'],
+    natural: ['A natural {n}. Nobody draws.', 'Natural {n}. Elegant.'],
+    tie: ['Égalité. {n} all.', 'A tie, {n} each. Player and Banker bets come back.'],
+    pair: ['A pair. Eleven to one, with pleasure.'],
+    bigWin: ['Splendid. The salon salutes you.'],
+    lose: ['The shoe giveth, the shoe taketh.'],
+  } },
+  { name: 'Mei', face: '🏮', game: 'baccarat', bio: 'Squeezes every third card like it owes her money.', lines: {
+    hello: ['Hello! Pick a side. I’ll do the squeezing.', 'Hi there. Player or Banker tonight?'],
+    natural: ['Natural {n}! No squeeze needed.', 'Ooh, {n} straight off.'],
+    tie: ['A tie! {n} all. Didn’t see that coming.', '{n} and {n}. The shoe is teasing us.'],
+    pair: ['Pair! I love a pair.', 'Look at that pair. Eleven to one!'],
+    win: ['{n} wins. You called it.', 'Nicely read.'],
+    lose: ['{n} this time. Next shoe’s yours.'],
+    bigWin: ['That’s a big one! Lucky red envelope for you.'],
+  } },
+  { name: 'Hugo', face: '🧐', game: 'baccarat', bio: 'Old-school. Calls the totals and nothing else, mostly.', lines: {
+    hello: ['Evening. Bets on the layout, please.', 'Good evening. Player, Banker, Tie.'],
+    shuffle: ['New shoe. Burning the first card.'],
+    natural: ['Natural {n}.', '{n}, a natural. Nobody draws.'],
+    tie: ['Tie hand, {n} all.'],
+    win: ['{n} wins.'],
+    lose: ['{n} wins.'],
+    push: ['Bets stand.'],
+  } },
+  { name: 'Coco', face: '🎀', game: 'baccarat', bio: 'Believes in streaks, hunches and lucky earrings.', lines: {
+    hello: ['Hi darling! I have a feeling about tonight.', 'Oh, welcome! Lucky earrings are on.'],
+    natural: ['A natural {n}! Told you, a feeling.', 'Natural {n}! Mwah.'],
+    tie: ['A tie! {n} all! I adore a tie.'],
+    pair: ['A pair! Like my earrings!'],
+    bigWin: ['Darling! That’s a big one!', 'Champagne for the lucky one!'],
+    win: ['{n}! Yes!', 'Ooh, {n} for you.'],
+    lose: ['Aw, {n}. It’ll swing back, darling.'],
+  } },
 ];
 
 /** What any dealer of this game might say, when they have nothing of their own. */
-const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlMoment, string[]> } = {
+const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlMoment, string[]>; baccarat: Record<BacMoment, string[]> } = {
   blackjack: {
     hello: ['Welcome to the table. Good luck.'],
     shuffle: ['Fresh shoe.', 'Shuffling up.'],
@@ -112,6 +154,17 @@ const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlM
     bigWin: ['Big winner on the layout!'],
     win: ['Winner. Paying out.', 'Pay the layout.'],
     lose: ['Better luck next spin.', 'The house takes this one.'],
+  },
+  baccarat: {
+    hello: ['Place your bets. Player, Banker or Tie.'],
+    shuffle: ['Fresh shoe.', 'New shoe, new scoreboard.'],
+    natural: ['A natural {n}.', 'Natural {n}. No more cards.'],
+    tie: ['Tie, {n} all.', 'A tie. Player and Banker bets push.'],
+    pair: ['A pair! Pays eleven to one.'],
+    bigWin: ['Big winner on the layout!', 'That’s a good coup.'],
+    win: ['{n} wins. Paying out.', 'Winner.'],
+    lose: ['{n} wins this one.', 'Better luck next coup.'],
+    push: ['Bets come back.'],
   },
 };
 
@@ -138,6 +191,7 @@ export function dealerLine(d: Dealer, moment: DealerMoment, rng: Rng, n = ''): s
 export const DEALER_CHANCE: Record<DealerMoment, number> = {
   hello: 1, shuffle: 0.8, playerBj: 0.9, dealerBj: 0.7, dealerBust: 0.45, bigWin: 0.9, win: 0.2, lose: 0.15, push: 0.2,
   noMore: 0.3, zero: 0.75, straight: 0.9, repeat: 0.8,
+  natural: 0.7, tie: 0.8, pair: 0.9,
 };
 
 /** What a blackjack round meant for the player, as the dealer sees it. */
@@ -185,6 +239,28 @@ export function rlMoment(v: RlSpinView): RlMoment {
   return 'lose';
 }
 
+export interface BacCoupView {
+  winner: 'player' | 'banker' | 'tie';
+  /** Either side had 8 or 9 on its first two cards. */
+  natural: boolean;
+  /** A pair bet of the player's won. */
+  pairHit: boolean;
+  /** The player's net for the coup. */
+  net: number;
+  min: number;
+}
+
+/** The one thing a baccarat croupier would remark on after a coup, most notable first. */
+export function bacMoment(v: BacCoupView): BacMoment {
+  if (v.pairHit) return 'pair';
+  if (v.winner === 'tie') return 'tie';
+  if (v.net >= v.min * 8) return 'bigWin';
+  if (v.natural) return 'natural';
+  if (v.net > 0) return 'win';
+  if (v.net < 0) return 'lose';
+  return 'push';
+}
+
 /**
  * Decides whether the dealer speaks this time. Small talk waits a couple of rounds after the
  * last line; big moments don't. `roll` is a 0..1 random number.
@@ -220,6 +296,13 @@ const WHISPERS: Record<DealerGame, string[]> = {
     'Little secret: every bet here has the same edge. Bigger payouts just come less often.',
     'Psst. Chasing losses is how the house pays for the chandeliers. Take a breather.',
     'Between us: set a stopping point before the next spin, and keep to it.',
+  ],
+  baccarat: [
+    'Psst. Banker is the best bet on this table, even after the commission.',
+    'Between you and me: stay off the Tie. Eight to one looks generous; it isn’t.',
+    'Little secret: the pair bets are pretty to look at and expensive to keep.',
+    'Between us: the scoreboard is for show. The shoe doesn’t remember streaks.',
+    'Psst. Chasing losses is how the house pays for the chandeliers. Take a breather.',
   ],
 };
 

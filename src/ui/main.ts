@@ -75,7 +75,7 @@ interface Prefs {
   reveal: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
-  /** The blackjack dealer and the roulette croupier chat now and then. */
+  /** The blackjack dealer and the roulette and baccarat croupiers chat now and then. */
   dealerTalk: boolean;
   sound: boolean;
   volume: number;
