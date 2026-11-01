@@ -62,6 +62,7 @@ const ROAD_COLS = 14;
 export class BaccaratTable extends HouseTable<BacSetup> {
   protected readonly title = 'Baccarat';
   protected readonly cls = 'bac';
+  protected readonly guideId = 'baccarat' as const;
   private readonly rng = createRng();
   private readonly shoe = new Shoe(BAC_DECKS, this.rng);
   private bets: BacBets = {};

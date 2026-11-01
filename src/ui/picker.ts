@@ -1,23 +1,12 @@
 import { Card, makeCard } from '../engine/cards';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { cardHtml } from './dom';
+import { openGuide } from './guide';
 import { symHtml } from './slots';
 
-/** Every game in the lobby: a poker variant, or one of the house games. */
-export type GameId = VariantId | HouseGame;
-export type HouseGame = 'blackjack' | 'roulette' | 'baccarat' | 'videopoker' | 'slots';
-export const HOUSE_GAMES: HouseGame[] = ['blackjack', 'roulette', 'baccarat', 'videopoker', 'slots'];
-export const isHouseGame = (id: string): id is HouseGame => (HOUSE_GAMES as string[]).includes(id);
-
-interface Category { id: string; name: string; games: GameId[] }
-
-/** The lobby's game tabs, grouped by how the games are dealt. */
-const CATEGORIES: Category[] = [
-  { id: 'community', name: "Hold'em & Omaha", games: ['holdem', 'shortdeck', 'omaha', 'omaha8'] },
-  { id: 'stud', name: 'Stud', games: ['stud7', 'stud8', 'razz'] },
-  { id: 'draw', name: 'Draw', games: ['draw5'] },
-  { id: 'casino', name: 'Casino', games: HOUSE_GAMES },
-];
+export { CATEGORIES, HOUSE_GAMES, isHouseGame } from './games';
+export type { Category, GameId, HouseGame } from './games';
+import { CATEGORIES, GameId, HOUSE_GAMES, HouseGame, isHouseGame } from './games';
 
 // Suits: 0 clubs, 1 diamonds, 2 hearts, 3 spades. Ranks 2..14 (ace high).
 const c = (rank: number, suit: number): Card => makeCard(rank, suit);
@@ -107,7 +96,7 @@ function showcase(id: GameId): Showcase {
 }
 
 const categoryOf = (id: GameId) => CATEGORIES.find((cat) => cat.games.includes(id)) ?? CATEGORIES[0];
-const shortName = (id: GameId) => (isHouseGame(id) ? HOUSE[id].name : VARIANTS[id].name);
+export const gameName = (id: GameId) => (isHouseGame(id) ? HOUSE[id].name : VARIANTS[id].name);
 
 /** Each tab remembers the game last picked in it, so switching back lands on it again. */
 const lastPick: Record<string, GameId> = {};
@@ -135,7 +124,7 @@ export function gamePickerHtml(selected: GameId): string {
         ${t.name}<span class="cat-count">${t.games.length}</span></button>`).join('')}
     </div>
     ${cat.games.length > 1 ? `<div class="cat-games" role="group" aria-label="${cat.name} games">
-      ${cat.games.map((id) => `<button type="button" class="game-pill" data-game="${id}" aria-pressed="${id === selected}">${pillIcon(id)}<span>${shortName(id)}</span></button>`).join('')}
+      ${cat.games.map((id) => `<button type="button" class="game-pill" data-game="${id}" aria-pressed="${id === selected}">${pillIcon(id)}<span>${gameName(id)}</span></button>`).join('')}
     </div>` : ''}
     <div class="feature${enter ? ' enter' : ''}" id="game-feature" role="tabpanel" aria-labelledby="cat-${cat.id}">
       <div class="feature-text">
@@ -143,6 +132,7 @@ export function gamePickerHtml(selected: GameId): string {
         <h3>${s.name}</h3>
         <p>${s.blurb}</p>
         <div class="facts">${s.facts.map((f) => `<span>${f}</span>`).join('')}</div>
+        <button type="button" class="guide-link" id="open-guide" data-guide="${selected}">How to play ${s.name}<span aria-hidden="true">→</span></button>
       </div>
       <figure class="feature-cards" aria-label="${s.art ? 'Example spin' : 'Example hand'}">
         ${s.art ?? `<div class="fc-row hand${s.hand.length > 4 ? ' many' : ''}">${s.handLabel ? `<span class="fc-label">${s.handLabel}</span>` : ''}${cards(s.hand)}</div>`}
@@ -171,6 +161,8 @@ export function bindGamePicker(pick: (id: GameId) => void) {
       document.getElementById(`cat-${next.id}`)?.focus();
     };
   });
+  const guide = document.getElementById('open-guide');
+  if (guide) guide.onclick = () => openGuide(guide.dataset.guide as GameId);
   document.querySelectorAll<HTMLButtonElement>('[data-game]').forEach((b) => {
     b.onclick = () => {
       pick(b.dataset.game as GameId);

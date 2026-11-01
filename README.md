@@ -46,6 +46,9 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
   History at the table (or from your profile) to step through any of them street by street,
   or press Play to watch it again. You see what you saw at the table: your own cards,
   face-up cards and hands shown at the end.
+- **How to play guides:** every game has a short rules page and a step-by-step walk
+  through a first hand, with the hand rankings for the poker games. Open it from the
+  "How to play" link under the featured game in the lobby, or the Rules button at any table.
 - **Looks:** pick a felt and card back for the poker and blackjack tables.
 - **Sounds** for cards, chips and wins.
 
@@ -150,7 +153,9 @@ conflict over it. The deploy workflows build everything from source.
 - `src/online/`: online play. `server.ts` and `blackjack.ts` are the table server (bundled
   into the Edge Function), `client.ts` talks to it, plus the shared protocol and table chat.
 - `src/ui/`: the browser front end (plain TypeScript + DOM), the PWA manifest, icons and
-  service worker (`sw.js`).
+  service worker (`sw.js`). `guide.ts` holds the how to play rules and walkthroughs; keep it
+  in step with the engines when a rule changes (`test/guide.test.ts` checks the walkthrough
+  hands against them).
 - `src/admin/`: the admin dashboard page.
 - `test/`: Node test runner tests. `fake-supabase.ts` and `memory-db.ts` stand in for the
   real backend.

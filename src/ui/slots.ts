@@ -76,6 +76,7 @@ const linePoints = (line: number) => LINES[line].map((row, reel) => `${50 + reel
 export class SlotsTable extends HouseTable<SlSetup> {
   protected readonly title = 'Slots';
   protected readonly cls = 'slots';
+  protected readonly guideId = 'slots' as const;
   private readonly rng = createRng();
   /** The reels where they stand now. */
   private stops: number[] = REELS.map((strip) => Math.floor(Math.random() * strip.length));

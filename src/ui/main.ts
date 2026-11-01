@@ -17,6 +17,7 @@ import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, o
 import { announce, checkAchievements, renderAchievements } from './achievements';
 import { renderStats } from './stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './history';
+import { GUIDE_ICON, guideOpen, openGuide } from './guide';
 import { recordHistory, sourceOfHand } from '../engine/history';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online';
@@ -584,7 +585,7 @@ class Game implements DevGame {
     clearTimeout(this.timer);
     const hand = this.hand;
     // Reviewing an old hand holds the game until the player is back.
-    if (!hand || this.modal !== 'none' || this.paused || handHistoryOpen()) return;
+    if (!hand || this.modal !== 'none' || this.paused || handHistoryOpen() || guideOpen()) return;
     const humanOut = this.spectating || this.humanIndex < 0 || hand.players[this.humanIndex].status === 'folded';
     const base = this.botDelay ?? BOT_DELAY[prefs.speed] * (humanOut ? 0.6 : 1);
     if (hand.isComplete) {
@@ -847,6 +848,7 @@ class Game implements DevGame {
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 18h7"/></svg><span>Console</span></button>` : ''}
           <button type="button" class="icon-btn" id="log-toggle" aria-pressed="${this.logOpen}" title="Hand log">${icon('M4 6h16M4 12h16M4 18h10')}<span>Log</span></button>
+<button type="button" class="icon-btn" id="open-guide" title="How to play">${icon(GUIDE_ICON)}<span>Rules</span></button>
           <button type="button" class="icon-btn" id="open-history" title="Hand history (H)">${icon(HISTORY_ICON)}<span>History</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${prefs.sound}" title="${prefs.sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(prefs.sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${prefs.sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
@@ -1208,6 +1210,7 @@ class Game implements DevGame {
     on('log-toggle', toggleLog);
     on('log-close', toggleLog);
     on('open-history', () => this.openHistory());
+    on('open-guide', () => openGuide(this.hand?.variant.id ?? 'holdem', () => !this.stopped && this.schedule()));
     on('replay-hand', () => this.openHistory(this.lastSaved ?? undefined));
     on('close-modal', () => this.closeModal());
     on('confirm-leave', () => renderSetup());
