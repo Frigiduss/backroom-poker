@@ -1,7 +1,7 @@
 // Turns a picture picked from the device into a small square JPEG for the player's badge. Doing
 // this in the browser means what's uploaded is always a freshly drawn image with nothing else in
 // it (no location or camera details), whatever the original file was.
-import { PICTURE_MAX_BYTES, PICTURE_PICK_MAX_BYTES, PICTURE_SIZE } from '../accounts';
+import { PICTURE_MAX_BYTES, PICTURE_PICK_MAX_BYTES, PICTURE_SIZE } from '../../accounts';
 
 const toBlob = (c: HTMLCanvasElement, quality: number) =>
   new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/jpeg', quality));

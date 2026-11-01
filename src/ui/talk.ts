@@ -3,7 +3,7 @@
 import { personaFor } from '../bots/persona';
 import { avatarLook } from '../accounts';
 import { esc } from './dom';
-import { faceInner } from './faces';
+import { faceInner } from './player/faces';
 
 /** A seat's avatar: a regular's face for bots; for people, the face they picked or the first letter of the name. */
 export function avatarHtml(name: string, level: string, bot: boolean, avatar: string | null = null): string {

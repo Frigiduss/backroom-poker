@@ -1,19 +1,19 @@
 // The blackjack table: the player against the dealer from a six-deck shoe, with a few bots
 // playing basic strategy in the other spots for company. Bets come straight out of the
 // player's chip bank and winnings go straight back in.
-import { blackjackTally, canRefill, credit, setBlackjackBank, takeUnlocks } from '../accounts';
-import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, BjHand, Round, RoundRig, RoundView, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../engine/blackjack';
-import { createRng, shuffle } from '../engine/cards';
-import { announce } from './achievements';
-import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
-import type { DevBlackjack } from './console-blackjack';
-import { cardHtml, chipsHtml, esc, fmt, isPhone, withHero } from './dom';
-import { GUIDE_ICON, openGuide } from './guide';
-import { currentTitle, player, savePlayer, serverAwards } from './profiles';
-import { SoundName, play, setVolume } from './sound';
-import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../bots/persona';
-import { avatarHtml, floatOver } from './talk';
-import { Dealer, DealerMoment, bjMoment, dealerLine, dealerSpeaks, pickDealer, shouldWhisper, whisperLine } from '../bots/dealers';
+import { blackjackTally, canRefill, credit, setBlackjackBank, takeUnlocks } from '../../accounts';
+import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, BjHand, Round, RoundRig, RoundView, Shoe, bookPlay, describeTotal, handTotal, isNatural } from '../../engine/blackjack';
+import { createRng, shuffle } from '../../engine/cards';
+import { announce } from '../player/achievements';
+import { bindConsoleButton, consoleEnabled, toggleConsole } from '../console';
+import type { DevBlackjack } from '../console-blackjack';
+import { cardHtml, chipsHtml, esc, fmt, isPhone, withHero } from '../dom';
+import { GUIDE_ICON, openGuide } from '../guides/guide';
+import { currentTitle, player, savePlayer, serverAwards } from '../player/profiles';
+import { SoundName, play, setVolume } from '../sound';
+import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../../bots/persona';
+import { avatarHtml, floatOver } from '../talk';
+import { Dealer, DealerMoment, bjMoment, dealerLine, dealerSpeaks, pickDealer, shouldWhisper, whisperLine } from '../../bots/dealers';
 
 // ---------- lobby settings ----------
 

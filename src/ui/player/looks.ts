@@ -1,7 +1,7 @@
 // The player's felt and card back. Choices are set as data attributes on the page, and the
 // stylesheet turns them into colours, so every table (poker, blackjack, online) follows.
-import { ACHIEVEMENT_BY_ID, CARD_BACKS, Counters, DEFAULT_LOOK, FELTS, Look, LookChoice, Profile, allCounters, lookFor, lookUnlocked } from '../accounts';
-import { esc } from './dom';
+import { ACHIEVEMENT_BY_ID, CARD_BACKS, Counters, DEFAULT_LOOK, FELTS, Look, LookChoice, Profile, allCounters, lookFor, lookUnlocked } from '../../accounts';
+import { esc } from '../dom';
 
 /** Shows the player's look, or the free one when nobody is signed in. `awards` is online progress. */
 export function applyLook(p: Profile | null, awards: Counters) {

@@ -1,8 +1,8 @@
 import { Card, makeCard } from '../engine/cards';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { cardHtml } from './dom';
-import { openGuide } from './guide';
-import { symHtml } from './slots';
+import { openGuide } from './guides/guide';
+import { symHtml } from './casino/slots';
 
 export { CATEGORIES, HOUSE_GAMES, isHouseGame } from './games';
 export type { Category, GameId, HouseGame } from './games';

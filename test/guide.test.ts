@@ -5,7 +5,7 @@ import { VARIANTS, VariantId, showdownValue } from '../src/engine/variants';
 import { evalHigh, evalLow } from '../src/engine/evaluator';
 import { handTotal } from '../src/engine/blackjack';
 import { payLine } from '../src/engine/videopoker';
-import { GUIDE_GAMES, guideFor } from '../src/ui/guide-data';
+import { GUIDE_GAMES, guideFor } from '../src/ui/guides/guide-data';
 import { CATEGORIES } from '../src/ui/games';
 
 const showdown = (id: VariantId) => {

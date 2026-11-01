@@ -1,9 +1,9 @@
 // The how to play text: rules and a first-hand walkthrough for every game in the lobby.
 // The rules come from the engines (src/engine), so keep the two in step when a rule changes;
 // test/guide.test.ts checks the walkthrough hands against them. No DOM here.
-import { Card, makeCard } from '../engine/cards';
-import type { Sym } from '../engine/slots';
-import type { GameId } from './games';
+import { Card, makeCard } from '../../engine/cards';
+import type { Sym } from '../../engine/slots';
+import type { GameId } from '../games';
 
 // Suits: 0 clubs, 1 diamonds, 2 hearts, 3 spades. Ranks 2..14 (ace high).
 const c = (rank: number, suit: number): Card => makeCard(rank, suit);

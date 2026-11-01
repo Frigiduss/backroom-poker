@@ -2,11 +2,11 @@
 import {
   ACHIEVEMENTS, ACHIEVEMENT_BY_ID, BOARD_NAMES, Board, LEADERBOARD_MIN_HANDS, LeaderRow, NotSetUpError,
   bonusAmount, bonusReady, fetchLeaderboard, nextBonusAt, streakDay,
-} from '../accounts';
+} from '../../accounts';
 import { faceHtml } from './faces';
-import { esc, fmt, titleHtml } from './dom';
+import { esc, fmt, titleHtml } from '../dom';
 import { claimDailyBonus, isOnline, onlineAuth, player, savePlayer, setNotice } from './profiles';
-import { play } from './sound';
+import { play } from '../sound';
 
 function waitText(ms: number): string {
   const mins = Math.max(1, Math.ceil(ms / 60_000));

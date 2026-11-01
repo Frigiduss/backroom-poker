@@ -1,27 +1,27 @@
 // Playing with friends: the lobby panel, the waiting room, and the online table. The table
 // here only draws what the server sends; every deal, bot move and payout happens on the
 // server (src/online/server.ts), so this page never holds anyone else's cards.
-import { simulateEquity, specFromView } from '../bots/equity';
-import { STYLE_NAMES } from '../bots/bot';
-import { PlayerView } from '../bots/view';
-import { OnlineAuth } from '../accounts/online';
-import { createRng } from '../engine/cards';
-import { Action, LegalActions } from '../engine/hand';
-import { DIFFICULTY_NAMES, FORMAT_NAMES } from '../engine/table';
-import { STRUCTURE_NAMES, VARIANTS, describeHolding } from '../engine/variants';
-import { TableClient } from '../online/client';
-import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../online/protocol';
-import { checkAchievements } from './achievements';
-import { HISTORY_ICON, openHandHistory, saveHand } from './history';
-import { recordHistory } from '../engine/history';
-import { cardHtml, chipsHtml, esc, fmt, isPhone, titleHtml, withHero } from './dom';
-import { SoundName, play } from './sound';
-import { consoleEnabled, toggleConsole } from './console';
+import { simulateEquity, specFromView } from '../../bots/equity';
+import { STYLE_NAMES } from '../../bots/bot';
+import { PlayerView } from '../../bots/view';
+import { OnlineAuth } from '../../accounts/online';
+import { createRng } from '../../engine/cards';
+import { Action, LegalActions } from '../../engine/hand';
+import { DIFFICULTY_NAMES, FORMAT_NAMES } from '../../engine/table';
+import { STRUCTURE_NAMES, VARIANTS, describeHolding } from '../../engine/variants';
+import { TableClient } from '../../online/client';
+import { HandView, PlayerTag, TURN_SECONDS, TableSettings, TableView } from '../../online/protocol';
+import { checkAchievements } from '../player/achievements';
+import { HISTORY_ICON, openHandHistory, saveHand } from '../player/history';
+import { recordHistory } from '../../engine/history';
+import { cardHtml, chipsHtml, esc, fmt, isPhone, titleHtml, withHero } from '../dom';
+import { SoundName, play } from '../sound';
+import { consoleEnabled, toggleConsole } from '../console';
 import { BjScreen } from './online-blackjack';
 import { ChatDock } from './chat';
-import { BJ_RULES_LINE, limitText } from './blackjack';
-import { avatarHtml, botTitle } from './talk';
-import { bindTableInvites, lobbyInvitesHtml, openInvitePicker, tableInvitesHtml } from './friends';
+import { BJ_RULES_LINE, limitText } from '../casino/blackjack';
+import { avatarHtml, botTitle } from '../talk';
+import { bindTableInvites, lobbyInvitesHtml, openInvitePicker, tableInvitesHtml } from '../player/friends';
 
 /** A person with a plus, for the table's Invite button. */
 const INVITE_ICON = 'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm10-2v6m3-3h-6';

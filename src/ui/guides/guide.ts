@@ -1,11 +1,11 @@
 // How to play: a rules page for every game in the lobby and a walk through a first hand, one
 // step at a time. It opens over the lobby or a table, like the hand history. The text lives in
 // guide-data.ts.
-import { VARIANTS } from '../engine/variants';
-import { cardHtml, esc } from './dom';
+import { VARIANTS } from '../../engine/variants';
+import { cardHtml, esc } from '../dom';
 import { A, C, D, H, J, K, Q, Ranking, S, Step, T, guideFor } from './guide-data';
-import { CATEGORIES, GameId, gameName } from './picker';
-import { symHtml } from './slots';
+import { CATEGORIES, GameId, gameName } from '../picker';
+import { symHtml } from '../casino/slots';
 
 
 const mini = (rank: number, suit: number) => {
