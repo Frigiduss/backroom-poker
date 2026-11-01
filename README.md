@@ -165,6 +165,7 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/leaderboard.sql` | Daily bonus and leaderboard |
 | `supabase/admin.sql` | Admin accounts |
 | `supabase/friends.sql` | Friends, who's online, and table invites |
+| `supabase/crashes.sql` | Crash reports in the admin dashboard |
 | `supabase/banks.sql` | Limits on how fast an online chip bank can grow, so a save can't be edited to cheat |
 | `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
@@ -175,6 +176,7 @@ accounts apart. Never put the `service_role` key in the repository.
 ### Admin tools
 
 Admin accounts (made with `supabase/admin.sql`) get a developer console in the game and the
-dashboard at `/admin/`, for looking after players, tables and the lobby announcement. Admin
+dashboard at `/admin/`, for looking after players, tables, the lobby announcement and the
+errors players' games hit (the Crashes tab). Admin
 powers are checked by the database and the table server, not the page, and every change is
 logged. See [supabase/README.md](supabase/README.md#the-developer-console).

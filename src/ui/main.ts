@@ -29,7 +29,11 @@ import { DEFAULT_VP, VideoPokerTable, VpSetup, bindVpSetupCard, vpSetupCardHtml 
 import { HouseGame, isHouseGame } from './picker';
 import { equity, think } from './thinker';
 import { avatarHtml, botTitle, floatOver } from './talk';
+import { installCrashReporter, setCrashAuth } from './crash';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
+
+// Errors from here on reach the admin dashboard's crash reports.
+installCrashReporter(whereNow);
 
 // ---------- settings ----------
 
@@ -1284,6 +1288,25 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
+/** What the player is doing, for crash reports: "Texas Hold'em · cash", "Blackjack", "Online poker"… */
+function whereNow(): string {
+  const online = activeTable();
+  if (online) return `Online ${online.game}`;
+  if (game) {
+    const s = game.setup;
+    return `${VARIANTS[s.variant]?.name ?? s.variant} · ${s.practice ? 'practice' : FORMAT_NAMES[s.format] ?? s.format}`;
+  }
+  if (blackjack) return 'Blackjack';
+  if (house instanceof RouletteTable) return 'Roulette';
+  if (house instanceof BaccaratTable) return 'Baccarat';
+  if (house instanceof VideoPokerTable) return 'Video poker';
+  const page = document.querySelector('main');
+  if (page?.classList.contains('profile-page')) return 'Profile';
+  if (page?.classList.contains('welcome') || page?.classList.contains('auth')) return 'Sign-in';
+  if (page?.classList.contains('room')) return 'Online room';
+  return page?.classList.contains('lobby') ? 'Lobby' : 'Starting up';
+}
+
 /** Opens the last player (online if signed in), or asks who's playing on a first visit. */
 async function boot() {
   let storage: Storage | null = null;
@@ -1295,6 +1318,7 @@ async function boot() {
   const local = new LocalAccountStore(storage);
   const auth = onlineEnabled(ONLINE) ? new OnlineAuth(ONLINE, storage) : null;
   initAccounts(local, auth, storage);
+  setCrashAuth(auth);
   initOnlinePlay({
     app,
     auth,
