@@ -27,6 +27,11 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
   Mixed) and five styles (balanced, tight, loose, aggressive, passive). 24 named bot
   characters have their own faces and table talk; turn the talk off in Settings, or switch
   on Fast bots if you'd rather not wait.
+- **Rivals:** the named bots remember how you play against them from one sitting to the
+  next. Take a bot's chips or knock them out and they hold a grudge: they greet you with
+  it, play back at you harder, and the Expert ones use what they've seen of your habits.
+  Win some back off them and they cool down. A bot who keeps beating you gets smug instead.
+  Your rivals are listed on the stats page.
 - **Practice mode:** a switch on the table setup card adds advice, your equity and pot odds
   on every decision. Practice uses free chips, so it never touches your bank, stats or
   achievements.

@@ -3,6 +3,8 @@
 // browser storage today and an online backend later.
 import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
 import type { BonusRecord } from './bonus';
+import { PERSONA_NAMES } from '../bots/persona';
+import { Rivals, normalizeRivals } from '../bots/rivals';
 
 export const STARTING_BANK = 10_000;
 /** A player whose bank (with nothing at a table) drops below this can refill it. */
@@ -76,6 +78,8 @@ export interface Profile {
   bonus: BonusRecord;
   /** The player's chips over time as [time, chips] points, oldest first. See noteChips. */
   history: ChipPoint[];
+  /** What each bot regular remembers about this player, by regular's name. */
+  rivals: Rivals;
 }
 
 /** When the player's chips (bank plus any cash-game stack) changed, and what they came to. */
@@ -114,6 +118,7 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     title: null,
     bonus: { last: null, streak: 0 },
     history: [[now, STARTING_BANK]],
+    rivals: {},
   };
 }
 
@@ -182,6 +187,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
     title: typeof r.title === 'string' ? r.title : null,
     bonus: { last: typeof r.bonus?.last === 'number' ? r.bonus.last : null, streak: Math.max(0, Math.floor(num(r.bonus?.streak, 0))) },
     history: normalizeHistory(r.history),
+    rivals: normalizeRivals(r.rivals, PERSONA_NAMES),
   };
   // Players saved before the chip graph existed start it from where they are now.
   if (!p.history.length) p.history.push([p.updatedAt, chipsOf(p)]);

@@ -2569,3 +2569,32 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .fr-row .pfp { width: 34px; height: 34px; font-size: 16px; }
   .fr-online-count { display: none; }
 }
+
+/* Rivals: a mark on a regular's avatar when they hold a grudge (or think they own you). */
+.pod .grudge {
+  position: absolute;
+  left: -5px; top: -7px;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  font-size: 13px; line-height: 1;
+  width: 19px; height: 19px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: #0d0a08;
+  border: 1px solid rgba(255, 255, 255, .18);
+  pointer-events: none;
+}
+.pod .grudge.g2 { border-color: rgba(233, 90, 120, .7); }
+.pod .grudge.g3 { border-color: #e95a78; box-shadow: 0 0 10px rgba(233, 90, 120, .6); }
+.pod .grudge.gm { border-color: rgba(127, 211, 155, .6); }
+.log li.k-rival { color: #f0a0b0; }
+.stats-rivals { display: grid; gap: 10px; }
+.stats-rivals .step { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.rival-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.rival { display: flex; gap: 10px; align-items: center; padding: 8px 12px 8px 8px; border-radius: 12px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .08); }
+.rival .avatar { width: 36px; font-size: 20px; }
+.rival .rv-main { display: grid; gap: 1px; min-width: 0; }
+.rival .rv-mood { font-family: var(--label); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.rival.g2 { border-color: rgba(233, 90, 120, .4); }
+.rival.g2 .rv-mood, .rival.g3 .rv-mood { color: #f0a0b0; }
+.rival.g3 { border-color: #e95a78; background: rgba(233, 90, 120, .08); }
+.rival.gm .rv-mood { color: var(--good); }

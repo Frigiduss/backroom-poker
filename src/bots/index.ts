@@ -4,3 +4,4 @@ export * from './equity';
 export * from './draw';
 export * from './strength';
 export * from './persona';
+export * from './rivals';
