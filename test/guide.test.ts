@@ -5,8 +5,8 @@ import { VARIANTS, VariantId, showdownValue } from '../src/engine/variants';
 import { evalHigh, evalLow } from '../src/engine/evaluator';
 import { handTotal } from '../src/engine/blackjack';
 import { payLine } from '../src/engine/videopoker';
-import { GUIDE_GAMES, guideFor } from '../src/ui/guide';
-import { CATEGORIES } from '../src/ui/picker';
+import { GUIDE_GAMES, guideFor } from '../src/ui/guide-data';
+import { CATEGORIES } from '../src/ui/games';
 
 const showdown = (id: VariantId) => {
   const step = guideFor(id).steps.find((s) => s.title === 'Showdown')!;
@@ -73,4 +73,16 @@ test('blackjack and video poker steps add up', () => {
   assert.equal(handTotal(bj[3].rows![0].cards as Card[]).total, 17);
   assert.equal(handTotal(bj[4].rows![1].cards as Card[]).total, 20);
   assert.equal(payLine(guideFor('videopoker').steps[2].rows![0].cards as Card[], 'jacks'), 'trips');
+});
+
+test('the slots walkthrough pays what it says', async () => {
+  const { linePay, paysFor } = await import('../src/engine/slots');
+  const step = guideFor('slots').steps[1];
+  const rows = step.reels!;
+  const pays = rows.map((r) => linePay(r));
+  assert.deepEqual(pays, ['anyBlack', 'anyRed', null]);
+  const diag = (rs: number[]) => linePay(rs.map((row, reel) => rows[row][reel]));
+  assert.equal(diag([0, 1, 2]), null);
+  assert.equal(diag([2, 1, 0]), null);
+  assert.equal(paysFor('anyBlack') + paysFor('anyRed'), 6);
 });

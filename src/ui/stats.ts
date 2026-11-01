@@ -1,6 +1,8 @@
 // The stats page: chips over time, how the player plays, and how each game has gone.
 import { ChipPoint, STYLE_MIN_HANDS, STYLE_NOTES, allCounters, chipsOf, chipsSince, playingStyle } from '../accounts';
 import { VARIANTS, VariantId } from '../engine/variants';
+import { personaFor } from '../bots/persona';
+import { RIVAL_MIN_HANDS, moodOf, rivalrySummary } from '../bots/rivals';
 import { esc, fmt } from './dom';
 import { isOnline, player, serverAwards } from './profiles';
 
@@ -149,6 +151,23 @@ function gamesHtml(c: ReturnType<typeof allCounters>): string {
   </section>`;
 }
 
+/** The regulars who have an opinion of the player: grudges first, then the ones who own them. */
+function rivalsHtml(): string {
+  const rows = Object.entries(player().rivals ?? {})
+    .map(([name, r]) => ({ name, r, m: moodOf(r), who: personaFor(name) }))
+    .filter((x) => x.who && x.r.hands >= RIVAL_MIN_HANDS)
+    .sort((a, b) => (b.m.level - a.m.level) || (b.r.net - a.r.net));
+  if (!rows.length) return '';
+  return `<section class="panel stats-rivals">
+    <h2 class="step">Rivals<span class="ach-count">${rows.filter((x) => x.m.level >= 2).length} grudge${rows.filter((x) => x.m.level >= 2).length === 1 ? '' : 's'}</span></h2>
+    <ul class="rival-list">${rows.map(({ name, r, m, who }) => `<li class="rival g${m.level < 0 ? 'm' : m.level}">
+      <span class="avatar face" aria-hidden="true">${who!.face}</span>
+      <span class="rv-main"><b>${esc(name)}</b><span class="rv-mood">${esc(m.label ?? 'No hard feelings')}</span><span class="ss">${esc(rivalrySummary(r))}</span></span>
+    </li>`).join('')}</ul>
+    <p class="fine">The regulars remember you. Take their chips or knock them out and they hold a grudge: they play back at you harder, and the sharpest of them use what they've seen of your habits. Win some back off them and they cool down.</p>
+  </section>`;
+}
+
 /** The full stats page, opened from the profile. */
 export function renderStats(app: HTMLElement, onBack: () => void) {
   const p = player();
@@ -180,6 +199,7 @@ export function renderStats(app: HTMLElement, onBack: () => void) {
     </section>
     ${styleHtml(c)}
     ${gamesHtml(c)}
+    ${rivalsHtml()}
   </main>`;
 
   document.getElementById('back')!.onclick = () => {

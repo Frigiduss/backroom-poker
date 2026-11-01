@@ -1,8 +1,10 @@
 import {
   ACHIEVEMENTS, Achievement, AccountStore, Counters, Factor, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PASSWORD_MIN, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
   BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
-  takeUnlocks, titleFor,
+  takeUnlocks, titleFor, FACES, OnlineError, avatarLook, clearOldPictures, deletePicture, pictureKey, uploadPicture,
 } from '../accounts';
+import { faceHtml, installFaceFallback } from './faces';
+import { shrinkPicture } from './picture';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { makeCard } from '../engine/cards';
 import { cardHtml, esc, fmt, titleHtml } from './dom';
@@ -27,6 +29,7 @@ let notice = '';
 export function initAccounts(localStore: LocalAccountStore, onlineAuth: OnlineAuth | null, kv: KeyValueStorage | null) {
   local = localStore;
   auth = onlineAuth;
+  installFaceFallback();
   storage = kv;
   store = local;
 }
@@ -190,8 +193,7 @@ export function savePlayer(): Promise<void> {
 
 // ---------- shared bits ----------
 
-export const avatarHtml = (p: Profile, cls = '') =>
-  `<span class="pfp ${cls}" style="--pfp:${esc(p.color)}" aria-hidden="true">${esc(p.name.slice(0, 1).toUpperCase())}</span>`;
+export const avatarHtml = (p: Profile, cls = '') => faceHtml(p, cls);
 
 /** The lobby's player badge: who is playing and what is in their bank. */
 export function playerBadgeHtml(): string {
@@ -279,7 +281,7 @@ export function renderAuth(app: HTMLElement, onReady: () => void, mode: 'signin'
     <p class="form-error" id="auth-error" role="alert"></p>
     <div class="auth-alt"><span>or</span></div>
     <button type="button" class="btn auth-offline" id="play-offline">Play offline on this device</button>
-  `, 'Pull up a chair. Eight games, five kinds of bots, and a chip bank that follows you from table to table.');
+  `, 'Pull up a chair. Eight games, six levels of bots, and a chip bank that follows you from table to table.');
 
   const email = document.getElementById('auth-email') as HTMLInputElement;
   const pass = document.getElementById('auth-pass') as HTMLInputElement;
@@ -510,6 +512,7 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
       <div class="colors" role="group" aria-label="Badge colour">
         ${PROFILE_COLORS.map((c) => `<button type="button" class="swatch" data-color="${c}" style="--pfp:${c}" aria-pressed="${c === p.color}" aria-label="Colour ${c}"></button>`).join('')}
       </div>
+      ${facePickerHtml(p)}
       ${statsHtml(p)}
       ${onStats ? statsStripHtml(p) : ''}
       ${onHistory ? historyStripHtml(p) : ''}
@@ -551,7 +554,78 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
     rerender();
   }));
 
+  bindFacePicker(app, p, rerender);
   bindAccountPanel(app, onBack);
+}
+
+// ---------- faces (profile page) ----------
+
+/** Keeps the face picker open across the redraw after a pick. */
+let faceOpen = false;
+
+function facePickerHtml(p: Profile): string {
+  const look = avatarLook(p.avatar);
+  const canUpload = !!auth && isOnline();
+  const letter = esc((p.name || '?').slice(0, 1).toUpperCase());
+  return `<details class="face-pick" id="face-pick"${faceOpen ? ' open' : ''}>
+    <summary>Change your face</summary>
+    <div class="face-grid" role="group" aria-label="Face">
+      <button type="button" class="face-opt letter" data-face="" style="--pfp:${esc(p.color)}" aria-pressed="${look.kind === 'letter'}" aria-label="Your first letter" title="Your first letter">${letter}</button>
+      ${FACES.map((f) => `<button type="button" class="face-opt" data-face="f:${f.id}" aria-pressed="${look.kind === 'face' && look.face.id === f.id}" aria-label="${f.name}" title="${f.name}">${f.emoji}</button>`).join('')}
+    </div>
+    <div class="face-upload">
+      ${canUpload ? `<label class="btn btn-sm${look.kind === 'picture' ? '' : ' btn-primary'}" id="face-upload-btn">${look.kind === 'picture' ? 'Upload a different picture' : 'Upload a picture'}<input type="file" id="face-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>
+        ${look.kind === 'picture' ? '<button type="button" class="btn btn-sm" id="face-remove">Remove picture</button>' : ''}
+        <p class="fine">Cropped to a square and shrunk. Everyone at your online tables, on the leaderboard and in your friends list can see it, so keep it friendly.</p>`
+        : `<p class="fine">${auth ? 'Sign in to an online account to upload your own picture.' : 'Pick a face for your badge.'}</p>`}
+      <p class="form-error" id="face-error" role="alert"></p>
+    </div>
+  </details>`;
+}
+
+function bindFacePicker(app: HTMLElement, p: Profile, rerender: () => void) {
+  const box = document.getElementById('face-pick') as HTMLDetailsElement | null;
+  if (!box) return;
+  box.ontoggle = () => (faceOpen = box.open);
+  const err = (msg: string) => {
+    const el = document.getElementById('face-error');
+    if (el) el.textContent = msg;
+  };
+  /** Sets the face, saves, and then deletes the picture it replaced. */
+  const setFace = async (value: string | null) => {
+    const old = pictureKey(p.avatar);
+    p.avatar = value;
+    p.updatedAt = Date.now();
+    await savePlayer();
+    if (old && old !== pictureKey(value) && auth) void deletePicture(auth, old);
+    rerender();
+  };
+  app.querySelectorAll<HTMLButtonElement>('[data-face]').forEach((b) => (b.onclick = () => void setFace(b.dataset.face || null)));
+  document.getElementById('face-remove')?.addEventListener('click', () => void setFace(null));
+  const file = document.getElementById('face-file') as HTMLInputElement | null;
+  if (file && auth) file.onchange = async () => {
+    const f = file.files?.[0];
+    file.value = '';
+    if (!f || !auth) return;
+    const btn = document.getElementById('face-upload-btn');
+    btn?.classList.add('busy');
+    err('');
+    try {
+      const jpeg = await shrinkPicture(f);
+      let value: string;
+      try {
+        value = await uploadPicture(auth, jpeg);
+      } catch (e) {
+        // Too many old pictures left behind (a save that never landed, another device): clear them and try once more.
+        if (!(e instanceof OnlineError && e.status === 403) || !(await clearOldPictures(auth, pictureKey(p.avatar)))) throw e;
+        value = await uploadPicture(auth, jpeg);
+      }
+      await setFace(value);
+    } catch (e) {
+      btn?.classList.remove('busy');
+      err((e as Error).message);
+    }
+  };
 }
 
 // ---------- online account (profile page) ----------

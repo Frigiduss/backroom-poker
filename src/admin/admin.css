@@ -100,3 +100,17 @@
 .adm-chat { margin: 10px 0 0; font-size: 13px; }
 .adm-chat h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .1em; opacity: .7; }
 .adm-chat ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+
+/* crash reports */
+.adm-bar select { background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; color: var(--text); }
+.adm-crashes { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.adm-crash { padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); display: grid; gap: 8px; min-width: 0; }
+.adm-crash-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.adm-crash-msg { font-family: var(--mono); font-size: 14px; word-break: break-word; min-width: 0; }
+.adm-crash-count { color: var(--gold-hi); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.adm-crash-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 13px; }
+.adm-crash-meta dt { color: var(--muted); }
+.adm-crash-meta dd { margin: 0; word-break: break-word; }
+.adm-crash summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.adm-stack { font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; padding: 8px 10px; background: rgba(0, 0, 0, .35); border-radius: 8px; max-height: 260px; overflow: auto; }
+.adm-crash .adm-row-actions { justify-content: flex-start; }

@@ -1,8 +1,9 @@
 import { Rng, cardLabel, createRng } from '../engine/cards';
 import { Action } from '../engine/hand';
-import { BotStyle, Difficulty } from '../engine/table';
+import { BotStyle, Difficulty, hasMaster } from '../engine/table';
 import { chooseDiscards } from './draw';
 import { simulateEquity, specFromView } from './equity';
+import { netOverride } from './neural';
 import { startingPercentile } from './strength';
 import { PlayerView } from './view';
 
@@ -38,6 +39,8 @@ export const PROFILES: Record<Difficulty, Profile> = {
   medium: { sims: 400, noise: 0.045, callBias: 0.03, aggression: 0.5, bluff: 0.07, ranges: false, adapt: false, raiseRespect: 0.9, pushFold: true, slowplay: 0.05, sizing: true, timeBudgetMs: 80 },
   hard: { sims: 800, noise: 0.02, callBias: 0.01, aggression: 0.6, bluff: 0.1, ranges: true, adapt: false, raiseRespect: 0.95, pushFold: true, slowplay: 0.12, sizing: true, timeBudgetMs: 140 },
   expert: { sims: 1400, noise: 0.008, callBias: 0, aggression: 0.65, bluff: 0.12, ranges: true, adapt: true, raiseRespect: 0.96, pushFold: true, slowplay: 0.2, sizing: true, timeBudgetMs: 220 },
+  // Master thinks like Expert, then lets its neural net overrule the move (No-Limit Hold'em only).
+  master: { sims: 1400, noise: 0.008, callBias: 0, aggression: 0.65, bluff: 0.12, ranges: true, adapt: true, raiseRespect: 0.96, pushFold: true, slowplay: 0.2, sizing: true, timeBudgetMs: 220 },
 };
 
 const STYLE_MODS: Record<BotStyle, { callBias: number; aggression: number; bluff: number; tight: number }> = {
@@ -76,6 +79,10 @@ export class Bot {
   private rng: Rng;
   private p: Profile;
   private mods: (typeof STYLE_MODS)[BotStyle];
+  /** Skill for the parts the net doesn't cover (drawing cards): Master plays those as Expert. */
+  private skill: Difficulty;
+  /** The last equity read before noise, for the neural net. */
+  private rawEquity = 0;
 
   constructor(difficulty: Difficulty, style: BotStyle = 'balanced', seed?: number) {
     this.difficulty = difficulty;
@@ -83,6 +90,7 @@ export class Bot {
     this.rng = createRng(seed);
     this.p = PROFILES[difficulty];
     this.mods = STYLE_MODS[style];
+    this.skill = difficulty === 'master' ? 'expert' : difficulty;
   }
 
   decide(view: PlayerView): Action {
@@ -90,9 +98,16 @@ export class Bot {
   }
 
   think(view: PlayerView): Decision {
+    const d = this.thinkClassic(view);
+    if (this.difficulty !== 'master' || !hasMaster(view.variant.id, view.structure) || d.equity === undefined) return d;
+    const pick = netOverride(view, d.action, this.rawEquity);
+    return pick ? { ...d, action: pick.action, reason: pick.reason } : d;
+  }
+
+  private thinkClassic(view: PlayerView): Decision {
     const L = view.legal;
     if (L.kind === 'draw') {
-      const discard = chooseDiscards(view.myCards, this.difficulty, this.rng);
+      const discard = chooseDiscards(view.myCards, this.skill, this.rng);
       const keep = view.myCards.filter((_, i) => !discard.includes(i));
       const reason = discard.length === 0
         ? 'The hand is already made, so it stands pat.'
@@ -219,7 +234,7 @@ export class Bot {
     const v = view.variant;
     const opts: { keep?: number[]; ranges?: (number | undefined)[] } = {};
     if (v.family === 'draw' && view.phase === 'betting' && view.players[view.me].drew === null) {
-      const discard = chooseDiscards(view.myCards, this.difficulty, this.rng);
+      const discard = chooseDiscards(view.myCards, this.skill, this.rng);
       opts.keep = view.myCards.filter((_, i) => !discard.includes(i));
     }
     if (this.p.ranges && v.family === 'flop') opts.ranges = this.estimateRanges(view);
@@ -231,7 +246,8 @@ export class Bot {
     if (this.difficulty === 'beginner' && v.family === 'flop' && view.street === 0) {
       eq = 0.5 * eq + 0.5 * startingPercentile(v, view.myCards) / (spec.opponents.length * 0.5 + 0.5);
     }
-    return clamp(eq, 0, 1);
+    this.rawEquity = clamp(eq, 0, 1);
+    return this.rawEquity;
   }
 
   /** Each opponent's likely range (fraction of starting hands) from their actions before the flop. */
