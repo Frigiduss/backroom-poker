@@ -4,7 +4,7 @@ import { PERSONAS, Persona, TalkEvent, lineFor, personaFor, remarkAfter } from '
 import { buildView } from '../bots/view';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
-import { DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, Seat, SeatConfig, Table } from '../engine/table';
+import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, difficultiesFor, hasMaster, Format, Seat, SeatConfig, Table } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
@@ -105,7 +105,7 @@ const BIG_BLIND = 20;
 const HANDS_PER_LEVEL: Record<BlindSpeed, number> = { slow: 15, normal: 10, turbo: 6 };
 const BOT_DELAY: Record<Speed, number> = { relaxed: 1900, normal: 1150, fast: 300 };
 const AVATAR: Record<Difficulty | 'human', string> = {
-  human: '#d9a94e', beginner: '#9fd3a8', easy: '#8fc1e8', medium: '#e8d48f', hard: '#e8a36f', expert: '#e07a8a',
+  human: '#d9a94e', beginner: '#9fd3a8', easy: '#8fc1e8', medium: '#e8d48f', hard: '#e8a36f', expert: '#e07a8a', master: '#b48cf2',
 };
 
 const structureFor = (v: VariantId): Structure => {
@@ -136,6 +136,8 @@ function renderSetup() {
   if (setup.format === 'headsup') setup.opponents = 1;
   setup.opponents = Math.max(1, Math.min(maxOpp, setup.opponents));
   const struct = structureFor(setup.variant);
+  // Master only plays No-Limit Hold'em; other games fall back to Expert.
+  if (setup.difficulty === 'master' && !hasMaster(setup.variant, struct)) setup.difficulty = 'expert';
   const seg = <T extends string>(name: string, items: [T, string][], current: T, disabled: (t: T) => boolean = () => false) =>
     `<div class="seg" role="group">${items
       .map(([val, label]) => `<button type="button" data-${name}="${val}" aria-pressed="${val === current}" ${disabled(val) ? 'disabled' : ''}>${label}</button>`)
@@ -192,7 +194,7 @@ function renderSetup() {
           </div>
           <div class="field">
             <span class="flabel">Bot difficulty</span>
-            ${seg('difficulty', [...DIFFICULTIES.map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty).replace('class="seg"', 'class="seg seg-3"')}
+            ${seg('difficulty', [...difficultiesFor(setup.variant, struct).map((d) => [d, DIFFICULTY_NAMES[d]] as [DifficultyChoice, string]), ['mixed', 'Mixed']], setup.difficulty).replace('class="seg"', 'class="seg seg-3"')}
             <span class="hint">${difficultyHint(setup.difficulty)}</span>
           </div>
           <div class="field">
@@ -327,6 +329,7 @@ function difficultyHint(d: DifficultyChoice): string {
     case 'medium': return 'Plays solid starting hands and respects pot odds.';
     case 'hard': return 'Reads your likely range from your betting and bluffs at the right times.';
     case 'expert': return 'Tracks how each player bets over time and adjusts to it.';
+    case 'master': return 'Expert thinking with a trained neural net on top. Bets hard when it smells weakness.';
     default: return 'Every bot gets a random skill level and style.';
   }
 }
@@ -393,7 +396,7 @@ class Game implements DevGame {
     for (let i = 0; i < opponents; i++) {
       // Skill comes from the setup; each regular plays their own style.
       const who = regulars[i];
-      seats.push({ name: who.name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: who.style });
+      seats.push({ name: who.name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(CLASSIC_DIFFICULTIES) : s.difficulty, style: who.style });
     }
     this.table = new Table({
       variant: s.variant,

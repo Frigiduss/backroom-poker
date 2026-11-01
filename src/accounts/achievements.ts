@@ -217,9 +217,10 @@ const BOT_STEPS: [Difficulty, string, Tier, string | undefined][] = [
   ['medium', 'Middleweight', 2, undefined],
   ['hard', 'Giant Slayer', 3, 'Giant Slayer'],
   ['expert', 'Shark Hunter', 3, 'Shark Hunter'],
+  ['master', 'Ghost in the Machine', 4, 'Machine Breaker'],
 ];
 for (const [d, name, tier, title] of BOT_STEPS) {
-  ladder('bots', `beat.${d}`, [{ id: `beat-${d}`, name, desc: `Win a tournament against ${d === 'expert' ? 'Expert' : d[0].toUpperCase() + d.slice(1)} bots.`, tier, goal: 1, title }]);
+  ladder('bots', `beat.${d}`, [{ id: `beat-${d}`, name, desc: `Win a tournament against ${d[0].toUpperCase() + d.slice(1)} bots${d === 'master' ? ' (No-Limit Hold\'em)' : ''}.`, tier, goal: 1, title }]);
 }
 ladder('bots', 'beat.expert', [
   { id: 'beat-expert-10', name: 'Apex Predator', desc: 'Win 10 tournaments against Expert bots.', tier: 4, goal: 10, title: 'Apex Predator' },

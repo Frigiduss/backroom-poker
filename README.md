@@ -24,7 +24,8 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
 - **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
   heads-up duel.
 - **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
-  Mixed) and five styles (balanced, tight, loose, aggressive, passive). 24 named bot
+  Mixed), plus **Master** in No-Limit Hold'em: Expert's thinking with a trained neural net
+  that overrules it when it's sure. Five styles (balanced, tight, loose, aggressive, passive). 24 named bot
   characters have their own faces and table talk; turn the talk off in Settings, or switch
   on Fast bots if you'd rather not wait.
 - **Practice mode:** a switch on the table setup card adds advice, your equity and pot odds
@@ -103,6 +104,7 @@ npm start          # install, build and open the game in your browser
 npm run build      # writes dist/ and supabase/functions/poker-table/index.ts
 npm test           # rules tests, online/server tests and thousands of bot-vs-bot hands (~3 min)
 npm run typecheck
+npm run train-bots # retrain the Master bot's net (about 30 min on all cores), then test it
 ```
 
 `npm run build` (`scripts/build.mjs`, esbuild) produces:
@@ -124,7 +126,10 @@ conflict over it. The deploy workflows build everything from source.
   `roulette.ts` (wheels, layout bets, payouts) and `baccarat.ts` (drawing rules, payouts).
 - `src/bots/`: bot opponents. Bots only see a `PlayerView` (what that seat may know).
   Decisions use Monte Carlo equity, pot odds, position, starting-hand charts and, at
-  Hard/Expert, opponent ranges; Expert also adapts to each player's tendencies. `persona.ts`
+  Hard/Expert, opponent ranges; Expert also adapts to each player's tendencies. `neural.ts`
+  is Master's net (weights in `neural-weights.ts`, made by `scripts/neural/`: self-play where
+  every candidate move is played out, a small network trained on the results, and a
+  duplicate match against Expert). `persona.ts`
   holds the named characters, `dealers.ts` the blackjack dealers and roulette croupiers, and `worker.ts`/`brain.ts` run bot thinking in a web worker.
 - `src/accounts/`: player profiles behind the `AccountStore` interface (`LocalAccountStore`
   in browser storage, `OnlineAccountStore` in Supabase), plus chip bank rules, stats,

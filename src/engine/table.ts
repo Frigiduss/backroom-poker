@@ -4,12 +4,21 @@ import { ActionRecord, Hand, Rig, Stakes } from './hand';
 import { Structure, VARIANTS, VariantDef, VariantId } from './variants';
 
 export type Format = 'cash' | 'sng' | 'headsup';
-export type Difficulty = 'beginner' | 'easy' | 'medium' | 'hard' | 'expert';
+export type Difficulty = 'beginner' | 'easy' | 'medium' | 'hard' | 'expert' | 'master';
 export type BotStyle = 'balanced' | 'tight' | 'loose' | 'aggressive' | 'passive';
 
 export const FORMAT_NAMES: Record<Format, string> = { cash: 'Cash game', sng: 'Sit & Go tournament', headsup: 'Heads-up duel' };
-export const DIFFICULTIES: Difficulty[] = ['beginner', 'easy', 'medium', 'hard', 'expert'];
-export const DIFFICULTY_NAMES: Record<Difficulty, string> = { beginner: 'Beginner', easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert' };
+export const DIFFICULTIES: Difficulty[] = ['beginner', 'easy', 'medium', 'hard', 'expert', 'master'];
+export const DIFFICULTY_NAMES: Record<Difficulty, string> = { beginner: 'Beginner', easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert', master: 'Master' };
+/** The levels every game has. Master (the neural net) only plays No-Limit Hold'em. */
+export const CLASSIC_DIFFICULTIES: Difficulty[] = ['beginner', 'easy', 'medium', 'hard', 'expert'];
+
+/** True when the Master bot has a trained net for this game; elsewhere it would just play as Expert. */
+export const hasMaster = (variant: VariantId, structure: Structure): boolean => variant === 'holdem' && structure === 'NL';
+
+/** The bot levels offered for a game. */
+export const difficultiesFor = (variant: VariantId, structure: Structure): Difficulty[] =>
+  hasMaster(variant, structure) ? DIFFICULTIES : CLASSIC_DIFFICULTIES;
 
 export interface SeatConfig {
   name: string;

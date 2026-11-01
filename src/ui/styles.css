@@ -50,6 +50,7 @@
   --lv-medium: #d9c46a;
   --lv-hard: #ef8f52;
   --lv-expert: #e95a78;
+  --lv-master: #b48cf2;
 
   --display: 'Bodoni Moda', 'Didot', 'Bodoni 72', Georgia, serif;
   --body: 'Barlow', 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -949,6 +950,7 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 .lv-medium { --av: var(--lv-medium); }
 .lv-hard { --av: var(--lv-hard); }
 .lv-expert { --av: var(--lv-expert); }
+.lv-master { --av: var(--lv-master); }
 .plate { display: grid; line-height: 1.15; min-width: 0; }
 .plate .nm { font-weight: 600; font-size: clamp(12px, 1.25cqw, 14.5px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
 .plate .stk { font-variant-numeric: tabular-nums; color: var(--gold-hi); font-weight: 700; font-size: clamp(12px, 1.25cqw, 14.5px); }
