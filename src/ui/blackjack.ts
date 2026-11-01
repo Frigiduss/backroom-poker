@@ -119,6 +119,8 @@ interface Spot {
   stack: number;
   /** Avatar colour class. */
   level: string;
+  /** A person's face (accounts/avatars.ts), or null. */
+  avatar?: string | null;
 }
 
 const BOT_LEVELS = ['beginner', 'easy', 'medium', 'hard', 'expert'];
@@ -138,6 +140,8 @@ export interface FeltSpot {
   stack: number;
   /** Avatar colour class. */
   level: string;
+  /** A person's face (accounts/avatars.ts), or null. */
+  avatar?: string | null;
   /** Shown under the name: a title, "Bot", "Away"… */
   label: string | null;
   /** Index into the round's seats, or -1 when the spot sits this round out. */
@@ -210,7 +214,7 @@ export class BjFelt {
         <div class="bj-hands">${hands}</div>
         ${circle}
         <div class="pod" title="${esc(spot.name)}">
-          ${avatarHtml(spot.name, spot.level, spot.level !== 'human')}
+          ${avatarHtml(spot.name, spot.level, spot.level !== 'human', spot.avatar ?? null)}
           <span class="plate"><span class="nm">${esc(spot.name)}</span><span class="stk">${fmt(spot.stack)}</span></span>
           ${label}
         </div>
@@ -638,7 +642,7 @@ export class BlackjackTable {
 
   private feltHtml(r: Round | null): string {
     const spots: FeltSpot[] = this.spots.map((s, i) => ({
-      id: s.id, name: s.name, me: s.isHuman, stack: s.isHuman ? this.bank : s.stack, level: s.level,
+      id: s.id, name: s.name, me: s.isHuman, stack: s.isHuman ? this.bank : s.stack, level: s.level, avatar: s.isHuman ? this.profile.avatar : null,
       label: s.isHuman ? currentTitle() : 'Bot', seat: r ? i : -1,
       // Between rounds the circle holds the next bet.
       bet: s.isHuman && (!r || r.isComplete) ? this.bet : 0,

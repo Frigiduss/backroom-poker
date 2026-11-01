@@ -3,6 +3,7 @@
 // browser storage today and an online backend later.
 import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
 import type { BonusRecord } from './bonus';
+import { cleanAvatar } from './avatars';
 import { PERSONA_NAMES } from '../bots/persona';
 import { Rivals, normalizeRivals } from '../bots/rivals';
 
@@ -64,6 +65,8 @@ export interface Profile {
   id: string;
   name: string;
   color: string;
+  /** The face on the badge: null for the first letter of the name, or see avatars.ts. */
+  avatar: string | null;
   createdAt: number;
   updatedAt: number;
   bank: number;
@@ -108,6 +111,7 @@ export function createProfile(name: string, opts: { color?: string; settings?: R
     id: newId(),
     name: cleanName(name) || 'Player',
     color: opts.color ?? PROFILE_COLORS[Math.floor(Math.random() * PROFILE_COLORS.length)],
+    avatar: null,
     createdAt: now,
     updatedAt: now,
     bank: STARTING_BANK,
@@ -177,6 +181,7 @@ export function normalizeProfile(raw: unknown): Profile | null {
     id: r.id,
     name: cleanName(r.name) || 'Player',
     color: safeColor(r.color),
+    avatar: cleanAvatar(r.avatar),
     createdAt: num(r.createdAt, Date.now()),
     updatedAt: num(r.updatedAt, Date.now()),
     bank: Math.max(0, Math.floor(num(r.bank, STARTING_BANK))),

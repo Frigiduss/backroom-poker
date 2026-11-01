@@ -1,6 +1,6 @@
 -- Back Room Poker: the daily chip bonus and the leaderboard.
 -- Run this once, after setup.sql and admin.sql (or security.sql on an older project), in the SQL Editor (New query → paste → Run).
--- Running it again is safe.
+-- Running it again is safe, and needed after an update that changes it (faces on the leaderboard: 2026-11).
 --
 --   * daily_bonus          when each online player last collected the daily bonus. Browsers can
 --                          read their own rows but never write them.
@@ -95,13 +95,14 @@ create policy "Leaderboard hidden: admin can add" on public.leaderboard_hidden
 create policy "Leaderboard hidden: admin can delete" on public.leaderboard_hidden
   for delete to authenticated using ((select public.is_admin()));
 
--- p_board is 'bank', 'pot' or 'achievements'. Returns the top p_limit players (at most 100),
+-- p_board is 'bank', 'pot' or 'achievements'. Each row's avatar is the player's face (see
+-- src/accounts/avatars.ts), only if it's in the right shape. Returns the top p_limit players (at most 100),
 -- plus the signed-in account's own players wherever they rank. Players show once they've
 -- played 10 hands, unless they turned the leaderboard off (settings.leaderboard = false) or an
 -- admin hid them.
 drop function if exists public.leaderboard(text, integer);
 create or replace function public.leaderboard(p_board text, p_limit integer default 25)
-returns table (rank bigint, name text, color text, title text, value numeric, mine boolean)
+returns table (rank bigint, name text, color text, title text, value numeric, mine boolean, avatar text)
 language sql
 stable
 security definer
@@ -129,7 +130,8 @@ as $$
   select r.rnk, left(coalesce(r.data ->> 'name', 'Player'), 14), r.data ->> 'color',
     case when jsonb_typeof(r.data #> '{achievements,unlocked}') = 'object' and (r.data #> '{achievements,unlocked}') ? (r.data ->> 'title')
       then r.data ->> 'title' end,
-    r.value, coalesce(r.owner = auth.uid(), false)
+    r.value, coalesce(r.owner = auth.uid(), false),
+    case when r.data ->> 'avatar' ~ '^(f:[a-z]{2,12}|u:[0-9a-f]{32})$' then r.data ->> 'avatar' end
   from ranked r
   where r.rn <= least(greatest(coalesce(p_limit, 25), 1), 100) or r.owner = auth.uid()
   order by r.rn;

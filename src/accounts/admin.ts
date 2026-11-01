@@ -3,6 +3,7 @@
 // whatever the browser sends. The console only shows itself to accounts that pass is_admin().
 import { Profile, normalizeProfile } from './profile';
 import { OnlineAuth, OnlineError, RestInit, restRequest } from './online';
+import { deletePicture } from './pictures';
 
 type Fetch = typeof fetch;
 
@@ -92,6 +93,19 @@ export class AdminApi {
     } else {
       await this.call(`leaderboard_hidden?player_id=eq.${encodeURIComponent(playerId)}`, { method: 'DELETE', prefer: 'return=minimal' });
     }
+  }
+
+  /**
+   * Stops an account uploading profile pictures (or lets it again), and deletes the picture
+   * given. Faces from the game's own set still work.
+   */
+  async setPictureBlocked(owner: string, blocked: boolean, pictureKey: string | null = null): Promise<boolean> {
+    if (blocked) {
+      await this.call('avatar_blocked?on_conflict=owner', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { owner } });
+    } else {
+      await this.call(`avatar_blocked?owner=eq.${encodeURIComponent(owner)}`, { method: 'DELETE', prefer: 'return=minimal' });
+    }
+    return pictureKey ? deletePicture(this.auth, pictureKey, this.fetchFn) : false;
   }
 
   /** The lobby announcement everyone sees. Readable without signing in. */

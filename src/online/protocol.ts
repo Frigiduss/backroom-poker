@@ -35,6 +35,8 @@ export interface PlayerTag {
   playerId?: string;
   /** Id of the achievement whose title to show. The server checks it was earned. */
   title?: string | null;
+  /** Their face (see accounts/avatars.ts). The server keeps it only if it's well formed. */
+  avatar?: string | null;
 }
 
 export type Request =
@@ -176,6 +178,8 @@ export interface MemberView {
   name: string;
   /** Title earned through achievements, or null. */
   title: string | null;
+  /** Their face, or null for their first letter. */
+  avatar: string | null;
   host: boolean;
   you: boolean;
   /** Seat id once the game has started (or once a late joiner is dealt in). */
@@ -190,6 +194,8 @@ export interface SeatView {
   name: string;
   /** People only: their title, or null. */
   title: string | null;
+  /** People only: their face, or null. */
+  avatar: string | null;
   isHuman: boolean;
   difficulty?: Difficulty;
   style?: BotStyle;
@@ -310,6 +316,7 @@ export interface BjSpotView {
   id: string;
   name: string;
   title: string | null;
+  avatar: string | null;
   isHuman: boolean;
   stack: number;
   rebuys: number;

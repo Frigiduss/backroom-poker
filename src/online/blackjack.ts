@@ -7,6 +7,7 @@
 // replayed, because a shoe lasts many rounds.
 import { PERSONA_NAMES } from '../bots/persona';
 import { Tally, blackjackTally } from '../accounts/achievements';
+import { cleanAvatar } from '../accounts/avatars';
 import { BJ_DECKS, BJ_LIMITS, BjAction, BjLimits, Round, RoundData, RoundRig, Shoe, ShoeData, bookPlay } from '../engine/blackjack';
 import { Card, Seed, createRng, shuffle, subSeed } from '../engine/cards';
 import type { AdminCommand, BjAdminInfo, BjMove, BjSpotView, BjTableView, TableSettings } from './protocol';
@@ -358,6 +359,7 @@ export function bjView(state: TableState, userId: string): BjTableView | null {
   const shown = bj.round ? new Set(bj.inRound) : new Set<string>();
   const spots: BjSpotView[] = bj.spots.map((x) => ({
     id: x.id, name: x.name, title: x.isHuman ? state.members.find((m) => m.seat === x.id)?.title ?? null : null,
+    avatar: x.isHuman ? cleanAvatar(state.members.find((m) => m.seat === x.id)?.avatar) : null,
     isHuman: x.isHuman, stack: x.stack, rebuys: x.rebuys, away: !!state.away[x.id], you: x.id === mySeat,
     bet: bj.phase === 'betting' ? bj.bets[x.id] ?? null : null,
     sittingOut: bj.phase === 'betting' && bj.sitOut.includes(x.id),
