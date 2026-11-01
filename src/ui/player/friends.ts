@@ -11,6 +11,7 @@ import { esc, fmt, titleHtml } from '../dom';
 import { faceHtml } from './faces';
 import { isOnline, player, savePlayer } from './profiles';
 import { play } from '../sound';
+import { TableClient } from '../../online/client';
 
 interface Hooks {
   app: HTMLElement;
@@ -332,6 +333,8 @@ export function bindTableInvites(table: string) {
     if (err) err.textContent = '';
     try {
       await inviteFriend(hooks.auth, b.dataset.invite!, table);
+      // Buzzes their phone too, if they turned notifications on (supabase/push.sql).
+      void new TableClient(hooks.auth).pushInvite(b.dataset.invite!);
       const set = invited.get(table) ?? new Set<string>();
       set.add(b.dataset.invite!);
       invited.set(table, set);

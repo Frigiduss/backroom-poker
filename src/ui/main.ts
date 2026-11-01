@@ -23,6 +23,7 @@ import { decodeSharedHand, sharedCodeIn } from '../engine/share';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online/online';
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
+import { initNotify } from './player/notify';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './player/leaderboard';
 import { bindChallengesButton, challengesButtonHtml } from './player/challenges';
@@ -1470,6 +1471,10 @@ async function boot() {
     },
   });
   initFriends({ app, auth, lobby: renderSetup, busy: () => !!(game || blackjack || house), join: joinTable });
+  // A tapped "your turn" notification; a game against bots or the house on screen is left alone.
+  initNotify({ auth, openTable: (code) => {
+    if (activeTable()?.code !== code && !(game || blackjack || house)) joinTable(code, false);
+  } });
   await migrateLegacySettings(local);
 
   // A hand a friend shared (#hand=…) opens straight away, signed in or not.

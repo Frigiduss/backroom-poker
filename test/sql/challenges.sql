@@ -5,11 +5,11 @@ create or replace function pg_temp.as_user(u text, aal text default 'aal1') retu
 create or replace function pg_temp.ck(ok boolean, what text) returns void language plpgsql as $$ begin if not ok then raise exception 'FAIL: %', what; end if; raise notice 'ok: %', what; end $$;
 grant execute on all functions in schema pg_temp to authenticated;
 -- J plays; K is someone else.
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000d1', 'j@x'), ('00000000-0000-0000-0000-0000000000d2', 'k@x');
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e1', 'j@x'), ('00000000-0000-0000-0000-0000000000e2', 'k@x');
 set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d2');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e2');
 insert into public.players (id, data) values ('pk', '{"name":"Kit","bank":10000}');
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d1');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
 insert into public.players (id, data) values ('pj', '{"name":"Jo","bank":10000}');
 select pg_temp.ck(public.challenge_week() = floor((floor(extract(epoch from now()) / 86400) + 3) / 7), 'week number from the server clock');
 -- the week starts on Monday: Sunday 1 Nov 2026 and Monday 2 Nov 2026 fall in different weeks
@@ -21,9 +21,9 @@ do $$ begin perform public.claim_challenge('pj', public.challenge_week() - 1, 0)
 do $$ begin perform public.claim_challenge('pj', public.challenge_week() + 1, 0); raise exception 'FAIL'; exception when raise_exception then raise notice 'ok: next week refused'; end $$;
 -- a real claim makes room in the bank limits
 reset role;
-update public.bank_guard set allowance = 0, at = now() where owner = '00000000-0000-0000-0000-0000000000d1';
+update public.bank_guard set allowance = 0, at = now() where owner = '00000000-0000-0000-0000-0000000000e1';
 set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d1');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
 select pg_temp.ck((public.claim_challenge('pj', public.challenge_week(), 2)->>'amount')::int = 10000, 'hard goal pays 10,000');
 select pg_temp.ck((public.claim_challenge('pj', public.challenge_week(), 2)->>'amount')::int = 0, 'paid only once');
 select pg_temp.ck((public.claim_challenge('pj', public.challenge_week(), 0)->>'amount')::int = 2500, 'easy goal pays 2,500');
@@ -32,18 +32,18 @@ select pg_temp.ck((select (data->>'bank')::int from public.players where id = 'p
 select pg_temp.ck((select count(*) from public.weekly_challenges) = 2, 'reads only its own paid goals');
 -- a second player in the same account can't be paid again
 reset role;
-insert into public.players (id, owner, data) values ('pj2', '00000000-0000-0000-0000-0000000000d1', '{"name":"Jo2","bank":10000}');
+insert into public.players (id, owner, data) values ('pj2', '00000000-0000-0000-0000-0000000000e1', '{"name":"Jo2","bank":10000}');
 set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d1');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e1');
 select pg_temp.ck((public.claim_challenge('pj2', public.challenge_week(), 2)->>'amount')::int = 0, 'one payment per account, not per player');
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d2');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e2');
 select pg_temp.ck((select count(*) from public.weekly_challenges) = 0, 'others'' paid goals hidden');
 select pg_temp.ck((public.claim_challenge('pk', public.challenge_week(), 2)->>'amount')::int = 10000, 'another account is paid separately');
 -- two-step sign-in and signed out
 reset role;
-insert into auth.mfa_factors (user_id, status) values ('00000000-0000-0000-0000-0000000000d2', 'verified');
+insert into auth.mfa_factors (user_id, status) values ('00000000-0000-0000-0000-0000000000e2', 'verified');
 set role authenticated;
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000d2', 'aal1');
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000e2', 'aal1');
 do $$ begin perform public.claim_challenge('pk', public.challenge_week(), 1); raise exception 'FAIL'; exception when insufficient_privilege then raise notice 'ok: aal1 refused'; end $$;
 reset role;
 do $$ begin perform set_config('test.uid', '', false); end $$;

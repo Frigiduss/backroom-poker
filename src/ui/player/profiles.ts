@@ -11,6 +11,7 @@ import { makeCard } from '../../engine/cards';
 import { cardHtml, esc, fmt, titleHtml } from '../dom';
 import { applyLook } from './looks';
 import { loadHands } from './history';
+import { bindNotifyPanel, forgetThisDevice, notifyPanelHtml } from './notify';
 import { historyNet } from '../../engine/history';
 
 // ---------- the signed-in player ----------
@@ -444,6 +445,7 @@ export function renderWelcome(app: HTMLElement, onDone: () => void, suggestedNam
 /** Signs out and goes back to the sign-in screen. */
 async function signOutTo(app: HTMLElement, onReady: () => void) {
   await savePlayer();
+  await forgetThisDevice();
   await auth?.signOut();
   store = local;
   current = null;
@@ -677,7 +679,8 @@ function accountPanelHtml(): string {
       <div id="security-body"><p class="fine">Checking…</p></div>
       <p class="form-ok" id="form-ok" role="status"></p>
       <p class="form-error" id="form-error" role="alert"></p>
-    </section>`;
+    </section>
+    ${notifyPanelHtml()}`;
   }
   if (s) {
     return `<section class="panel account-panel">
@@ -697,6 +700,7 @@ function accountPanelHtml(): string {
 function bindAccountPanel(app: HTMLElement, onReady: () => void) {
   if (!auth) return;
   if (document.getElementById('security-panel')) void renderSecurity(app, onReady);
+  if (document.getElementById('notify-panel')) void bindNotifyPanel();
   document.getElementById('sign-out')?.addEventListener('click', () => busy(app, () => signOutTo(app, onReady)));
   document.getElementById('go-auth')?.addEventListener('click', () => renderAuth(app, onReady));
   document.getElementById('retry-online')?.addEventListener('click', () => busy(app, async () => {

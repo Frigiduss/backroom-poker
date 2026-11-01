@@ -9,6 +9,7 @@
 // The server also credits achievements for online play: every finished hand and tournament
 // adds to each person's counters in player_awards, which browsers can read but not write.
 import { PERSONA_NAMES, personaFor } from '../bots/persona';
+import type { TurnNotice } from './push';
 import { cleanAvatar } from '../accounts/avatars';
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { withSeason } from '../accounts/seasons';
@@ -19,7 +20,7 @@ import { Action, Hand, rigProblem } from '../engine/hand';
 import { dealtAsSeen } from '../engine/history';
 import { BotStyle, CLASSIC_DIFFICULTIES, DIFFICULTIES, Difficulty, hasMaster, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
-import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjView, checkBjSettings } from './blackjack';
+import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjTurn, bjView, checkBjSettings } from './blackjack';
 import { ChatError, ChatState, chatAdmin, chatAdminInfo, chatSay, chatView, findMember } from './chat';
 import { AdminCommand, AdminReply, AdminTableInfo, AdminTableSummary, BlindSpeed, HandView, PlayerTag, Request, SeatView, TURN_SECONDS, TableSettings, TableView } from './protocol';
 
@@ -93,6 +94,10 @@ export interface TableState {
   bj?: BjState;
   /** Table chat (src/online/chat.ts). */
   chat?: ChatState;
+  /** Whose turn it was at the last save ("hand.events" or "round.spot"), to notice a new one. */
+  turnKey?: string;
+  /** When each person was last sent a "your turn" notification, epoch ms. */
+  pinged?: Record<string, number>;
 }
 
 /** The people playing (or about to): everyone at the table who isn't just watching. */
@@ -542,6 +547,51 @@ export interface ServerOptions {
   now?: () => number;
   /** Table seeds. Tests pass numbers to get the same cards every run; live tables use secureSeed(). */
   seed?: () => Seed;
+  /** Called after a save that made it someone's turn (src/online/push.ts sends the notification). Must not throw. */
+  notify?: (n: TurnNotice) => void;
+}
+
+/** The least time between two "your turn" notifications to one person at one table. */
+export const PING_GAP_MS = 45_000;
+
+/** The person the table is waiting on, if it is waiting on a person, and a key that changes each turn. */
+function turnHolder(state: TableState, t: Table | null): { userId: string; key: string } | null {
+  if (state.phase !== 'playing' || state.paused) return null;
+  let seatId: string | null;
+  let key: string;
+  if (state.bj) {
+    const turn = bjTurn(state);
+    if (!turn) return null;
+    seatId = turn.spot;
+    key = `b${turn.round}.${turn.spot}`;
+  } else {
+    const hand = t?.hand;
+    if (!t || !hand || hand.isComplete) return null;
+    const seat = t.seatOf(hand.toAct);
+    if (!seat.isHuman) return null;
+    seatId = seat.id;
+    key = `p${t.handNumber}.${state.events.length}`;
+  }
+  if (state.away[seatId]) return null;
+  const m = state.members.find((x) => x.seat === seatId && !x.left && !x.watching);
+  return m ? { userId: m.userId, key } : null;
+}
+
+/**
+ * Notes whose turn it is before a save, and returns a notification to send once it's saved: when
+ * the turn has just come round to someone other than the person who made this request, and they
+ * weren't told in the last PING_GAP_MS. A person who doesn't come back times out and goes "away"
+ * after two turns, which stops the notifications.
+ */
+function turnPing(state: TableState, t: Table | null, requester: string, at: number): TurnNotice | null {
+  const holder = turnHolder(state, t);
+  const before = state.turnKey;
+  state.turnKey = holder?.key;
+  if (!holder || holder.key === before || holder.userId === requester) return null;
+  const pinged = (state.pinged ??= {});
+  if (at - (pinged[holder.userId] ?? 0) < PING_GAP_MS) return null;
+  pinged[holder.userId] = at;
+  return { userId: holder.userId, code: '', settings: state.settings };
 }
 
 /** Handles one request from a signed-in person. */
@@ -558,7 +608,7 @@ export async function handle(db: TableDb, userId: string, raw: unknown, opts: Se
       return req.op === 'tables' ? await listTables(db) : await adminChange(db, userId, req, now);
     }
     if (!['leave', 'start', 'act', 'bj', 'tick', 'rebuy', 'back', 'chat'].includes(req.op)) throw new TableError('Unknown request.');
-    return await change(db, userId, req, now, seed);
+    return await change(db, userId, req, now, seed, opts.notify);
   } catch (err) {
     if (err instanceof TableError || err instanceof ChatError) return { status: err.status, body: { ok: false, error: err.message } };
     throw err;
@@ -678,7 +728,7 @@ async function watch(db: TableDb, userId: string, req: Extract<Request, { op: 'w
   throw new TableError('The table is busy. Try again.', 503);
 }
 
-async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'watch' | 'admin' | 'tables' }>, now: () => number, seed: () => Seed): Promise<Outcome> {
+async function change(db: TableDb, userId: string, req: Exclude<Request, { op: 'create' | 'join' | 'watch' | 'admin' | 'tables' }>, now: () => number, seed: () => Seed, notify?: (n: TurnNotice) => void): Promise<Outcome> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = await db.byId(String(req.tableId ?? ''));
     if (!row) throw new TableError('That table is gone.', 404);
@@ -763,6 +813,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
       }
     }
 
+    const ping = turnPing(state, t, userId, at);
     if (!(await db.update(row.id, row.version, state))) {
       if (req.op === 'tick') {
         const fresh = await db.byId(row.id);
@@ -773,6 +824,7 @@ async function change(db: TableDb, userId: string, req: Exclude<Request, { op: '
     const saved = { ...row, version: row.version + 1 };
     const out = await publish(db, saved, state, t, at, userId, credits);
     if (req.op === 'leave') await db.dropView(row.id, userId);
+    if (ping && notify) notify({ ...ping, code: row.code });
     return out;
   }
   throw new TableError('The table is busy. Try again.', 503);
