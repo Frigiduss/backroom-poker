@@ -13,9 +13,11 @@ import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table } fro
 import { VARIANTS, VariantDef } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { AdminCommand, AdminTableInfo } from '../online/protocol';
-import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey } from '../accounts';
+import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey, SEASONS, seasonOn } from '../accounts';
 import { esc, fmt } from './dom';
-import { player, savePlayer } from './player/profiles';
+import { player, savePlayer, serverAwards } from './player/profiles';
+import { applyLook } from './player/looks';
+import { previewSeason, previewedSeason } from './player/season';
 import { testCrash } from './crash';
 import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
 
@@ -683,6 +685,23 @@ const COMMANDS: Command[] = [
     run(args, out) {
       setSlotsHighRoll(args[0] ? args[0] === 'on' : !highRoll);
       out(highRoll ? 'High roll on: slots spins land three sevens.' : 'High roll off: slots spins are random again.', 'ok');
+      hooks.redraw();
+    },
+  },
+  {
+    name: 'season', usage: 'season [winter | off]', group: 'Your player', help: 'Previews a seasonal event out of season until you turn it off or reload: its lobby banner, and its felt and card back free to pick. Games played in a preview count for nothing.',
+    run(args, out) {
+      const id = args[0] ?? (previewedSeason() ? 'off' : '');
+      if (!id) return out(`Seasonal events: ${SEASONS.map((s) => `${s.id} (${s.name})`).join(', ')}. Today: ${seasonOn()?.name ?? 'none on'}.`, 'dim');
+      if (id === 'off') {
+        previewSeason(null);
+        out('Season preview off.', 'ok');
+      } else {
+        const s = previewSeason(id);
+        if (!s) return out(`No event called ${esc(id)}. Try ${SEASONS.map((x) => x.id).join(', ')}.`, 'err');
+        out(`Previewing ${esc(s.name)}.`, 'ok');
+      }
+      applyLook(player(), serverAwards());
       hooks.redraw();
     },
   },
