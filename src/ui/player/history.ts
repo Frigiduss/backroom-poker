@@ -4,7 +4,8 @@
 import { Card, RANK_CHARS, SUIT_SYMBOLS, rankOf, suitOf } from '../../engine/cards';
 import { Frame, HandHistory, chapters, historyNet, isHandHistory, replayFrames } from '../../engine/history';
 import { STRUCTURE_NAMES, VARIANTS } from '../../engine/variants';
-import { cardHtml, esc, fmt } from '../dom';
+import { SHARE_PREFIX, encodeSharedHand } from '../../engine/share';
+import { cardHtml, esc, fmt, isPhone } from '../dom';
 
 /** Hands kept per player; older ones drop off. */
 export const HANDS_KEPT = 50;
@@ -41,6 +42,8 @@ interface Options {
   fourColor?: boolean;
   /** Open on this hand (by id) instead of the newest. */
   select?: string;
+  /** Show only this hand, from a link a friend shared, instead of the player's own; null for a link that didn't read. */
+  shared?: HandHistory | null;
   onClose?: () => void;
 }
 
@@ -79,7 +82,13 @@ const ICONS = {
   pause: 'M7 5h4v14H7zM13 5h4v14h-4z',
   next: 'M8 5v14l9-7-9-7Z',
   last: 'M18 5v14M6 5l9 7-9 7V5Z',
+  share: 'M12 15V3.5M7.5 8 12 3.5 16.5 8M5 12.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-6.5',
 };
+
+/** The address that replays this hand for whoever opens it. */
+export async function shareLink(h: HandHistory): Promise<string> {
+  return `${location.origin}${location.pathname}#${SHARE_PREFIX}${await encodeSharedHand(h)}`;
+}
 
 class HistoryViewer {
   private hands: HandHistory[];
@@ -87,11 +96,14 @@ class HistoryViewer {
   private frames: Frame[] = [];
   private k = 0;
   private timer = 0;
+  /** What the Share button says for a moment after it's used. */
+  private shareNote = '';
+  private shareTimer = 0;
   private root: HTMLDivElement;
   private keys = (e: KeyboardEvent) => this.onKey(e);
 
   constructor(private opts: Options) {
-    this.hands = loadHands(opts.playerId);
+    this.hands = opts.shared ? [opts.shared] : opts.shared === null ? [] : loadHands(opts.playerId);
     this.sel = Math.max(0, this.hands.findIndex((h) => h.id === opts.select));
     this.root = document.createElement('div');
     this.root.className = `overlay hh-overlay${opts.fourColor ? ' four-color' : ''}`;
@@ -103,6 +115,7 @@ class HistoryViewer {
 
   close(notify = true) {
     clearInterval(this.timer);
+    clearTimeout(this.shareTimer);
     window.removeEventListener('keydown', this.keys, true);
     this.root.remove();
     if (open === this) open = null;
@@ -141,6 +154,39 @@ class HistoryViewer {
     this.timer = 0;
   }
 
+  /** Hands the link to the phone's share sheet, or copies it. */
+  private async share() {
+    const h = this.hands[this.sel];
+    if (!h || this.opts.shared) return;
+    let note = 'Link copied';
+    try {
+      const url = await shareLink(h);
+      if (isPhone() && typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ title: `A ${VARIANTS[h.variant].name} hand`, text: 'Watch how this hand played out', url });
+          note = '';
+        } catch (e) {
+          if ((e as Error)?.name === 'AbortError') return;
+          throw e;
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+        } catch {
+          prompt('Copy this link:', url);
+          note = '';
+        }
+      }
+    } catch {
+      note = "Couldn't make a link";
+    }
+    if (open !== this) return;
+    this.shareNote = note;
+    clearTimeout(this.shareTimer);
+    this.shareTimer = window.setTimeout(() => ((this.shareNote = ''), open === this && this.render()), 2500);
+    this.render();
+  }
+
   private chapterJump(dir: 1 | -1) {
     this.stop();
     const marks = chapters(this.frames).map((c) => c.at);
@@ -160,24 +206,31 @@ class HistoryViewer {
     else if (k === 'End') (this.stop(), this.go(this.frames.length - 1));
     else if (k === 'ArrowDown' && this.sel < this.hands.length - 1) this.pick(this.sel + 1);
     else if (k === 'ArrowUp' && this.sel > 0) this.pick(this.sel - 1);
+    else if ((k === 's' || k === 'S') && !e.ctrlKey && !e.metaKey && !this.opts.shared) void this.share();
     else return;
     e.preventDefault();
   }
 
   private render() {
     const h = this.hands[this.sel];
+    const shared = this.opts.shared;
+    const broken = shared === null;
+    const sharer = shared?.players[shared.me]?.name;
     const listScroll = this.root.querySelector('.hh-list')?.scrollTop;
     const stepsScroll = this.root.querySelector('.hh-steps');
     this.root.innerHTML = `
     <div class="hh" role="dialog" aria-modal="true" aria-labelledby="hh-title">
       <header class="hh-head">
-        <h2 id="hh-title">Hand history</h2>
-        <span class="hh-sub">${this.hands.length ? `Your last ${this.hands.length === 1 ? 'hand' : `${this.hands.length} hands`} on this device` : ''}</span>
+        <h2 id="hh-title">${shared || broken ? 'Shared hand' : 'Hand history'}</h2>
+        <span class="hh-sub">${shared ? `Played from ${sharer ? esc(sharer) : 'a friend'}’s seat` : this.hands.length ? `Your last ${this.hands.length === 1 ? 'hand' : `${this.hands.length} hands`} on this device` : ''}</span>
         <button type="button" class="icon-btn" id="hh-close" aria-label="Close hand history">✕</button>
       </header>
-      ${h ? `<div class="hh-body">
-        <nav class="hh-list" aria-label="Saved hands">${this.hands.map((x, i) => this.itemHtml(x, i)).join('')}</nav>
+      ${h ? `<div class="hh-body${shared ? ' solo' : ''}">
+        ${shared ? '' : `<nav class="hh-list" aria-label="Saved hands">${this.hands.map((x, i) => this.itemHtml(x, i)).join('')}</nav>`}
         <section class="hh-replay" aria-label="Replay">${this.replayHtml(h)}</section>
+      </div>` : broken ? `<div class="hh-empty">
+        <p><b>This hand can’t be shown.</b></p>
+        <p>The link may have been cut short when it was copied. Ask your friend to send it again.</p>
       </div>` : `<div class="hh-empty">
         <p><b>No hands saved yet.</b></p>
         <p>Every poker hand you play is kept here, your last ${HANDS_KEPT} on this device, so you can step back through how it went street by street.</p>
@@ -215,10 +268,11 @@ class HistoryViewer {
     const s = h.stakes;
     const stakes = v.family === 'stud' ? `${fmt(s.smallBet)}/${fmt(s.bigBet)}` : `${fmt(s.sb)}/${fmt(s.bb)}`;
     const when = new Date(h.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const shareBtn = this.opts.shared ? '' : `<button type="button" class="btn btn-sm hh-share" id="hh-share" title="Send this hand to a friend (S)">${icon(ICONS.share)}<span>${esc(this.shareNote || 'Share')}</span></button>`;
     const at = this.k;
     const chapterNow = f.chapter;
     return `
-      <div class="hh-info"><b>${STRUCTURE_NAMES[h.structure]} ${esc(v.name)}</b> <span>${stakes} · ${esc(h.where)} · Hand ${h.number} · ${when}</span></div>
+      <div class="hh-info"><b>${STRUCTURE_NAMES[h.structure]} ${esc(v.name)}</b> <span>${stakes} · ${esc(h.where)} · Hand ${h.number} · ${when}</span>${shareBtn}</div>
       <div class="hh-felt">${this.feltHtml(h, f)}</div>
       <p class="hh-caption ${f.final ? 'final' : ''}" role="status"><span class="hh-chap">${esc(f.chapter)}</span>${esc(f.text)}</p>
       <div class="hh-controls">
@@ -262,6 +316,8 @@ class HistoryViewer {
 
   private bind() {
     this.root.querySelector<HTMLElement>('#hh-close')!.onclick = () => this.close();
+    const shareBtn = this.root.querySelector<HTMLElement>('#hh-share');
+    if (shareBtn) shareBtn.onclick = () => void this.share();
     this.root.onclick = (e) => {
       if (e.target === this.root) this.close();
     };

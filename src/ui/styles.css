@@ -2254,6 +2254,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   font-family: var(--display); font-weight: 700; letter-spacing: .3em; font-size: clamp(14px, 2.4cqw, 30px);
   color: rgba(246, 214, 142, .16);
 }
+.bac-croupier { position: absolute; left: 8%; top: 3%; z-index: 2; }
 .bac-hands { position: relative; z-index: 1; display: flex; justify-content: center; gap: clamp(18px, 6cqw, 90px); width: 100%; }
 .bac-hand { display: grid; justify-items: center; gap: 6px; padding: 8px 12px 10px; border-radius: 14px; min-width: calc(var(--cw) * 3.3); transition: background .2s, box-shadow .2s; }
 .bac-hand-head { display: flex; align-items: center; gap: 8px; }
@@ -2315,6 +2316,11 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .bac-felt { border-radius: 12px; }
   .bac-hands { gap: 8px; }
   .bac-table .bj-shoe, .bac-felt::after { display: none; }
+  .bac-croupier { position: relative; left: auto; top: auto; align-self: flex-start; margin: 0 0 8px 4px; }
+  .bac-croupier .dealer-plate { padding: 2px 10px 2px 4px; }
+  .bac-croupier .dealer-face { font-size: 18px; }
+  /* Chips sit in the spot's corner so a bet doesn't push the scoreboard off the felt. */
+  .bac-spot .rl-stake { position: absolute; right: 8px; top: 50%; margin: 0; transform: translateY(-50%) scale(.75); transform-origin: right center; }
   .bac-hand { min-width: 0; padding: 6px; }
   .bac-spots { grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
   .bac-spot.player, .bac-spot.banker { min-height: 86px; }
@@ -2382,6 +2388,10 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 .hh-info { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .hh-info b { font-size: 15px; }
 .hh-info span { color: var(--muted); font-size: 13px; }
+.hh-share { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
+.hh-info .hh-share span { color: inherit; font-size: inherit; }
+.hh-share svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.hh-body.solo { grid-template-columns: minmax(0, 1fr); }
 .hh-felt {
   --cw: clamp(26px, 3.4vw, 42px);
   position: relative; min-height: 0; border-radius: 999px;
@@ -2455,6 +2465,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .hh-overlay { padding: 0; }
   .hh { height: 100%; border-radius: 0; border: 0; }
   .hh-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow-y: auto; }
+  .hh-body.solo { grid-template-rows: auto; }
   .hh-list { display: flex; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; }
   .hh-item { flex: none; width: 230px; border-color: var(--line); }
   .hh-replay { grid-template-rows: auto 300px auto auto auto 180px; padding: 12px; }

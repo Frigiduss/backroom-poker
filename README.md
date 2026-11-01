@@ -27,7 +27,8 @@ The workflows build everything from source.
 ```
 src/
   engine/      pure game rules, no browser code: cards, hand evaluator, variants, the Hand
-               state machine, Table, blackjack, roulette, baccarat, video poker, slots, history
+               state machine, Table, blackjack, roulette, baccarat, video poker, slots, history,
+               share.ts (a hand packed into a #hand= link, checked before it is shown)
   bots/        bot opponents. Bots only see a PlayerView. bot.ts (5 levels x 5 styles),
                neural.ts + neural-weights.ts (Master), persona.ts (24 named bots),
                rivals.ts (grudges), dealers.ts (casino dealers), worker.ts/brain.ts (web worker)
@@ -43,7 +44,8 @@ src/
     app/       PWA files: icons, manifest, service worker (sw.js)
     casino/    blackjack, roulette, baccarat, video poker, slots, house.ts (their shared frame)
     player/    profile and sign-in, stats, achievements, looks, faces and pictures,
-               leaderboard, weekly challenges, friends, hand history, season.ts (lobby event banner)
+               leaderboard, weekly challenges, friends, hand history (with its Share button and
+               shared-hand view), season.ts (lobby event banner)
     online/    online tables, online blackjack, table chat
     guides/    how to play: guide-data.ts (rules + first-hand walkthroughs, no DOM) and the
                guide screen. Keep it in step with the engines; test/guide.test.ts checks it

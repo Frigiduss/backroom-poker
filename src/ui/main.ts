@@ -19,6 +19,7 @@ import { renderStats } from './player/stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './player/history';
 import { GUIDE_ICON, guideOpen, openGuide } from './guides/guide';
 import { recordHistory, sourceOfHand } from '../engine/history';
+import { decodeSharedHand, sharedCodeIn } from '../engine/share';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online/online';
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
@@ -75,7 +76,7 @@ interface Prefs {
   reveal: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
-  /** The blackjack dealer and the roulette croupier chat now and then. */
+  /** The blackjack dealer and the roulette and baccarat croupiers chat now and then. */
   dealerTalk: boolean;
   sound: boolean;
   volume: number;
@@ -591,6 +592,11 @@ class Game implements DevGame {
     this.thinkKey = key;
     this.thinkMs = base * k;
     return this.thinkMs;
+  }
+
+  /** Picks the game back up after something opened over it (a shared hand) closes. */
+  resume() {
+    if (!this.stopped) this.schedule();
   }
 
   private schedule() {
@@ -1466,9 +1472,13 @@ async function boot() {
   initFriends({ app, auth, lobby: renderSetup, busy: () => !!(game || blackjack || house), join: joinTable });
   await migrateLegacySettings(local);
 
+  // A hand a friend shared (#hand=…) opens straight away, signed in or not.
+  void openSharedHand();
+  window.addEventListener('hashchange', () => void openSharedHand());
+
   // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.
   let resetPassword = false;
-  if (auth && /access_token|error_description/.test(location.hash)) {
+  if (auth && sharedCodeIn(location.hash) === null && /access_token|error_description/.test(location.hash)) {
     const hash = location.hash;
     history.replaceState(null, '', location.href.split('#')[0]);
     const r = await auth.fromRedirect(hash).catch(() => null);
@@ -1506,6 +1516,16 @@ async function boot() {
   const open = () => (auth?.current ? goOnline(renderSetup, app) : auth ? renderAuth(app, renderSetup) : openPlayer(renderSetup, app));
   if (resetPassword) renderNewPassword(app, open);
   else await open();
+}
+
+/** Replays the hand in the address's #hand=… part, if there is one, then takes it off the address. */
+async function openSharedHand() {
+  const code = sharedCodeIn(location.hash);
+  if (code === null) return;
+  history.replaceState(null, '', location.href.split('#')[0]);
+  const hand = await decodeSharedHand(code);
+  // Over a local table, the game waits while it's open and carries on after.
+  openHandHistory({ playerId: '', shared: hand, fourColor: prefs.fourColor, onClose: () => game?.resume() });
 }
 
 /** Before accounts existed, one name and its settings lived under older keys. They become the first player. */
