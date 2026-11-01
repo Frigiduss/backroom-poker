@@ -2,15 +2,15 @@ import {
   ACHIEVEMENTS, Achievement, AccountStore, Counters, Factor, KeyValueStorage, LocalAccountStore, NAME_MAX, OnlineAccountStore, OnlineAuth, PASSWORD_MIN, PROFILE_COLORS, Profile, REFILL_BELOW, STARTING_BANK,
   BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
   takeUnlocks, titleFor, FACES, OnlineError, avatarLook, clearOldPictures, deletePicture, pictureKey, uploadPicture,
-} from '../accounts';
+} from '../../accounts';
 import { faceHtml, installFaceFallback } from './faces';
 import { shrinkPicture } from './picture';
-import { VARIANTS, VariantId } from '../engine/variants';
-import { makeCard } from '../engine/cards';
-import { cardHtml, esc, fmt, titleHtml } from './dom';
+import { VARIANTS, VariantId } from '../../engine/variants';
+import { makeCard } from '../../engine/cards';
+import { cardHtml, esc, fmt, titleHtml } from '../dom';
 import { applyLook } from './looks';
 import { loadHands } from './history';
-import { historyNet } from '../engine/history';
+import { historyNet } from '../../engine/history';
 
 // ---------- the signed-in player ----------
 

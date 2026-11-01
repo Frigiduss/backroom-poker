@@ -1,14 +1,14 @@
 // What the roulette, baccarat and video poker tables share: the lobby card's frame, the chip rack, the
 // top bar and the settings modal. These games are the player alone against the house, with
 // bets taken straight from the chip bank like blackjack.
-import { takeUnlocks } from '../accounts';
-import { announce } from './achievements';
-import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
-import { fmt } from './dom';
-import { GUIDE_ICON, openGuide } from './guide';
-import type { HouseGame } from './picker';
-import { player, savePlayer, serverAwards } from './profiles';
-import { play, setVolume } from './sound';
+import { takeUnlocks } from '../../accounts';
+import { announce } from '../player/achievements';
+import { bindConsoleButton, consoleEnabled, toggleConsole } from '../console';
+import { fmt } from '../dom';
+import { GUIDE_ICON, openGuide } from '../guides/guide';
+import type { HouseGame } from '../picker';
+import { player, savePlayer, serverAwards } from '../player/profiles';
+import { play, setVolume } from '../sound';
 import type { BjPrefs } from './blackjack';
 
 export type HouseLimits = 'low' | 'mid' | 'high';

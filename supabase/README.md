@@ -1,4 +1,4 @@
-# Turning on online accounts
+# Supabase notes
 
 Online accounts let a player sign in with an email and password and find their players,
 chip bank and stats on any device. They use [Supabase](https://supabase.com) for sign-in

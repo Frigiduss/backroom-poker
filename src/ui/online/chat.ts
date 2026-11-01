@@ -1,10 +1,10 @@
 // Table chat and emotes at online tables. The dock lives outside the table screen, which
 // redraws on every update, so a half-typed line and the scroll position survive. Each new
 // line also floats up over the speaker's seat for a few seconds.
-import { CHAT_MAX, ChatLineView, EMOTES, EmoteId, TableView } from '../online/protocol';
-import { esc } from './dom';
-import { play } from './sound';
-import { floatOver } from './talk';
+import { CHAT_MAX, ChatLineView, EMOTES, EmoteId, TableView } from '../../online/protocol';
+import { esc } from '../dom';
+import { play } from '../sound';
+import { floatOver } from '../talk';
 
 export interface ChatHooks {
   /** Sends a line or an emote; resolves once the server has it. */

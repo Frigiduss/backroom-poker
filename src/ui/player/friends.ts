@@ -6,11 +6,11 @@ import {
   ACHIEVEMENT_BY_ID, Friend, FriendCard, FriendsNotSetUpError, FriendsState, OnlineAuth, OnlineError, TableInvite,
   addFriend, answerFriend, cleanFriendCode, dismissInvite, inviteFriend, removeFriend, seenText, syncFriends,
   ChipGift, GIFT_MAX, GIFT_MIN, GIFT_RECEIVE_DAY, GIFT_SEND_DAY, GiftsNotSetUpError, GiftsState, collectGifts, giftProblem, sendChips, syncGifts,
-} from '../accounts';
-import { esc, fmt, titleHtml } from './dom';
+} from '../../accounts';
+import { esc, fmt, titleHtml } from '../dom';
 import { faceHtml } from './faces';
 import { isOnline, player, savePlayer } from './profiles';
-import { play } from './sound';
+import { play } from '../sound';
 
 interface Hooks {
   app: HTMLElement;

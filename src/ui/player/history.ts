@@ -1,10 +1,10 @@
 // Hand history: the last hands a player played, saved in this browser, and a viewer that
 // replays any of them street by street. Opens over whatever is on screen (a table or the
 // profile) and leaves it untouched underneath.
-import { Card, RANK_CHARS, SUIT_SYMBOLS, rankOf, suitOf } from '../engine/cards';
-import { Frame, HandHistory, chapters, historyNet, isHandHistory, replayFrames } from '../engine/history';
-import { STRUCTURE_NAMES, VARIANTS } from '../engine/variants';
-import { cardHtml, esc, fmt } from './dom';
+import { Card, RANK_CHARS, SUIT_SYMBOLS, rankOf, suitOf } from '../../engine/cards';
+import { Frame, HandHistory, chapters, historyNet, isHandHistory, replayFrames } from '../../engine/history';
+import { STRUCTURE_NAMES, VARIANTS } from '../../engine/variants';
+import { cardHtml, esc, fmt } from '../dom';
 
 /** Hands kept per player; older ones drop off. */
 export const HANDS_KEPT = 50;

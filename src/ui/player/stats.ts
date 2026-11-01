@@ -1,9 +1,9 @@
 // The stats page: chips over time, how the player plays, and how each game has gone.
-import { ChipPoint, STYLE_MIN_HANDS, STYLE_NOTES, allCounters, chipsOf, chipsSince, playingStyle } from '../accounts';
-import { VARIANTS, VariantId } from '../engine/variants';
-import { personaFor } from '../bots/persona';
-import { RIVAL_MIN_HANDS, moodOf, rivalrySummary } from '../bots/rivals';
-import { esc, fmt } from './dom';
+import { ChipPoint, STYLE_MIN_HANDS, STYLE_NOTES, allCounters, chipsOf, chipsSince, playingStyle } from '../../accounts';
+import { VARIANTS, VariantId } from '../../engine/variants';
+import { personaFor } from '../../bots/persona';
+import { RIVAL_MIN_HANDS, moodOf, rivalrySummary } from '../../bots/rivals';
+import { esc, fmt } from '../dom';
 import { isOnline, player, serverAwards } from './profiles';
 
 type Range = 'week' | 'month' | 'all';

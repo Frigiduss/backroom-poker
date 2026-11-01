@@ -1,13 +1,13 @@
 // The baccarat table: punto banco from an eight-deck shoe. The player bets on Player, Banker,
 // a Tie or the pair side bets, and the dealer turns the cards over by the fixed drawing rules.
 // Bets come out of the chip bank on the deal and winnings go back when the coup is settled.
-import { baccaratTally, credit, setBlackjackBank } from '../accounts';
-import { BAC_DECKS, BAC_LIMITS, BAC_PAYOUT, BAC_SPOTS, BAC_SPOT_NAMES, BacBets, BacLimits, BacResult, BacSpot, Coup, betsProblem, betsTotal, dealCoup, handValue, settleCoup } from '../engine/baccarat';
-import { Shoe } from '../engine/blackjack';
-import { createRng } from '../engine/cards';
-import { cardHtml, chipsHtml, esc, fmt } from './dom';
+import { baccaratTally, credit, setBlackjackBank } from '../../accounts';
+import { BAC_DECKS, BAC_LIMITS, BAC_PAYOUT, BAC_SPOTS, BAC_SPOT_NAMES, BacBets, BacLimits, BacResult, BacSpot, Coup, betsProblem, betsTotal, dealCoup, handValue, settleCoup } from '../../engine/baccarat';
+import { Shoe } from '../../engine/blackjack';
+import { createRng } from '../../engine/cards';
+import { cardHtml, chipsHtml, esc, fmt } from '../dom';
 import { HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
-import { play } from './sound';
+import { play } from '../sound';
 
 // ---------- lobby settings ----------
 

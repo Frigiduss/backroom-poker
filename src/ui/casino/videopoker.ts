@@ -2,12 +2,12 @@
 // draw once. The pay table sits on the glass above the cards, lit on the column for the coins
 // bet and the line the hand makes. Bets come out of the chip bank on the deal and winnings
 // go back on the draw.
-import { credit, setBlackjackBank, videoPokerTally } from '../accounts';
-import { createRng } from '../engine/cards';
-import { LINE_NAMES, MACHINES, MACHINE_NAMES, MAX_COINS, Machine, PAY_TABLES, PayLine, VpHand, VpResult, dealVp, drawVp, linePays, payLine, settleVp } from '../engine/videopoker';
-import { cardHtml, esc, fmt } from './dom';
+import { credit, setBlackjackBank, videoPokerTally } from '../../accounts';
+import { createRng } from '../../engine/cards';
+import { LINE_NAMES, MACHINES, MACHINE_NAMES, MAX_COINS, Machine, PAY_TABLES, PayLine, VpHand, VpResult, dealVp, drawVp, linePays, payLine, settleVp } from '../../engine/videopoker';
+import { cardHtml, esc, fmt } from '../dom';
 import { HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
-import { play } from './sound';
+import { play } from '../sound';
 
 // ---------- lobby settings ----------
 

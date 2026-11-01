@@ -1,17 +1,17 @@
 // The roulette table: the wheel, the betting layout and a rack of chips. The player puts
 // chips on any spot of the layout, spins, and the house pays what the ball hits. Bets come
 // out of the chip bank when the wheel spins and winnings go back when the ball drops.
-import { credit, rouletteTally, setBlackjackBank } from '../accounts';
-import { createRng } from '../engine/cards';
+import { credit, rouletteTally, setBlackjackBank } from '../../accounts';
+import { createRng } from '../../engine/cards';
 import {
   DOUBLE_ZERO, Layout, PAYOUT, Pocket, RL_LIMITS, RlLimits, SpinResult, WHEEL_ORDER, Wheel,
   describeSpot, isZero, layoutProblem, layoutTotal, pocketColor, pocketLabel, settle, spin, spotFor,
-} from '../engine/roulette';
-import { chipsHtml, esc, fmt } from './dom';
+} from '../../engine/roulette';
+import { chipsHtml, esc, fmt } from '../dom';
 import { HouseHooks, HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
-import { play } from './sound';
-import { floatOver } from './talk';
-import { Dealer, DealerMoment, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../bots/dealers';
+import { play } from '../sound';
+import { floatOver } from '../talk';
+import { Dealer, DealerMoment, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../../bots/dealers';
 
 // ---------- lobby settings ----------
 

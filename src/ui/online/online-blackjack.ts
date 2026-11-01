@@ -1,11 +1,11 @@
 // An online blackjack table: draws what the table server sends (src/online/blackjack.ts) on
 // the same felt as the practice table, and turns the buttons into requests. The shoe and
 // the dealer's hole card stay on the server; the round arrives with the hole card blank.
-import { BjAction, basicStrategy, describeTotal, isNatural } from '../engine/blackjack';
-import { BjMove, BjTableView, TableView } from '../online/protocol';
-import { BJ_CHIPS, BjFelt, FeltSpot, OUTCOME_TEXT, limitText } from './blackjack';
-import { esc, fmt } from './dom';
-import { SoundName, play } from './sound';
+import { BjAction, basicStrategy, describeTotal, isNatural } from '../../engine/blackjack';
+import { BjMove, BjTableView, TableView } from '../../online/protocol';
+import { BJ_CHIPS, BjFelt, FeltSpot, OUTCOME_TEXT, limitText } from '../casino/blackjack';
+import { esc, fmt } from '../dom';
+import { SoundName, play } from '../sound';
 
 export interface BjScreenHooks {
   /** Sends a blackjack move for the round on the table. */

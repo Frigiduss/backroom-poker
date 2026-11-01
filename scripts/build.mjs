@@ -60,8 +60,8 @@ async function bundleTests() {
 
 /** Tab and home-screen icons, inlined as data URIs so the page stays a single file. */
 function icons() {
-  const svg = readFileSync(join(root, 'src/ui/icon.svg')).toString('base64');
-  const png = readFileSync(join(root, 'src/ui/apple-touch-icon.png')).toString('base64');
+  const svg = readFileSync(join(root, 'src/ui/app/icon.svg')).toString('base64');
+  const png = readFileSync(join(root, 'src/ui/app/apple-touch-icon.png')).toString('base64');
   return `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${svg}">\n`
     + `<link rel="apple-touch-icon" href="data:image/png;base64,${png}">`;
 }
@@ -129,9 +129,9 @@ async function buildOnce() {
 
 /** The manifest, icons and service worker, whose version changes whenever the page does. */
 function writeAppFiles(html) {
-  for (const file of APP_FILES) copyFileSync(join(root, 'src/ui', file), join(dist, file));
-  const version = createHash('sha256').update(html).update(readFileSync(join(root, 'src/ui/sw.js'))).digest('hex').slice(0, 12);
-  writeFileSync(join(dist, 'sw.js'), readFileSync(join(root, 'src/ui/sw.js'), 'utf8').replace('__VERSION__', version));
+  for (const file of APP_FILES) copyFileSync(join(root, 'src/ui/app', file), join(dist, file));
+  const version = createHash('sha256').update(html).update(readFileSync(join(root, 'src/ui/app/sw.js'))).digest('hex').slice(0, 12);
+  writeFileSync(join(dist, 'sw.js'), readFileSync(join(root, 'src/ui/app/sw.js'), 'utf8').replace('__VERSION__', version));
 }
 
 /** The admin dashboard: the developer console and live panels on a page of their own. */

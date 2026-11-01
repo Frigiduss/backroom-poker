@@ -1,5 +1,5 @@
 {
-  "name": "poker",
+  "name": "backroom-poker",
   "version": "0.1.0",
   "private": true,
   "description": "Browser poker with bot opponents: Hold'em, Omaha, Draw, Stud and more.",

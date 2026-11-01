@@ -15,7 +15,7 @@ import { TableClient } from '../online/client';
 import { AdminCommand, AdminTableInfo } from '../online/protocol';
 import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey } from '../accounts';
 import { esc, fmt } from './dom';
-import { player, savePlayer } from './profiles';
+import { player, savePlayer } from './player/profiles';
 import { testCrash } from './crash';
 import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
 

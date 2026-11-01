@@ -2,9 +2,9 @@
 // uploaded picture. Face values come from other players' saves, so they're checked against the
 // strict pattern in accounts/avatars.ts before anything is drawn, and a picture is only ever a
 // link to the game's own storage bucket.
-import { avatarLook, pictureUrl } from '../accounts';
-import { ONLINE } from '../accounts/config';
-import { esc } from './dom';
+import { avatarLook, pictureUrl } from '../../accounts';
+import { ONLINE } from '../../accounts/config';
+import { esc } from '../dom';
 
 const letterOf = (name: string): string => esc((name || '?').slice(0, 1).toUpperCase());
 

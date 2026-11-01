@@ -1,10 +1,10 @@
 // The achievements screen (progress on every achievement, and the title picker) and the
 // pop-up that celebrates a new unlock.
-import { ACHIEVEMENTS, Achievement, GROUP_NAMES, GROUP_ORDER, TIER_NAMES, allCounters, isUnlocked, looksUnlockedBy } from '../accounts';
-import { esc, fmt, titleHtml } from './dom';
+import { ACHIEVEMENTS, Achievement, GROUP_NAMES, GROUP_ORDER, TIER_NAMES, allCounters, isUnlocked, looksUnlockedBy } from '../../accounts';
+import { esc, fmt, titleHtml } from '../dom';
 import { currentTitle, isOnline, player, refreshAwards, savePlayer, serverAwards } from './profiles';
 import { bindLooks, looksPanelHtml } from './looks';
-import { play } from './sound';
+import { play } from '../sound';
 
 // ---------- unlock pop-ups ----------
 

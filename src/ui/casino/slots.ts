@@ -1,13 +1,13 @@
 // The slot machine: three reels behind glass, one to five pay lines, and a coin a line from
 // the chip bank. The stake comes out on the pull, the reels stop one after another, and
 // whatever the lines pay goes back into the bank once the last reel lands.
-import { credit, setBlackjackBank, slotsTally } from '../accounts';
-import { createRng } from '../engine/cards';
-import { LINES, LINE_NAMES, MAX_LINES, PAYS, PayId, REELS, ROW_COUNT, SlotSpin, Sym, SYMBOL_NAMES, highRollStops, settleSpin, spinSlots, windowAt } from '../engine/slots';
-import { esc, fmt } from './dom';
-import { setSlotsHighRoll, slotsHighRoll } from './console';
+import { credit, setBlackjackBank, slotsTally } from '../../accounts';
+import { createRng } from '../../engine/cards';
+import { LINES, LINE_NAMES, MAX_LINES, PAYS, PayId, REELS, ROW_COUNT, SlotSpin, Sym, SYMBOL_NAMES, highRollStops, settleSpin, spinSlots, windowAt } from '../../engine/slots';
+import { esc, fmt } from '../dom';
+import { setSlotsHighRoll, slotsHighRoll } from '../console';
 import { HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
-import { play } from './sound';
+import { play } from '../sound';
 
 // ---------- lobby settings ----------
 
