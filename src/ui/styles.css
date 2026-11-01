@@ -2312,6 +2312,10 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 .hh-info { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .hh-info b { font-size: 15px; }
 .hh-info span { color: var(--muted); font-size: 13px; }
+.hh-share { margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
+.hh-info .hh-share span { color: inherit; font-size: inherit; }
+.hh-share svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.hh-body.solo { grid-template-columns: minmax(0, 1fr); }
 .hh-felt {
   --cw: clamp(26px, 3.4vw, 42px);
   position: relative; min-height: 0; border-radius: 999px;
@@ -2385,6 +2389,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
   .hh-overlay { padding: 0; }
   .hh { height: 100%; border-radius: 0; border: 0; }
   .hh-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow-y: auto; }
+  .hh-body.solo { grid-template-rows: auto; }
   .hh-list { display: flex; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px; }
   .hh-item { flex: none; width: 230px; border-color: var(--line); }
   .hh-replay { grid-template-rows: auto 300px auto auto auto 180px; padding: 12px; }
