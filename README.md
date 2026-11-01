@@ -32,9 +32,10 @@ src/
                neural.ts + neural-weights.ts (Master), persona.ts (24 named bots),
                rivals.ts (grudges), dealers.ts (casino dealers), worker.ts/brain.ts (web worker)
   accounts/    profiles behind AccountStore (local or Supabase), bank rules, stats,
-               achievements, bonus, leaderboard, friends, gifts, avatars, crash reports
+               achievements, bonus, leaderboard, friends, gifts, avatars, crash reports,
+               notifications (push.ts)
   online/      table server (server.ts, blackjack.ts, bundled into the Edge Function by
-               edge.ts), client.ts, protocol, table chat
+               edge.ts), client.ts, protocol, table chat, push.ts + webpush.ts (notifications)
   ui/          the poker table and app shell: main.ts (startup + poker table), index.html,
                styles.css, dom.ts, sound.ts, thinker.ts, talk.ts (faces + speech bubbles),
                console.ts, console-blackjack.ts, picker.ts,
@@ -42,7 +43,7 @@ src/
     app/       PWA files: icons, manifest, service worker (sw.js)
     casino/    blackjack, roulette, baccarat, video poker, slots, house.ts (their shared frame)
     player/    profile and sign-in, stats, achievements, looks, faces and pictures,
-               leaderboard, friends, hand history
+               leaderboard, friends, hand history, notify.ts (notifications panel)
     online/    online tables, online blackjack, table chat
     guides/    how to play: guide-data.ts (rules + first-hand walkthroughs, no DOM) and the
                guide screen. Keep it in step with the engines; test/guide.test.ts checks it
@@ -79,7 +80,8 @@ Run each once in the Supabase SQL editor. Order matters where noted.
 | `security.sql` | two-step sign-in, for projects made before it | yes |
 | `gifts.sql` | chip gifts | yes |
 | `avatars.sql` | uploaded pictures | yes |
-| `crashes.sql` | crash reports (after `admin.sql`), then type `crashtest` in the console | not yet |
+| `crashes.sql` | crash reports (after `admin.sql`), then type `crashtest` in the console | yes |
+| `push.sql` | "your turn" and invite notifications (after `friends.sql`) | not yet |
 
 ## Gotchas
 

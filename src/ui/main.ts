@@ -22,6 +22,7 @@ import { recordHistory, sourceOfHand } from '../engine/history';
 import { SoundName, play, setVolume } from './sound';
 import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTable, stopOnline } from './online/online';
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
+import { initNotify } from './player/notify';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './player/leaderboard';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './casino/blackjack';
@@ -1452,6 +1453,10 @@ async function boot() {
     },
   });
   initFriends({ app, auth, lobby: renderSetup, busy: () => !!(game || blackjack || house), join: joinTable });
+  // A tapped "your turn" notification; a game against bots or the house on screen is left alone.
+  initNotify({ auth, openTable: (code) => {
+    if (activeTable()?.code !== code && !(game || blackjack || house)) joinTable(code, false);
+  } });
   await migrateLegacySettings(local);
 
   // Links in account emails (confirm sign-up, reset password) come back with a session in the hash.

@@ -158,6 +158,37 @@ functions, which only ever return friend codes, names, colours, faces and titles
 account id. While the game is open it checks in every 20 seconds, which is what shows a player
 as online (anyone seen in the last 75 seconds).
 
+## Notifications
+
+Players can get a phone or desktop notification when it's their turn at an online table (poker
+or blackjack), and when a friend invites them to their table: **Profile → Notifications → Turn
+on for this device**, with a switch for each kind. On iPhone and iPad it only works in the
+installed app (Share → Add to Home Screen, iOS 16.4 or later); Android, desktop Chrome, Edge
+and Firefox work in the browser too. Tapping a "your turn" notification goes straight back to
+the table.
+
+To switch it on, run [`push.sql`](push.sql) once in the SQL Editor (after `friends.sql`).
+Running it again is safe. The table server sends the notifications, so it needs no other
+setup: the first time one is needed it makes its own signing key and keeps it in `push_keys`,
+which only the server can read. Nothing secret goes in the code. Until `push.sql` is run, the
+Notifications panel says they aren't switched on yet.
+
+So nobody is pestered:
+
+- nothing is sent while any of the player's devices has the game open in front of them (each
+  open game tells the server every minute or so, and again as soon as it's put away)
+- one "your turn" notification per person per table every 45 seconds at most; someone who
+  doesn't come back times out and is marked away after two turns, which stops them
+- a friend's invites send one notification a minute at most, and only for an invite made in
+  the last two minutes
+- notifications only ever go to the push services of Chrome, Firefox, Safari and Edge, and an
+  account keeps at most 10 devices. Signing out removes this device.
+
+Browsers can't read the push tables; everything goes through `push_save`, `push_remove`,
+`push_status` and `push_awake`, which only touch the signed-in account's own devices.
+`select owner, endpoint, turns, invites, updated_at from push_devices` in the SQL Editor shows
+who has them on.
+
 ## Sending chips to friends
 
 Friends can send each other chips from their banks. To switch it on, run

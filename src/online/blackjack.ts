@@ -201,6 +201,16 @@ function turnSpot(state: TableState, round: Round): string | null {
   return null;
 }
 
+/** The person's spot the round is waiting on (playing or insurance), with the round number; null while betting or waiting on a bot or the dealer. */
+export function bjTurn(state: TableState): { round: number; spot: string } | null {
+  const bj = state.bj;
+  if (!bj || bj.phase !== 'round') return null;
+  const { round } = load(state);
+  if (!round || round.isComplete) return null;
+  const spot = turnSpot(state, round);
+  return spot && isPerson(state, spot) ? { round: bj.roundNumber, spot } : null;
+}
+
 const isPerson = (state: TableState, spotId: string | null): boolean =>
   !!spotId && !!state.bj!.spots.find((s) => s.id === spotId)?.isHuman && !state.away[spotId];
 
