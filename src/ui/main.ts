@@ -27,6 +27,7 @@ import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml }
 import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './roulette';
 import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './baccarat';
 import { DEFAULT_VP, VideoPokerTable, VpSetup, bindVpSetupCard, vpSetupCardHtml } from './videopoker';
+import { DEFAULT_SL, SlSetup, SlotsTable, bindSlSetupCard, slSetupCardHtml } from './slots';
 import { HouseGame, isHouseGame } from './picker';
 import { equity, think } from './thinker';
 import { avatarHtml, botTitle, floatOver } from './talk';
@@ -57,6 +58,7 @@ interface Setup {
   rl: RlSetup;
   bac: BacSetup;
   vp: VpSetup;
+  sl: SlSetup;
   /** Free table with a coach: hints on every decision, no bank, stats or achievements. */
   practice: boolean;
 }
@@ -79,7 +81,7 @@ interface Prefs {
 const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
-  game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
+  game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, sl: DEFAULT_SL, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, dealerTalk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -97,6 +99,7 @@ function loadSettings(p: Profile) {
   setup.rl = { ...DEFAULT_RL, ...setup.rl };
   setup.bac = { ...DEFAULT_BAC, ...setup.bac };
   setup.vp = { ...DEFAULT_VP, ...setup.vp };
+  setup.sl = { ...DEFAULT_SL, ...setup.sl };
   setVolume(prefs.volume, !prefs.sound);
 }
 
@@ -177,7 +180,8 @@ function renderSetup() {
       ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me))
         : setup.game === 'roulette' ? rlSetupCardHtml(setup.rl, me.bank, canRefill(me))
         : setup.game === 'baccarat' ? bacSetupCardHtml(setup.bac, me.bank, canRefill(me))
-        : setup.game === 'videopoker' ? vpSetupCardHtml(setup.vp, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
+        : setup.game === 'videopoker' ? vpSetupCardHtml(setup.vp, me.bank, canRefill(me))
+        : setup.game === 'slots' ? slSetupCardHtml(setup.sl, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
           <span class="eyebrow">${setup.practice ? 'Your practice table' : 'Your table'}</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
@@ -231,7 +235,7 @@ function renderSetup() {
         </div>
       </aside>`}
 
-      ${friendsPanelHtml(setup.game === 'roulette' ? 'Roulette' : setup.game === 'baccarat' ? 'Baccarat' : setup.game === 'videopoker' ? 'Video poker' : undefined)}
+      ${friendsPanelHtml(setup.game === 'roulette' ? 'Roulette' : setup.game === 'baccarat' ? 'Baccarat' : setup.game === 'videopoker' ? 'Video poker' : setup.game === 'slots' ? 'Slots' : undefined)}
     </div>
   </main>`;
   app.querySelector('.setup-card .options')!.scrollTop = optionsScroll;
@@ -252,6 +256,7 @@ function renderSetup() {
   bindRlSetupCard(setup.rl, update);
   bindBacSetupCard(setup.bac, update);
   bindVpSetupCard(setup.vp, update);
+  bindSlSetupCard(setup.sl, update);
   app.querySelectorAll<HTMLButtonElement>('[data-structure]').forEach((b) => (b.onclick = () => update(() => (setup.structures[setup.variant] = b.dataset.structure as Structure))));
   app.querySelectorAll<HTMLButtonElement>('[data-format]').forEach((b) => (b.onclick = () => update(() => {
     const prev = setup.format;
@@ -306,11 +311,12 @@ function renderSetup() {
       blackjack.start();
       return;
     }
-    if (setup.game === 'roulette' || setup.game === 'baccarat' || setup.game === 'videopoker') {
+    if (setup.game === 'roulette' || setup.game === 'baccarat' || setup.game === 'videopoker' || setup.game === 'slots') {
       const hooks = { app, prefs, save: saveSettings, leave: renderSetup };
       house = setup.game === 'roulette' ? new RouletteTable({ ...hooks, setup: setup.rl })
         : setup.game === 'baccarat' ? new BaccaratTable({ ...hooks, setup: setup.bac })
-        : new VideoPokerTable({ ...hooks, setup: setup.vp });
+        : setup.game === 'videopoker' ? new VideoPokerTable({ ...hooks, setup: setup.vp })
+        : new SlotsTable({ ...hooks, setup: setup.sl });
       house.start();
       return;
     }
@@ -1382,7 +1388,7 @@ function ordinal(n: number): string {
 
 let game: Game | null = null;
 let blackjack: BlackjackTable | null = null;
-let house: RouletteTable | BaccaratTable | VideoPokerTable | null = null;
+let house: RouletteTable | BaccaratTable | VideoPokerTable | SlotsTable | null = null;
 let resizeTimer: number | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);

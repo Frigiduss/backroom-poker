@@ -21,6 +21,8 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
 - **Video poker** machines: Jacks or Better, Bonus Poker and Double Double Bonus, all on
   their full-pay tables. Bet one to five coins of 5 to 500 chips, hold, draw, and a royal
   flush on five coins pays 4,000.
+- **Slots:** the Lucky Sevens machine, three reels of suits, chips, crowns and sevens with
+  one to five pay lines and coins of 5 to 500 chips. Three sevens on a line pays 500 coins.
 - **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
   heads-up duel.
 - **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
@@ -73,6 +75,7 @@ Hand history: `←`/`→` step, `Space` play/pause, `↑`/`↓` other hands, `Es
 Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
 Roulette and baccarat: `1`–`3` pick a chip, `U` undo, `C` clear, `R` rebet, `Space` spin or deal.
 Video poker: `1`–`5` hold a card, `B` bet one, `X` bet max, `Space` deal or draw.
+Slots: `1`–`4` pick a coin, `L` lines, `X` spin max, `Space` spin.
 
 ## Install it as an app
 
