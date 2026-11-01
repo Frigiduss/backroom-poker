@@ -1,11 +1,12 @@
 import { Card, makeCard } from '../engine/cards';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { cardHtml } from './dom';
+import { symHtml } from './slots';
 
 /** Every game in the lobby: a poker variant, or one of the house games. */
 export type GameId = VariantId | HouseGame;
-export type HouseGame = 'blackjack' | 'roulette' | 'baccarat' | 'videopoker';
-export const HOUSE_GAMES: HouseGame[] = ['blackjack', 'roulette', 'baccarat', 'videopoker'];
+export type HouseGame = 'blackjack' | 'roulette' | 'baccarat' | 'videopoker' | 'slots';
+export const HOUSE_GAMES: HouseGame[] = ['blackjack', 'roulette', 'baccarat', 'videopoker', 'slots'];
 export const isHouseGame = (id: string): id is HouseGame => (HOUSE_GAMES as string[]).includes(id);
 
 interface Category { id: string; name: string; games: GameId[] }
@@ -51,6 +52,7 @@ const SHOWCASE: Record<GameId, Omit<Showcase, 'name' | 'blurb' | 'facts'>> = {
   roulette: { hand: [], art: rouletteArt(), caption: 'Seventeen, black. A chip straight up on it pays 35 to 1.' },
   baccarat: { hand: [c(4, 2), c(5, 3)], handLabel: 'Player', board: [c(13, 0), c(7, 1)], boardLabel: 'Banker', caption: 'A natural nine for Player beats Banker\'s seven.' },
   videopoker: { hand: [c(11, 2), c(11, 3), c(4, 0), c(11, 1), c(9, 2)], caption: 'Three jacks dealt. Hold them and draw two more cards.' },
+  slots: { hand: [], art: slotsArt(), caption: 'Three sevens on the middle line: 500 coins a coin bet.' },
 };
 
 /** A few pockets of the wheel around 17, for the feature panel. */
@@ -58,6 +60,12 @@ function rouletteArt(): string {
   const run = [4, 21, 2, 25, 17, 34, 6, 27, 13];
   const reds = new Set([21, 25, 34, 27]);
   return `<div class="rl-art" aria-hidden="true">${run.map((n, i) => `<span class="${reds.has(n) ? 'red' : 'black'}${n === 17 ? ' hit' : ''}" style="--i:${i}">${n}${n === 17 ? '<i class="rl-art-ball"></i>' : ''}</span>`).join('')}</div>`;
+}
+
+/** The slot window with three sevens across the middle, for the feature panel. */
+function slotsArt(): string {
+  const rows = [['crown', 'heart', 'chip'], ['seven', 'seven', 'seven'], ['spade', 'club', 'diamond']] as const;
+  return `<div class="sl-art" aria-hidden="true">${rows.map((r, i) => r.map((s) => symHtml(s, i === 1 ? 'hit' : '')).join('')).join('')}</div>`;
 }
 
 const HOUSE: Record<HouseGame, { name: string; blurb: string; facts: string[] }> = {
@@ -80,6 +88,11 @@ const HOUSE: Record<HouseGame, { name: string; blurb: string; facts: string[] }>
     name: 'Video Poker',
     blurb: 'Five cards, one draw, and a pay table on the glass. Hold what you like, draw the rest, and a royal flush on five coins pays 4,000.',
     facts: ['Casino', 'vs the machine', 'Jacks or Better', 'Bonus Poker', 'Double Double Bonus'],
+  },
+  slots: {
+    name: 'Slots',
+    blurb: 'Lucky Sevens: three reels of suits, chips, crowns and sevens. Play one to five lines, pull, and three sevens on a line pays 500 coins.',
+    facts: ['Casino', 'vs the machine', '3 reels', '5 lines'],
   },
 };
 
@@ -104,7 +117,8 @@ let featured: GameId | null = null;
 const fan = (n: number) => `<span class="hole" style="--n:${n};--s:${n > 4 ? 5 : n > 2 ? 7 : 9}px" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i style="--i:${i};--k:${i - (n - 1) / 2}"></i>`).join('')}</span>`;
 const holeCount = (id: GameId) => (id === 'videopoker' ? 5 : isHouseGame(id) ? 2 : VARIANTS[id].holeCards);
 const wheelIcon = '<span class="hole wheel-icon" aria-hidden="true"><i></i></span>';
-const pillIcon = (id: GameId) => (id === 'roulette' ? wheelIcon : fan(holeCount(id)));
+const slotIcon = '<span class="hole slot-icon" aria-hidden="true">7</span>';
+const pillIcon = (id: GameId) => (id === 'roulette' ? wheelIcon : id === 'slots' ? slotIcon : fan(holeCount(id)));
 
 /** Tabs of game families, the games in the open tab, and a featured view of the chosen game. */
 export function gamePickerHtml(selected: GameId): string {

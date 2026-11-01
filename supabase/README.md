@@ -90,6 +90,22 @@ to list every table and `table CODE` to work on one you aren't sitting at. `kick
 `close` remove a person or end a table. The table server looks the account up in the
 `admins` table itself before doing any of it, and every change goes in `admin_log`.
 
+## Crash reports
+
+When a player's game hits an error, it sends a short report: the error and where in the code
+it happened, what they were playing, their browser and which deploy they were on. Admins see
+them in the dashboard's **Crashes** tab, grouped so the same error from many players is one
+report with a count. **Mark fixed** hides a report until the error happens again.
+
+To turn it on, run [`crashes.sql`](crashes.sql) once in the SQL Editor, after `admin.sql`.
+Type `crashtest` in the console to send a test report and check it arrives.
+
+Anyone playing can send reports, signed in or not, so the database guards it: reports only go
+in through `report_crash()`, which trims every field, takes at most 30 an hour from one
+connection or account (600 from everybody), only 60 new kinds of error an hour, and keeps the
+newest 500. Only admins can read them. Reports never include page addresses' query or
+`#` part (sign-in links put tokens there), and connections are kept only as a salted hash.
+
 ## Playing with friends (online tables)
 
 Signed-in players can make a private table, send its five-letter code (or invite link) to

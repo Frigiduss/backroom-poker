@@ -16,6 +16,7 @@ import { AdminCommand, AdminTableInfo } from '../online/protocol';
 import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer } from './profiles';
+import { testCrash } from './crash';
 import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
 
 /** What the console needs from a running game (main.ts's Game provides it). */
@@ -1068,6 +1069,13 @@ const COMMANDS: Command[] = [
       const rows = await onlineAdmin().recentLog(Math.max(1, Math.min(200, Number(args[0]) || 20)));
       if (!rows.length) return out('Nothing logged yet.');
       out(table(rows.map((r) => [new Date(r.at).toLocaleString(), esc(r.action), `<code>${esc(JSON.stringify(r.detail))}</code>`]), ['When', 'Action', 'Detail']));
+    },
+  },
+  {
+    name: 'crashtest', usage: 'crashtest', group: 'Accounts', help: 'Sends a test crash report, to check reports reach the admin dashboard\'s Crashes tab.',
+    async run(_args, out) {
+      testCrash();
+      out('Test crash report sent. It shows in the admin dashboard under Crashes.', 'ok');
     },
   },
 ];

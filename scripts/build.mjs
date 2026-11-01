@@ -15,6 +15,16 @@ const dist = join(root, 'dist');
 const args = process.argv.slice(2);
 mkdirSync(dist, { recursive: true });
 
+/** Which deploy this is (the commit it was built from), shown with crash reports. */
+const BUILD = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'dev';
+  } catch {
+    return 'dev';
+  }
+})();
+const define = { __BUILD__: JSON.stringify(BUILD) };
+
 /**
  * Resolves `import source from 'virtual:bot-worker'` to the bot worker (src/bots/worker.ts),
  * bundled on its own and handed over as a string, so the page can start it from a Blob
@@ -43,7 +53,7 @@ async function bundleTests() {
   const files = readdirSync(join(root, 'test')).filter((f) => f.endsWith('.test.ts'));
   await esbuild.build({
     entryPoints: files.map((f) => join(root, 'test', f)),
-    bundle: true, platform: 'node', format: 'esm', outdir: out, logLevel: 'warning', plugins: [botWorker],
+    bundle: true, platform: 'node', format: 'esm', outdir: out, logLevel: 'warning', plugins: [botWorker], define,
   });
   execFileSync(process.execPath, ['--test', ...files.map((f) => join(out, f.replace(/\.ts$/, '.js')))], { stdio: 'inherit' });
 }
@@ -96,7 +106,7 @@ function page(js, css, template = 'src/ui/index.html', app = false) {
 async function buildOnce() {
   const result = await esbuild.build({
     entryPoints: [join(root, 'src/ui/main.ts')],
-    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker],
+    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker], define,
   });
   const js = result.outputFiles[0].text;
   const css = readFileSync(join(root, 'src/ui/styles.css'), 'utf8');
@@ -128,7 +138,7 @@ function writeAppFiles(html) {
 async function buildAdmin(gameCss) {
   const result = await esbuild.build({
     entryPoints: [join(root, 'src/admin/main.ts')],
-    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker],
+    bundle: true, minify: true, format: 'iife', target: 'es2020', write: false, logLevel: 'warning', plugins: [botWorker], define,
   });
   const css = gameCss + readFileSync(join(root, 'src/admin/admin.css'), 'utf8');
   const html = page(result.outputFiles[0].text, css, 'src/admin/index.html');
@@ -154,7 +164,7 @@ if (args.includes('--test')) {
 } else if (args.includes('--serve')) {
   const ctx = await esbuild.context({
     entryPoints: [join(root, 'src/ui/main.ts')], bundle: true, format: 'iife', sourcemap: true,
-    outdir: join(dist, 'dev'), entryNames: 'game', logLevel: 'info', plugins: [botWorker],
+    outdir: join(dist, 'dev'), entryNames: 'game', logLevel: 'info', plugins: [botWorker], define,
   });
   await ctx.watch();
   writeFileSync(join(dist, 'dev', 'index.html'), readFileSync(join(root, 'src/ui/index.html'), 'utf8').replace('<!--__ICONS__-->', icons).replace('/*__CSS__*/', '').replace('</head>', '<link rel="stylesheet" href="styles.css"></head>'));

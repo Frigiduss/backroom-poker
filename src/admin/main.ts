@@ -4,26 +4,30 @@
 // and changes things through the same database rules (supabase/admin.sql) and table-server
 // admin checks as the console, and most buttons simply run a console command.
 import { ONLINE } from '../accounts/config';
-import { AdminApi, AdminLogEntry, AdminPlayer, Factor, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
+import { AdminApi, AdminLogEntry, AdminPlayer, CrashApi, CrashReport, Factor, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
 import { Card } from '../engine/cards';
 import { DIFFICULTY_NAMES } from '../engine/table';
 import { VARIANTS } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { AdminTableInfo, AdminTableSummary } from '../online/protocol';
 import { cardHtml, esc, fmt } from '../ui/dom';
+import { BUILD, installCrashReporter, setCrashAuth } from '../ui/crash';
 import { consolePrint, dockConsole, execute, initConsole, pinTable, refreshConsoleAccess } from '../ui/console';
 
-type Tab = 'tables' | 'players' | 'accounts' | 'announcement' | 'log';
+type Tab = 'tables' | 'players' | 'accounts' | 'crashes' | 'announcement' | 'log';
 const TABS: [Tab, string][] = [
   ['tables', 'Live tables'],
   ['players', 'Players'],
   ['accounts', 'Accounts'],
+  ['crashes', 'Crashes'],
   ['announcement', 'Announcement'],
   ['log', 'Change log'],
 ];
 const TAB_KEY = 'backroom-poker-admin-tab';
 /** How often the live panels (tables, the table being watched, the log) fetch again. */
 const REFRESH_MS = 3000;
+
+installCrashReporter(() => 'Admin dashboard');
 
 const app = document.getElementById('app')!;
 let storage: Storage | null = null;
@@ -34,6 +38,8 @@ try {
 }
 const auth = onlineEnabled(ONLINE) ? new OnlineAuth(ONLINE, storage) : null;
 const api = auth ? new AdminApi(auth) : null;
+const crashApi = auth ? new CrashApi(auth) : null;
+setCrashAuth(auth);
 const tables = auth ? new TableClient(auth) : null;
 /** The game, relative to this page: one folder up on the published site, index.html next to a local copy. */
 const gameUrl = /\.html?$/.test(location.pathname) ? 'index.html' : '../';
@@ -240,6 +246,27 @@ function renderPanel() {
       <div class="adm-bar"><h2>Accounts</h2><button type="button" class="btn" id="adm-reload">Refresh</button></div>
       <div id="adm-data" class="adm-data"><p class="adm-muted">Loading…</p></div>`;
     $('#adm-reload')!.onclick = () => void load();
+  } else if (tab === 'crashes') {
+    panel.innerHTML = `
+      <div class="adm-bar"><h2>Crashes</h2>
+        <select id="adm-crash-show" aria-label="Which crashes to show">
+          ${(['open', 'fixed', 'all'] as const).map((v) => `<option value="${v}"${crashShow === v ? ' selected' : ''}>${v === 'open' ? 'Open' : v === 'fixed' ? 'Marked fixed' : 'All'}</option>`).join('')}
+        </select>
+        <button type="button" class="btn" id="adm-reload">Refresh</button>
+        <button type="button" class="btn adm-danger" id="adm-crash-purge" title="Deletes every report marked fixed">Delete fixed</button></div>
+      <div id="adm-data" class="adm-data"><p class="adm-muted">Loading…</p></div>`;
+    const show = $<HTMLSelectElement>('#adm-crash-show')!;
+    show.onchange = () => {
+      crashShow = show.value as typeof crashShow;
+      drawCrashes();
+    };
+    $('#adm-reload')!.onclick = () => void load();
+    $('#adm-crash-purge')!.onclick = async () => {
+      const n = crashes.filter((c) => c.fixedAt).length;
+      if (!n) return consolePrint('No reports are marked fixed.', 'dim');
+      if (!confirm(`Delete the ${n} report${n === 1 ? '' : 's'} marked fixed?`)) return;
+      await crashAction(() => crashApi!.removeFixed(), 'crash.purge', { reports: n });
+    };
   } else if (tab === 'announcement') {
     panel.innerHTML = `
       <div class="adm-bar"><h2>Lobby announcement</h2></div>
@@ -261,6 +288,7 @@ async function load() {
     if (showing === 'tables') await loadTables();
     else if (showing === 'players') await loadPlayers();
     else if (showing === 'accounts') await loadAccounts();
+    else if (showing === 'crashes') await loadCrashes();
     else if (showing === 'announcement') await loadAnnouncement();
     else await loadLog();
   } catch (err) {
@@ -481,6 +509,85 @@ async function loadAccounts() {
     playerSearch = b.dataset.email!;
     switchTab('players');
   }));
+}
+
+// ---------- crashes ----------
+
+let crashes: CrashReport[] = [];
+let crashShow: 'open' | 'fixed' | 'all' = 'open';
+
+async function loadCrashes() {
+  let list: CrashReport[];
+  try {
+    list = await crashApi!.list();
+  } catch (err) {
+    if (err instanceof OnlineError && err.status === 401) throw err;
+    const el = $('#adm-data');
+    if (el && tab === 'crashes') {
+      el.innerHTML = `<p class="adm-error">${esc((err as Error).message)}</p>
+        <p class="adm-muted">If crash reports haven't been set up yet, run <code>supabase/crashes.sql</code> in the Supabase SQL Editor.</p>`;
+    }
+    return;
+  }
+  const accounts = await api!.accounts().catch(() => []);
+  emails = new Map(accounts.map((a) => [a.id, a.email]));
+  crashes = list;
+  if (tab === 'crashes') drawCrashes();
+}
+
+function drawCrashes() {
+  const el = $('#adm-data');
+  if (!el) return;
+  const rows = crashes.filter((c) => crashShow === 'all' || (crashShow === 'fixed') === !!c.fixedAt);
+  const open = crashes.filter((c) => !c.fixedAt).length;
+  const list = (xs: string[], current?: string) => xs.length
+    ? xs.map((x) => `${esc(x)}${x === current ? ' <span class="adm-pill">this build</span>' : ''}`).join(', ')
+    : '<span class="adm-muted">unknown</span>';
+  el.innerHTML = rows.length
+    ? `<ol class="adm-crashes">${rows.map((c) => `
+      <li class="adm-crash${c.fixedAt ? ' adm-out' : ''}">
+        <div class="adm-crash-head">
+          <b class="adm-crash-msg">${esc(c.message)}</b>
+          <span class="adm-crash-count">${c.count === 1 ? 'once' : `${fmt(c.count)} times`} · ${c.people >= 50 ? '50+' : c.people} ${c.people === 1 ? 'person' : 'people'}</span>
+        </div>
+        <dl class="adm-crash-meta">
+          <dt>Last</dt><dd><span title="${esc(new Date(c.lastAt).toLocaleString())}">${ago(c.lastAt)}</span> <span class="adm-muted">(first ${ago(c.firstAt)})</span></dd>
+          <dt>Game</dt><dd>${list(c.games)}</dd>
+          <dt>Browser</dt><dd>${list(c.browsers)}</dd>
+          <dt>Build</dt><dd>${list(c.builds, BUILD)}</dd>
+          ${c.account ? `<dt>Account</dt><dd>${esc(emails.get(c.account) ?? shortId(c.account))} <span class="adm-muted">(latest signed-in)</span></dd>` : ''}
+          ${c.fixedAt ? `<dt>Fixed</dt><dd>marked ${ago(c.fixedAt)}; it opens again if it happens again</dd>` : ''}
+        </dl>
+        ${c.stack ? `<details><summary>Stack trace</summary><pre class="adm-stack">${esc(c.stack)}</pre></details>` : ''}
+        <div class="adm-row-actions">
+          <button type="button" class="btn btn-sm" data-c="${c.fixedAt ? 'open' : 'fix'}" data-id="${c.id}">${c.fixedAt ? 'Reopen' : 'Mark fixed'}</button>
+          <button type="button" class="btn btn-sm adm-danger" data-c="delete" data-id="${c.id}">Delete</button>
+        </div>
+      </li>`).join('')}</ol>
+      <p class="adm-muted">${rows.length} shown · ${open} open of ${crashes.length}. The same error from many players is one report. The server keeps the newest 500.</p>`
+    : `<p class="adm-muted">${crashes.length
+      ? crashShow === 'open' ? 'Nothing open. Every report is marked fixed.' : 'Nothing here.'
+      : 'No crashes reported yet. Players\' games send errors here as they happen (type <b>crashtest</b> in the terminal to send a test one).'}</p>`;
+  el.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => {
+    const c = crashes.find((x) => x.id === Number(b.dataset.id));
+    if (!c) return;
+    const detail = { id: c.id, message: c.message.slice(0, 80) };
+    if (b.dataset.c === 'delete') {
+      if (confirm(`Delete this report for good?\n\n${c.message}`)) void crashAction(() => crashApi!.remove(c.id), 'crash.delete', detail);
+    } else {
+      void crashAction(() => crashApi!.setFixed(c.id, b.dataset.c === 'fix'), b.dataset.c === 'fix' ? 'crash.fixed' : 'crash.reopen', detail);
+    }
+  }));
+}
+
+async function crashAction(act: () => Promise<void>, action: string, detail: Record<string, unknown>) {
+  try {
+    await act();
+    await api!.log(action, detail);
+  } catch (err) {
+    consolePrint(esc((err as Error).message), 'err');
+  }
+  await load();
 }
 
 // ---------- announcement and log ----------
