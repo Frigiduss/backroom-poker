@@ -16,7 +16,7 @@ import { buildView } from '../bots/view';
 import { Card, Seed, createRng, secureSeed, shuffle, subSeed } from '../engine/cards';
 import { Action, Hand, rigProblem } from '../engine/hand';
 import { dealtAsSeen } from '../engine/history';
-import { BotStyle, DIFFICULTIES, Difficulty, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
+import { BotStyle, CLASSIC_DIFFICULTIES, DIFFICULTIES, Difficulty, hasMaster, PlayerStats, Seat, SeatConfig, Table, TableConfig, emptyStats } from '../engine/table';
 import { VARIANTS, VariantId } from '../engine/variants';
 import { BjCredits, BjError, BjState, bjAdmin, bjAdminInfo, bjAutoStep, bjBack, bjDeadline, bjFreeSpot, bjMove, bjRebuy, bjResume, bjStart, bjTickAt, bjView, checkBjSettings } from './blackjack';
 import { ChatError, ChatState, chatAdmin, chatAdminInfo, chatSay, chatView, findMember } from './chat';
@@ -245,7 +245,8 @@ export function checkSettings(raw: unknown): TableSettings {
   if (!v) throw new TableError('Pick a game for the table.');
   const format = s.format === 'sng' || s.format === 'headsup' ? s.format : 'cash';
   const structure = s.structure && v.structures.includes(s.structure) ? s.structure : v.defaultStructure;
-  const difficulty = s.difficulty === 'mixed' || DIFFICULTIES.includes(s.difficulty as Difficulty) ? s.difficulty! : 'medium';
+  let difficulty = s.difficulty === 'mixed' || DIFFICULTIES.includes(s.difficulty as Difficulty) ? s.difficulty! : 'medium';
+  if (difficulty === 'master' && !hasMaster(v.id, structure)) difficulty = 'expert';
   const stackBB = [50, 100, 200].includes(Number(s.stackBB)) ? Number(s.stackBB) : 100;
   const blindSpeed = s.blindSpeed === 'slow' || s.blindSpeed === 'turbo' ? s.blindSpeed : 'normal';
   const seats = format === 'headsup' ? 2 : Math.max(2, Math.min(v.maxPlayers, Math.round(Number(s.seats) || 6)));
@@ -325,7 +326,7 @@ function startGame(state: TableState, now: number, seed: Seed, credits?: AwardCr
   while (seats.length < Math.max(2, s.seats)) {
     const name = names[seats.length % names.length];
     // Each regular plays their own style.
-    seats.push({ name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(DIFFICULTIES) : s.difficulty, style: personaFor(name)?.style ?? pick(STYLES) });
+    seats.push({ name, isHuman: false, difficulty: s.difficulty === 'mixed' ? pick(CLASSIC_DIFFICULTIES) : s.difficulty, style: personaFor(name)?.style ?? pick(STYLES) });
   }
   // People sit in a random order around the table.
   const order = shuffle(seats.map((_, i) => i), rng);

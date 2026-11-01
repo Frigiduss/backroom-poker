@@ -281,7 +281,7 @@ export function renderAuth(app: HTMLElement, onReady: () => void, mode: 'signin'
     <p class="form-error" id="auth-error" role="alert"></p>
     <div class="auth-alt"><span>or</span></div>
     <button type="button" class="btn auth-offline" id="play-offline">Play offline on this device</button>
-  `, 'Pull up a chair. Eight games, five kinds of bots, and a chip bank that follows you from table to table.');
+  `, 'Pull up a chair. Eight games, six levels of bots, and a chip bank that follows you from table to table.');
 
   const email = document.getElementById('auth-email') as HTMLInputElement;
   const pass = document.getElementById('auth-pass') as HTMLInputElement;
