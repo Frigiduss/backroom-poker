@@ -147,7 +147,7 @@ class GuideViewer {
           ${g.ranking ? rankingHtml(g.ranking) : ''}
         </section>
         <section class="hg-walk" aria-label="Your first hand">
-          <div class="hg-walk-head"><h4>Your first ${this.game === 'roulette' ? 'spin' : this.game === 'baccarat' ? 'coup' : 'hand'}</h4><span>Step ${this.step + 1} of ${n}</span></div>
+          <div class="hg-walk-head"><h4>Your first ${this.game === 'roulette' || this.game === 'slots' ? 'spin' : this.game === 'baccarat' ? 'coup' : 'hand'}</h4><span>Step ${this.step + 1} of ${n}</span></div>
           <div class="hg-dots" aria-hidden="true">${g.steps.map((_, i) => `<i class="${i === this.step ? 'on' : i < this.step ? 'done' : ''}"></i>`).join('')}</div>
           <div class="hg-step" aria-live="polite">
             <h5>${s.title}</h5>

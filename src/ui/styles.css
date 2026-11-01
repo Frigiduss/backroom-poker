@@ -2731,7 +2731,7 @@ button.bonus-btn.ready:hover { color: var(--ink); filter: brightness(1.06); }
 .hg-rules h3 { margin: 4px 0 6px; font-family: var(--display); font-size: 34px; line-height: 1.05; }
 .hg-goal { margin: 0 0 14px; font-size: 16px; color: var(--text); max-width: 60ch; }
 .hg-list { margin: 0; padding-left: 20px; display: grid; gap: 9px; color: var(--muted); font-size: 14.5px; line-height: 1.5; max-width: 66ch; }
-.hg-list b, .hg-step b, .hg-goal b { color: var(--text); font-weight: 600; }
+.hg-list b, .hg-step p b, .hg-goal b { color: var(--text); font-weight: 600; }
 .hg-list li::marker { color: var(--gold); font-weight: 700; }
 .hg-rank { margin-top: 20px; padding: 14px 16px; border-radius: 12px; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); max-width: 520px; }
 .hg-rank h4, .hg-walk-head h4 { margin: 0 0 10px; font-family: var(--label); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; color: var(--gold); font-weight: 600; }
