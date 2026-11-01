@@ -11,6 +11,7 @@
 import { PERSONA_NAMES, personaFor } from '../bots/persona';
 import { cleanAvatar } from '../accounts/avatars';
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
+import { withSeason } from '../accounts/seasons';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
 import { Card, Seed, createRng, secureSeed, shuffle, subSeed } from '../engine/cards';
@@ -194,8 +195,10 @@ async function checkTitle(db: TableDb, userId: string, tag: PlayerTag): Promise<
   }
 }
 
-function addCredit(credits: AwardCredit[] | undefined, m: Member | undefined, tally: Tally) {
+function addCredit(credits: AwardCredit[] | undefined, m: Member | undefined, played: Tally) {
   if (!credits || !m?.playerId) return;
+  // Games at online tables count toward a seasonal event too, by the server's calendar.
+  const tally = withSeason(played);
   const prev = credits.find((c) => c.userId === m.userId && c.playerId === m.playerId);
   if (prev) prev.tally = mergeTally(prev.tally, tally);
   else credits.push({ userId: m.userId, playerId: m.playerId, tally });
