@@ -9,7 +9,7 @@ import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Forma
 import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
-  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally,
+  finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally, allCounters,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
@@ -25,6 +25,8 @@ import { activeTable, bindFriendsPanel, friendsPanelHtml, initOnlinePlay, joinTa
 import { bindLobbyFriends, friendsButtonHtml, initFriends } from './player/friends';
 import { bindGamePicker, gamePickerHtml } from './picker';
 import { bindLobbyExtras, lobbyExtrasHtml } from './player/leaderboard';
+import { bindSeasonBanner, seasonBannerHtml } from './player/season';
+import { applyLook } from './player/looks';
 import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml } from './casino/blackjack';
 import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './casino/roulette';
 import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './casino/baccarat';
@@ -177,6 +179,7 @@ function renderSetup() {
       <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
     </header>
     ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
+    ${seasonBannerHtml(me, allCounters(me, serverAwards()))}
 
     <div class="lobby-grid">
       ${gamePickerHtml(setup.game === 'poker' ? setup.variant : setup.game)}
@@ -291,6 +294,11 @@ function renderSetup() {
       ...(setup.game === 'blackjack' ? { game: 'blackjack' as const, bjLimits: setup.bj.limits, bots: setup.bj.bots } : {}),
     },
   }));
+  bindSeasonBanner(app, me, allCounters(me, serverAwards()), () => {
+    applyLook(me, serverAwards());
+    savePlayer();
+    renderSetup();
+  });
   bindConsoleButton();
   bindLobbyExtras(app, renderSetup);
   bindLobbyFriends(app, renderSetup);
