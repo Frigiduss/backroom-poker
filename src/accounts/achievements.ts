@@ -23,7 +23,7 @@ export type Counters = Record<string, number>;
 export type Tier = 1 | 2 | 3 | 4;
 export const TIER_NAMES: Record<Tier, string> = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Diamond' };
 
-export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'videopoker' | 'slots' | 'online';
+export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'videopoker' | 'slots' | 'events' | 'online';
 export const GROUP_NAMES: Record<AchievementGroup, string> = {
   career: 'Career',
   hands: 'Big hands',
@@ -34,9 +34,10 @@ export const GROUP_NAMES: Record<AchievementGroup, string> = {
   casino: 'Roulette and baccarat',
   videopoker: 'Video poker',
   slots: 'Slots',
+  events: 'Seasonal events',
   online: 'Online with friends',
 };
-export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'videopoker', 'slots', 'online'];
+export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'videopoker', 'slots', 'events', 'online'];
 
 export interface Achievement {
   id: string;
@@ -338,6 +339,11 @@ ladder('slots', 'sl.bigWin', [
 ]);
 ladder('slots', 'sl.sevens', [
   { id: 'sl-sevens', name: 'Triple Seven', desc: 'Line up three sevens for the top prize.', tier: 4, goal: 1, title: 'Lucky Sevens' },
+]);
+
+// Seasonal events: games count only while the event is on (see seasons.ts).
+ladder('events', 'ev.winter.played', [
+  { id: 'snowed-in', name: 'Snowed In', desc: 'Play 50 games of anything during Winter Nights, all through December.', tier: 2, goal: 50, title: 'Snowbird' },
 ]);
 
 // Online with friends: credited by the table server only.

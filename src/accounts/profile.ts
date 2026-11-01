@@ -2,6 +2,7 @@
 // settings. Everything here is plain data and pure bookkeeping, so the same rules work with
 // browser storage today and an online backend later.
 import { Achievement, Counters, Tally, addTally, combine, unlockedIn } from './achievements';
+import { withSeason } from './seasons';
 import type { BonusRecord } from './bonus';
 import { ChallengeRecord, emptyChallenges, normalizeChallenges } from './challenges';
 import { cleanAvatar } from './avatars';
@@ -365,9 +366,12 @@ export function profileCounters(p: Profile): Counters {
 /** Everything that counts toward achievements: this player's own play plus what the table server credited. */
 export const allCounters = (p: Profile, server: Counters = {}): Counters => combine(profileCounters(p), server);
 
-/** Adds a game event to the player's progress. Online counters are left to the server. */
-export function credit(p: Profile, t: Tally): void {
-  addTally(p.achievements.counters, t);
+/**
+ * Adds a game event to the player's progress, counting it toward any seasonal event that is
+ * on. Online counters are left to the server.
+ */
+export function credit(p: Profile, t: Tally, now: Date = new Date()): void {
+  addTally(p.achievements.counters, withSeason(t, now));
   touch(p);
 }
 

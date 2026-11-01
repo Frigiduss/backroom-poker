@@ -1851,6 +1851,7 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
 [data-felt="sahara"] { --felt-hi: #9c7a47; --felt: #735630; --felt-deep: #3d2c15; --felt-line: rgba(255, 238, 200, .22); }
 [data-felt="velvet"] { --felt-hi: #6b3b97; --felt: #4a256f; --felt-deep: #220f39; --felt-line: rgba(246, 214, 142, .2); }
 [data-felt="onyx"] { --felt-hi: #2c2c2c; --felt: #171717; --felt-deep: #050505; --felt-line: rgba(230, 184, 92, .34); }
+[data-felt="snowfall"] { --felt-hi: #3d7aa3; --felt: #245276; --felt-deep: #0d263e; --felt-line: rgba(236, 246, 255, .3); }
 
 [data-back="classic"] {
   --back-a: #7d1a2a; --back-b: #57101c; --back-edge: var(--ivory); --back-ink: rgba(246, 214, 142, .5);
@@ -1899,6 +1900,14 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
     repeating-linear-gradient(60deg, rgba(255, 255, 255, .32) 0 1px, transparent 1px 9px),
     repeating-linear-gradient(-60deg, rgba(255, 255, 255, .32) 0 1px, transparent 1px 9px),
     linear-gradient(200deg, rgba(255, 196, 230, .55), transparent 60%);
+}
+
+[data-back="snowflake"] {
+  --back-a: #b3263a; --back-b: #5e0f1c; --back-edge: #f4f8ff; --back-ink: rgba(244, 248, 255, .6);
+  --back-art:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f4f8ff' stroke-width='1.4' stroke-linecap='round'%3E%3Cpath d='M12 2v20M3.3 7l17.4 10M3.3 17l17.4-10'/%3E%3Cpath d='M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5M3.6 10.2l3.4-.9-.9-3.4M20.4 13.8l-3.4.9.9 3.4M6.1 17.1l.9-3.4-3.4-.9M17.9 6.9l-.9 3.4 3.4.9'/%3E%3Ccircle cx='12' cy='12' r='1.6' fill='%23f4f8ff' stroke='none'/%3E%3C/svg%3E") center / 58% no-repeat,
+    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, .55) 0 1.2px, transparent 1.6px) 0 0 / 9px 9px,
+    radial-gradient(circle at 70% 64%, rgba(255, 255, 255, .35) 0 1px, transparent 1.4px) 0 0 / 7px 7px;
 }
 
 .looks .look-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
@@ -1954,6 +1963,36 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   .ch-list { grid-template-columns: 1fr; }
   .ch-card { grid-template-rows: none; padding: 14px; gap: 8px; }
   .ch-desc { font-size: 16px; }
+/* ---------- Seasonal event banner ---------- */
+.season-banner {
+  display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-radius: 14px;
+  border: 1px solid rgba(236, 246, 255, .22);
+  background:
+    radial-gradient(circle at 12% 30%, rgba(255, 255, 255, .16) 0 1px, transparent 1.6px) 0 0 / 23px 23px,
+    radial-gradient(circle at 60% 70%, rgba(255, 255, 255, .1) 0 1px, transparent 1.6px) 0 0 / 31px 31px,
+    linear-gradient(120deg, rgba(36, 82, 118, .55), rgba(13, 38, 62, .7));
+}
+.season-felt {
+  flex: none; width: 74px; height: 50px; border-radius: 999px; display: grid; place-items: center;
+  background: radial-gradient(ellipse 70% 65% at 50% 40%, var(--felt-hi), var(--felt) 50%, var(--felt-deep));
+  box-shadow: 0 0 0 2px var(--wood), 0 0 0 3px var(--wood-hi), inset 0 4px 12px rgba(0, 0, 0, .5);
+}
+.season-felt .card { --w: 26px; transform: rotate(-8deg); }
+.season-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.season-text b { font-family: var(--display); font-size: 21px; line-height: 1.15; }
+.season-text > span:last-child { font-size: 14px; color: var(--muted); }
+.season-text > span:last-child b { font-family: var(--body); font-size: inherit; color: var(--text); }
+.season-side { flex: none; display: grid; gap: 6px; justify-items: end; min-width: 150px; }
+.season-side .bar { width: 100%; }
+.season-done { font-size: 13px; color: var(--gold-hi); font-weight: 600; }
+@media (max-width: 640px) {
+  .season-banner { flex-wrap: wrap; gap: 10px 12px; padding: 10px 12px; }
+  .season-felt { width: 58px; height: 40px; }
+  .season-felt .card { --w: 20px; }
+  .season-text { flex-basis: calc(100% - 80px); }
+  .season-side { flex-basis: 100%; grid-template-columns: 1fr auto; align-items: center; justify-items: stretch; min-width: 0; }
+  .season-side .ach-num { grid-row: 2; }
+  .season-side .btn, .season-side .season-done { grid-column: 2; grid-row: 1 / span 2; }
 }
 
 /* ---------- Daily bonus and leaderboard ---------- */

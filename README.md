@@ -33,7 +33,7 @@ src/
                rivals.ts (grudges), dealers.ts (casino dealers), worker.ts/brain.ts (web worker)
   accounts/    profiles behind AccountStore (local or Supabase), bank rules, stats,
                achievements, bonus, weekly challenges, leaderboard, friends, gifts, avatars,
-               crash reports
+               crash reports, seasons.ts (seasonal events: dates, free looks, the event achievement)
   online/      table server (server.ts, blackjack.ts, bundled into the Edge Function by
                edge.ts), client.ts, protocol, table chat
   ui/          the poker table and app shell: main.ts (startup + poker table), index.html,
@@ -43,7 +43,7 @@ src/
     app/       PWA files: icons, manifest, service worker (sw.js)
     casino/    blackjack, roulette, baccarat, video poker, slots, house.ts (their shared frame)
     player/    profile and sign-in, stats, achievements, looks, faces and pictures,
-               leaderboard, weekly challenges, friends, hand history
+               leaderboard, weekly challenges, friends, hand history, season.ts (lobby event banner)
     online/    online tables, online blackjack, table chat
     guides/    how to play: guide-data.ts (rules + first-hand walkthroughs, no DOM) and the
                guide screen. Keep it in step with the engines; test/guide.test.ts checks it
