@@ -6,8 +6,10 @@ import { BAC_DECKS, BAC_LIMITS, BAC_PAYOUT, BAC_SPOTS, BAC_SPOT_NAMES, BacBets, 
 import { Shoe } from '../../engine/blackjack';
 import { createRng } from '../../engine/cards';
 import { cardHtml, chipsHtml, esc, fmt } from '../dom';
-import { HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
+import { HouseHooks, HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
 import { play } from '../sound';
+import { floatOver } from '../talk';
+import { Dealer, DealerMoment, bacMoment, dealerLine, dealerSpeaks, pickDealer, shouldWhisper, whisperLine } from '../../bots/dealers';
 
 // ---------- lobby settings ----------
 
@@ -78,6 +80,20 @@ export class BaccaratTable extends HouseTable<BacSetup> {
   /** Cards already drawn, so only new ones animate. */
   private seen = new Set<string>();
   private coups = 0;
+  /** The croupier tonight, the coup they last spoke on, and their line waiting to float up. */
+  private readonly talkRng = createRng();
+  private readonly dealer: Dealer = pickDealer('baccarat', this.talkRng);
+  private dealerLast = -10;
+  private dealerSays = '';
+  /** The bank when the player sat down, to tell how far down they are; and whether the croupier has whispered yet. */
+  private readonly startBank = this.profile.bank;
+  private whispered = false;
+  private whisper = '';
+
+  constructor(h: HouseHooks<BacSetup>) {
+    super(h);
+    this.dealerSay('hello');
+  }
 
   private get limits() {
     return BAC_LIMITS[this.h.setup.limits];
@@ -148,6 +164,32 @@ export class BaccaratTable extends HouseTable<BacSetup> {
     this.render();
   }
 
+  // ---------- the croupier ----------
+
+  /** Now and then the croupier says something; nearly always about the big moments. */
+  private dealerSay(m: DealerMoment, n = '') {
+    if (this.h.prefs.dealerTalk === false || !dealerSpeaks(m, this.coups - this.dealerLast, this.talkRng.next())) return;
+    const line = dealerLine(this.dealer, m, this.talkRng, n);
+    if (!line) return;
+    this.dealerLast = this.coups;
+    this.dealerSays = line;
+  }
+
+  /** Floats the croupier's line, once the table is drawn. */
+  private flushDealer() {
+    const line = this.dealerSays;
+    this.dealerSays = '';
+    const whisper = this.whisper;
+    this.whisper = '';
+    if (whisper) requestAnimationFrame(() => floatOver('dealer', whisper, { at: 'right', whisper: true }));
+    else if (line) requestAnimationFrame(() => floatOver('dealer', line, { at: 'right' }));
+  }
+
+  render() {
+    super.render();
+    if (!this.stopped) this.flushDealer();
+  }
+
   // ---------- the coup ----------
 
   private deal() {
@@ -162,6 +204,7 @@ export class BaccaratTable extends HouseTable<BacSetup> {
       this.road = [];
       this.fresh = true;
       play('shuffle');
+      if (this.coups > 0) this.dealerSay('shuffle');
     }
     const coup = dealCoup(this.shoe);
     const result = settleCoup(this.bets, coup);
@@ -207,6 +250,20 @@ export class BaccaratTable extends HouseTable<BacSetup> {
     credit(this.profile, baccaratTally(c.coup, r, this.run));
     this.road.push({ w: c.coup.winner === 'player' ? 'P' : c.coup.winner === 'banker' ? 'B' : 'T', pp: c.coup.playerPair || undefined, bp: c.coup.bankerPair || undefined });
     play(r.net > 0 ? 'win' : r.net < 0 ? 'pot' : 'chips');
+    if (this.stopped) return;
+    const co = c.coup;
+    const moment = bacMoment({
+      winner: co.winner, natural: co.natural, net: r.net, min: this.limits.min,
+      pairHit: r.spots.some((s) => (s.spot === 'playerPair' || s.spot === 'bankerPair') && s.outcome === 'win'),
+    });
+    const side = co.winner === 'player' ? 'Player' : 'Banker';
+    const n = moment === 'win' || moment === 'lose' ? side : String(Math.max(co.playerTotal, co.bankerTotal));
+    this.dealerSay(moment, n);
+    // Well down for the night, the croupier may (very rarely) lean in with some advice.
+    if (this.h.prefs.dealerTalk !== false && shouldWhisper(this.startBank - this.bank, this.limits.min, this.whispered, this.talkRng.next())) {
+      this.whispered = true;
+      this.whisper = whisperLine('baccarat', this.talkRng);
+    }
   }
 
   protected finish() {
@@ -275,6 +332,7 @@ export class BaccaratTable extends HouseTable<BacSetup> {
     return `<div class="bac-table">
       <div class="bj-rail bac-rail"><div class="bj-felt bac-felt"></div></div>
       <div class="bj-shoe" title="${this.shoe.remaining} cards left in the shoe"><span></span></div>
+      <div class="bac-croupier"><div class="dealer-plate" data-seat="dealer" title="${esc(`${this.dealer.name} · Croupier\n${this.dealer.bio}`)}"><span class="dealer-face" aria-hidden="true">${this.dealer.face}</span><span class="dealer-who"><b>${esc(this.dealer.name)}</b><small>Croupier</small></span></div></div>
       <div class="bac-hands">${this.handHtml('player')}${this.handHtml('banker')}</div>
       ${msg ? `<div class="bj-msg bac-msg ${c?.done ? c.coup.winner : ''}">${esc(msg)}</div>` : ''}
       <div class="bac-spots">${spots}</div>
@@ -313,7 +371,8 @@ export class BaccaratTable extends HouseTable<BacSetup> {
   }
 
   protected settingsExtraHtml(): string {
-    return `<label class="toggle"><input type="checkbox" data-pref="fourColor" ${this.h.prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>`;
+    return `<label class="toggle"><input type="checkbox" data-pref="fourColor" ${this.h.prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
+      <label class="toggle"><input type="checkbox" data-pref="dealerTalk" ${this.h.prefs.dealerTalk !== false ? 'checked' : ''}> Let the croupier chat</label>`;
   }
 
   protected bindGame() {
