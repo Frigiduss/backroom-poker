@@ -9,6 +9,7 @@
 // The server also credits achievements for online play: every finished hand and tournament
 // adds to each person's counters in player_awards, which browsers can read but not write.
 import { PERSONA_NAMES, personaFor } from '../bots/persona';
+import { cleanAvatar } from '../accounts/avatars';
 import { Counters, Tally, combine, handTally, mergeTally, runAfter, titleFor, tournamentTally } from '../accounts/achievements';
 import { Bot } from '../bots/bot';
 import { buildView } from '../bots/view';
@@ -46,6 +47,8 @@ export interface Member {
   playerId?: string;
   /** Their title, checked against their achievements when they sat down. */
   title?: string | null;
+  /** Their face (accounts/avatars.ts), checked for shape when they sat down. */
+  avatar?: string | null;
   /** Hands won in a row at this table. */
   run?: number;
   /** Watching without a seat: sees only what the whole table sees. Joining sits them in. */
@@ -179,14 +182,15 @@ const cleanPlayerId = (s: unknown): string | undefined => (typeof s === 'string'
 // ---------- achievements ----------
 
 /** The title a person may wear: only one their achievements have earned. */
-async function checkTitle(db: TableDb, userId: string, tag: PlayerTag): Promise<{ playerId?: string; title: string | null }> {
+async function checkTitle(db: TableDb, userId: string, tag: PlayerTag): Promise<{ playerId?: string; title: string | null; avatar: string | null }> {
   const playerId = cleanPlayerId(tag.playerId);
-  if (!playerId || typeof tag.title !== 'string') return { playerId, title: null };
+  const avatar = cleanAvatar(tag.avatar);
+  if (!playerId || typeof tag.title !== 'string') return { playerId, title: null, avatar };
   try {
     const a = await db.awards(userId, playerId);
-    return { playerId, title: titleFor(tag.title, combine(a.profile, a.server)) };
+    return { playerId, title: titleFor(tag.title, combine(a.profile, a.server)), avatar };
   } catch {
-    return { playerId, title: null };
+    return { playerId, title: null, avatar };
   }
 }
 
@@ -494,7 +498,8 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
   const humanTurn = !!hand && !hand.isComplete && t!.seatOf(hand.toAct).isHuman && !state.away[t!.seatOf(hand.toAct).id];
   const stalled = state.phase === 'playing' && !!t && (!hand || hand.isComplete) && t.liveSeats.length < 2 && !state.pendingRebuys.length && !state.pendingSits.length;
   const seats: SeatView[] = (t?.seats ?? []).map((s) => ({
-    id: s.id, name: s.name, title: s.isHuman ? state.members.find((m) => m.seat === s.id)?.title ?? null : null, isHuman: s.isHuman, difficulty: s.isHuman ? undefined : s.difficulty, style: s.isHuman ? undefined : s.style,
+    id: s.id, name: s.name, title: s.isHuman ? state.members.find((m) => m.seat === s.id)?.title ?? null : null,
+    avatar: s.isHuman ? cleanAvatar(state.members.find((m) => m.seat === s.id)?.avatar) : null, isHuman: s.isHuman, difficulty: s.isHuman ? undefined : s.difficulty, style: s.isHuman ? undefined : s.style,
     stack: s.stack, busted: s.busted, place: s.place, rebuys: s.rebuys, away: !!state.away[s.id], you: s.id === mySeat,
   }));
   return {
@@ -503,7 +508,7 @@ export function viewFor(row: { id: string; code: string; version: number }, stat
     code: row.code,
     phase: state.phase,
     settings: state.settings,
-    members: state.members.map((m) => ({ name: m.name, title: m.title ?? null, host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left, watching: !!m.watching })),
+    members: state.members.map((m) => ({ name: m.name, title: m.title ?? null, avatar: cleanAvatar(m.avatar), host: m.userId === state.host, you: m.userId === userId, seat: m.seat, left: m.left, watching: !!m.watching })),
     isHost: state.host === userId,
     seats,
     mySeat,
@@ -621,6 +626,7 @@ async function join(db: TableDb, userId: string, req: Extract<Request, { op: 'jo
       }
       m.left = false;
       m.title = tag.title;
+      m.avatar = tag.avatar;
       if (state.phase === 'lobby' || !m.seat) {
         m.name = name;
         m.playerId = tag.playerId;
@@ -656,6 +662,7 @@ async function watch(db: TableDb, userId: string, req: Extract<Request, { op: 'w
       // Someone back after leaving keeps their seat, if they had one; a bot plays it until they say they're back.
       m.left = false;
       m.title = tag.title;
+      m.avatar = tag.avatar;
       if (!m.seat) m.watching = true;
     } else {
       if (state.members.filter((x) => x.watching && !x.left).length >= WATCHERS_MAX) throw new TableError('That table has as many people watching as it can take.', 409);

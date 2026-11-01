@@ -21,6 +21,8 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
 - **Video poker** machines: Jacks or Better, Bonus Poker and Double Double Bonus, all on
   their full-pay tables. Bet one to five coins of 5 to 500 chips, hold, draw, and a royal
   flush on five coins pays 4,000.
+- **Slots:** the Lucky Sevens machine, three reels of suits, chips, crowns and sevens with
+  one to five pay lines and coins of 5 to 500 chips. Three sevens on a line pays 500 coins.
 - **Three formats:** cash game (with rebuys), Sit & Go tournament (rising blinds) and a
   heads-up duel.
 - **Bots that play like people:** five levels (Beginner, Easy, Medium, Hard, Expert, or
@@ -28,6 +30,11 @@ Poker, blackjack, roulette, baccarat and video poker in your browser, against co
   that overrules it when it's sure. Five styles (balanced, tight, loose, aggressive, passive). 24 named bot
   characters have their own faces and table talk; turn the talk off in Settings, or switch
   on Fast bots if you'd rather not wait.
+- **Rivals:** the named bots remember how you play against them from one sitting to the
+  next. Take a bot's chips or knock them out and they hold a grudge: they greet you with
+  it, play back at you harder, and the Expert ones use what they've seen of your habits.
+  Win some back off them and they cool down. A bot who keeps beating you gets smug instead.
+  Your rivals are listed on the stats page.
 - **Practice mode:** a switch on the table setup card adds advice, your equity and pot odds
   on every decision. Practice uses free chips, so it never touches your bank, stats or
   achievements.
@@ -53,6 +60,10 @@ Signed in, you can also:
 - **Add friends** with their six-character friend code (or friend link), see who's online,
   and invite them to your table in one tap. Invites pop up on their screen with Join and
   Watch buttons. Only friends who've both said yes see each other's name and online status.
+- **Send chips to a friend** from your bank (after 10 hands): up to 10,000 a day, and a friend
+  can be sent up to 20,000 a day. Gifts wait in their Friends list until they collect them.
+- **Pick a face** for your badge from the game's set, or upload your own picture. It shows at
+  online tables, on the leaderboard and in friends lists. (Faces from the set work offline too.)
 - **Watch a table** without taking a seat, from its code or watch link.
 - **Chat** at the table.
 - **Climb the leaderboard** for chip bank, biggest pot and achievements (players appear
@@ -69,6 +80,7 @@ Hand history: `←`/`→` step, `Space` play/pause, `↑`/`↓` other hands, `Es
 Blackjack: `H` hit, `S` stand, `D` double, `P` split, `I`/`N` insurance, `Space` deal.
 Roulette and baccarat: `1`–`3` pick a chip, `U` undo, `C` clear, `R` rebet, `Space` spin or deal.
 Video poker: `1`–`5` hold a card, `B` bet one, `X` bet max, `Space` deal or draw.
+Slots: `1`–`4` pick a coin, `L` lines, `X` spin max, `Space` spin.
 
 ## Install it as an app
 
@@ -158,7 +170,7 @@ The engine and bots have no DOM dependencies, so they can be reused on other pla
 
 ### Supabase backend
 
-Online accounts, tables, achievements, the leaderboard, the daily bonus and friends run on
+Online accounts, tables, achievements, the leaderboard, the daily bonus, friends, chip gifts and pictures run on
 [Supabase](https://supabase.com). Without it the game still works fully offline against bots.
 Setup is a handful of SQL files run once in the Supabase SQL editor:
 
@@ -170,7 +182,10 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/leaderboard.sql` | Daily bonus and leaderboard |
 | `supabase/admin.sql` | Admin accounts |
 | `supabase/friends.sql` | Friends, who's online, and table invites |
+| `supabase/crashes.sql` | Crash reports in the admin dashboard |
 | `supabase/banks.sql` | Limits on how fast an online chip bank can grow, so a save can't be edited to cheat |
+| `supabase/gifts.sql` | Sending chips to friends, with daily limits |
+| `supabase/avatars.sql` | Uploaded profile pictures (storage bucket and its rules) |
 | `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
 Step-by-step instructions are in [supabase/README.md](supabase/README.md). Only the public
@@ -180,6 +195,7 @@ accounts apart. Never put the `service_role` key in the repository.
 ### Admin tools
 
 Admin accounts (made with `supabase/admin.sql`) get a developer console in the game and the
-dashboard at `/admin/`, for looking after players, tables and the lobby announcement. Admin
+dashboard at `/admin/`, for looking after players, tables, the lobby announcement and the
+errors players' games hit (the Crashes tab). Admin
 powers are checked by the database and the table server, not the page, and every change is
 logged. See [supabase/README.md](supabase/README.md#the-developer-console).

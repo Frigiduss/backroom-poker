@@ -1,10 +1,11 @@
 import { Bot, Decision, STYLE_NAMES } from '../bots/bot';
 import { specFromView } from '../bots/equity';
 import { PERSONAS, Persona, TalkEvent, lineFor, personaFor, remarkAfter } from '../bots/persona';
+import { Mood, RivalEvent, moodOf, noteHand, rememberedStats, transferBetween, rivalLine, rivalrySummary, grudgeStyle } from '../bots/rivals';
 import { buildView } from '../bots/view';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
-import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, difficultiesFor, hasMaster, Format, Seat, SeatConfig, Table } from '../engine/table';
+import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, PlayerStats, Seat, SeatConfig, Table, difficultiesFor, hasMaster } from '../engine/table';
 import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from '../engine/variants';
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
@@ -26,10 +27,15 @@ import { BjSetup, BlackjackTable, DEFAULT_BJ, bindBjSetupCard, bjSetupCardHtml }
 import { DEFAULT_RL, RlSetup, RouletteTable, bindRlSetupCard, rlSetupCardHtml } from './roulette';
 import { BacSetup, BaccaratTable, DEFAULT_BAC, bacSetupCardHtml, bindBacSetupCard } from './baccarat';
 import { DEFAULT_VP, VideoPokerTable, VpSetup, bindVpSetupCard, vpSetupCardHtml } from './videopoker';
+import { DEFAULT_SL, SlSetup, SlotsTable, bindSlSetupCard, slSetupCardHtml } from './slots';
 import { HouseGame, isHouseGame } from './picker';
 import { equity, think } from './thinker';
 import { avatarHtml, botTitle, floatOver } from './talk';
+import { installCrashReporter, setCrashAuth } from './crash';
 import { DevGame, bindConsoleButton, consoleButtonHtml, consoleEnabled, initConsole, refreshConsoleAccess, toggleConsole } from './console';
+
+// Errors from here on reach the admin dashboard's crash reports.
+installCrashReporter(whereNow);
 
 // ---------- settings ----------
 
@@ -52,6 +58,7 @@ interface Setup {
   rl: RlSetup;
   bac: BacSetup;
   vp: VpSetup;
+  sl: SlSetup;
   /** Free table with a coach: hints on every decision, no bank, stats or achievements. */
   practice: boolean;
 }
@@ -74,7 +81,7 @@ interface Prefs {
 const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
-  game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
+  game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, sl: DEFAULT_SL, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, dealerTalk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -92,6 +99,7 @@ function loadSettings(p: Profile) {
   setup.rl = { ...DEFAULT_RL, ...setup.rl };
   setup.bac = { ...DEFAULT_BAC, ...setup.bac };
   setup.vp = { ...DEFAULT_VP, ...setup.vp };
+  setup.sl = { ...DEFAULT_SL, ...setup.sl };
   setVolume(prefs.volume, !prefs.sound);
 }
 
@@ -174,7 +182,8 @@ function renderSetup() {
       ${setup.game === 'blackjack' ? bjSetupCardHtml(setup.bj, me.bank, canRefill(me))
         : setup.game === 'roulette' ? rlSetupCardHtml(setup.rl, me.bank, canRefill(me))
         : setup.game === 'baccarat' ? bacSetupCardHtml(setup.bac, me.bank, canRefill(me))
-        : setup.game === 'videopoker' ? vpSetupCardHtml(setup.vp, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
+        : setup.game === 'videopoker' ? vpSetupCardHtml(setup.vp, me.bank, canRefill(me))
+        : setup.game === 'slots' ? slSetupCardHtml(setup.sl, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
           <span class="eyebrow">${setup.practice ? 'Your practice table' : 'Your table'}</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
@@ -228,7 +237,7 @@ function renderSetup() {
         </div>
       </aside>`}
 
-      ${friendsPanelHtml(setup.game === 'roulette' ? 'Roulette' : setup.game === 'baccarat' ? 'Baccarat' : setup.game === 'videopoker' ? 'Video poker' : undefined)}
+      ${friendsPanelHtml(setup.game === 'roulette' ? 'Roulette' : setup.game === 'baccarat' ? 'Baccarat' : setup.game === 'videopoker' ? 'Video poker' : setup.game === 'slots' ? 'Slots' : undefined)}
     </div>
   </main>`;
   app.querySelector('.setup-card .options')!.scrollTop = optionsScroll;
@@ -249,6 +258,7 @@ function renderSetup() {
   bindRlSetupCard(setup.rl, update);
   bindBacSetupCard(setup.bac, update);
   bindVpSetupCard(setup.vp, update);
+  bindSlSetupCard(setup.sl, update);
   app.querySelectorAll<HTMLButtonElement>('[data-structure]').forEach((b) => (b.onclick = () => update(() => (setup.structures[setup.variant] = b.dataset.structure as Structure))));
   app.querySelectorAll<HTMLButtonElement>('[data-format]').forEach((b) => (b.onclick = () => update(() => {
     const prev = setup.format;
@@ -271,6 +281,7 @@ function renderSetup() {
     name: me.name,
     playerId: me.id,
     title: currentTitle() ? me.title : null,
+    avatar: me.avatar,
     settings: {
       variant: setup.variant, structure: struct, format: setup.format, difficulty: setup.difficulty,
       stackBB: setup.stackBB, blindSpeed: setup.blindSpeed, seats: setup.format === 'headsup' ? 2 : setup.opponents + 1,
@@ -303,11 +314,12 @@ function renderSetup() {
       blackjack.start();
       return;
     }
-    if (setup.game === 'roulette' || setup.game === 'baccarat' || setup.game === 'videopoker') {
+    if (setup.game === 'roulette' || setup.game === 'baccarat' || setup.game === 'videopoker' || setup.game === 'slots') {
       const hooks = { app, prefs, save: saveSettings, leave: renderSetup };
       house = setup.game === 'roulette' ? new RouletteTable({ ...hooks, setup: setup.rl })
         : setup.game === 'baccarat' ? new BaccaratTable({ ...hooks, setup: setup.bac })
-        : new VideoPokerTable({ ...hooks, setup: setup.vp });
+        : setup.game === 'videopoker' ? new VideoPokerTable({ ...hooks, setup: setup.vp })
+        : new SlotsTable({ ...hooks, setup: setup.sl });
       house.start();
       return;
     }
@@ -337,6 +349,7 @@ function difficultyHint(d: DifficultyChoice): string {
 // ---------- game ----------
 
 interface LogLine { text: string; kind: string; me: boolean }
+interface RivalMoment { seat: string; event: RivalEvent }
 
 class Game implements DevGame {
   readonly setup: Setup;
@@ -383,6 +396,8 @@ class Game implements DevGame {
   // Developer console controls.
   paused = false;
   autopilot: Bot | null = null;
+  /** A regular holding a grudge plays the player with a hotter style: their second self, by seat and style. */
+  private grudgeBots = new Map<string, Bot>();
   botDelay: number | null = null;
 
   constructor(s: Setup) {
@@ -534,8 +549,10 @@ class Game implements DevGame {
     if (this.log.length > 500) this.log.splice(0, this.log.length - 500);
 
     if (hand.isComplete) {
-      this.talkAfter(hand);
+      const before = { ...this.table.stats[this.humanId] };
       this.table.finishHand();
+      const rival = this.noteRivals(hand, before);
+      this.talkAfter(hand, rival);
       this.recordResult(hand);
       const me = this.humanSeat;
       if (!this.spectating && me.busted) this.modal = this.table.isTournament ? 'over' : 'busted';
@@ -598,13 +615,13 @@ class Game implements DevGame {
     const hand = this.hand;
     if (!hand || hand.isComplete || this.stopped) return;
     const seat = this.table.seatOf(hand.toAct);
-    const bot = this.bots.get(seat.id) ?? (seat.isHuman ? this.autopilot : null);
+    const bot = this.botFor(seat, hand) ?? (seat.isHuman ? this.autopilot : null);
     if (!bot) return;
     const turn = () => `${this.table.handNumber}|${hand.actions.length}|${hand.phase}|${hand.toAct}`;
     const asked = turn();
     if (this.thinking === asked) return;
     this.thinking = asked;
-    think(bot, buildView(hand, hand.toAct, this.table.stats)).then((d) => {
+    think(bot, buildView(hand, hand.toAct, this.statsFor(seat))).then((d) => {
       if (this.thinking !== asked) return;
       this.thinking = '';
       // Something moved the game on while the bot thought (a console command, leaving): ask again.
@@ -657,12 +674,96 @@ class Game implements DevGame {
     cues.slice(-6).forEach((c, i) => play(c, i * 0.13));
   }
 
+  // ---------- rivals ----------
+
+  /** How this seat's regular feels about the player, from what they remember. */
+  private moodOf(seat: Seat): Mood {
+    return seat.isHuman ? moodOf(undefined) : moodOf(this.profile.rivals[seat.name]);
+  }
+
+  /** The bot that plays this seat now: a regular with a grudge plays back harder while the player is in the hand. */
+  private botFor(seat: Seat, hand: Hand): Bot | undefined {
+    const base = this.bots.get(seat.id);
+    if (!base) return undefined;
+    const hi = this.humanIndex;
+    if (hi < 0 || hand.players[hi].status === 'folded') return base;
+    const style = grudgeStyle(base.style, this.moodOf(seat));
+    if (style === base.style) return base;
+    const key = `${seat.id}|${style}`;
+    let hot = this.grudgeBots.get(key);
+    if (!hot) this.grudgeBots.set(key, (hot = new Bot(base.difficulty, style)));
+    return hot;
+  }
+
+  /** What a seat knows of everyone's habits: tonight's, plus what its regular remembers of the player. */
+  private statsFor(seat: Seat): Record<string, PlayerStats> {
+    const r = seat.isHuman ? undefined : this.profile.rivals[seat.name];
+    if (!r) return this.table.stats;
+    return { ...this.table.stats, [this.humanId]: rememberedStats(this.table.stats[this.humanId], r) };
+  }
+
+  /**
+   * Every regular dealt in with the player remembers the hand. Returns the one rivalry moment
+   * worth a word, if any. Practice tables, rigged hands and autopilot leave memories alone.
+   */
+  private noteRivals(hand: Hand, before: PlayerStats): RivalMoment | null {
+    const hi = this.humanIndex;
+    const res = hand.result;
+    if (this.practice || this.spectating || hi < 0 || !res || hand.wasRigged || this.autopilot) return null;
+    const after = this.table.stats[this.humanId];
+    const mine = { ...after };
+    for (const k of Object.keys(mine) as (keyof PlayerStats)[]) mine[k] = after[k] - (before[k] ?? 0);
+    const me = hand.players[hi];
+    const bb = hand.stakes.bb || hand.stakes.bigBet;
+    const playerNet = me.stack - me.startStack;
+    const nets = hand.players.map((p) => p.stack - p.startStack);
+    const now = Date.now();
+    const moments: (RivalMoment & { weight: number })[] = [];
+    hand.players.forEach((p, i) => {
+      if (i === hi || !this.bots.has(p.id) || !personaFor(p.name)) return;
+      const both = res.showdown && me.shown && p.shown;
+      const winner = !both ? null : res.won[hi] > 0 && res.won[i] === 0 ? 'player' : res.won[i] > 0 && res.won[hi] === 0 ? 'bot' : null;
+      const fold = hand.actions.findIndex((a) => a.player === i && a.type === 'fold');
+      const lastPush = fold < 0 ? undefined : hand.actions.slice(0, fold).reverse().find((a) => a.aggressive && a.player !== i);
+      const { mood, rose, moved } = noteHand(this.profile.rivals, p.name, {
+        bigBlind: bb, showdown: res.showdown, sameShowdown: both, playerNet, moved: transferBetween(nets, hi, i), winner,
+        playerBusted: me.stack === 0, botBusted: p.stack === 0, botFoldedToPlayer: lastPush?.player === hi, playerStats: mine, now,
+      });
+      if (rose && mood.level >= 2) {
+        this.log.push({ text: `${p.name} ${mood.level >= 3 ? 'now counts you as their nemesis' : 'is holding a grudge against you'}.`, kind: 'rival', me: false });
+        moments.push({ seat: p.id, event: 'rise', weight: 5 });
+      } else if (mood.level >= 1 && moved <= -bb * 8) moments.push({ seat: p.id, event: 'revenge', weight: this.talkRng.next() < 0.7 ? 3 : 0 });
+      else if (mood.level >= 2 && moved >= bb * 10) moments.push({ seat: p.id, event: 'sore', weight: this.talkRng.next() < 0.5 ? 2 : 0 });
+    });
+    const best = moments.filter((m) => m.weight > 0).sort((a, b) => b.weight - a.weight)[0];
+    return best ? { seat: best.seat, event: best.event } : null;
+  }
+
+  /** Hover text for a bot's seat, with where they stand with the player. */
+  private seatTitle(seat: Seat, tag: string): string {
+    const r = this.profile.rivals[seat.name];
+    const mood = this.moodOf(seat);
+    const base = botTitle(seat.name, tag);
+    return r && mood.label ? `${base}\n${mood.label}. ${rivalrySummary(r)}` : base;
+  }
+
   /** A bot says something: into the log, and up over their seat once the table is drawn. */
   private say(seatId: string, event: TalkEvent): boolean {
     const seat = this.table.seats.find((x) => x.id === seatId);
     const who: Persona | undefined = seat && !seat.isHuman ? personaFor(seat.name) : undefined;
     if (!who || !prefs.talk) return false;
-    const text = lineFor(who, event, this.talkRng);
+    return this.sayLine(seatId, who, lineFor(who, event, this.talkRng));
+  }
+
+  /** A regular says something about their rivalry with the player. */
+  private sayRival(seatId: string, event: RivalEvent): boolean {
+    const seat = this.table.seats.find((x) => x.id === seatId);
+    const who = seat && !seat.isHuman ? personaFor(seat.name) : undefined;
+    if (!who || !prefs.talk) return false;
+    return this.sayLine(seatId, who, rivalLine(who.name, event, this.humanSeat.name, this.talkRng));
+  }
+
+  private sayLine(seatId: string, who: Persona, text: string): boolean {
     this.log.push({ text: `${who.name}: “${text}”`, kind: 'talk', me: false });
     this.talkQueue.push({ seat: seatId, text });
     this.lastTalk = this.table.handNumber;
@@ -675,6 +776,12 @@ class Game implements DevGame {
     for (const e of entries) {
       if (e.kind === 'start' && this.table.handNumber === 1) {
         const bots = this.table.seats.filter((x) => !x.isHuman);
+        // A regular with a score to settle (or one who thinks they own the player) speaks first.
+        const moods = bots.map((b) => ({ b, m: this.moodOf(b) })).sort((x, y) => y.m.level - x.m.level);
+        const grudge = moods.find((x) => x.m.level >= 2);
+        const smug = moods.find((x) => x.m.level < 0);
+        if (grudge && roll() < 0.85 && this.sayRival(grudge.b.id, 'greetGrudge')) continue;
+        if (smug && roll() < 0.6 && this.sayRival(smug.b.id, 'greetSmug')) continue;
         const greeter = bots[Math.floor(roll() * bots.length)];
         if (greeter && roll() < 0.6) this.say(greeter.id, 'hello');
       } else if (e.kind === 'action' && e.player !== undefined && /all-in/.test(e.text) && this.lastTalk < this.table.handNumber && roll() < 0.4) {
@@ -684,9 +791,10 @@ class Game implements DevGame {
   }
 
   /** Once a hand is over, maybe one bot has something to say about it. */
-  private talkAfter(hand: Hand) {
+  private talkAfter(hand: Hand, rival: RivalMoment | null) {
     const res = hand.result;
     if (!res || this.lastTalk === this.table.handNumber) return;
+    if (rival && this.sayRival(rival.seat, rival.event)) return;
     const remark = remarkAfter({
       bots: hand.players.map((p) => (this.bots.has(p.id) ? p.id : null)),
       showdown: res.showdown,
@@ -839,8 +947,8 @@ class Game implements DevGame {
       const hero = isMe && phone;
       const seatHtml = `<div class="${classes.join(' ')}" data-seat="${seat.id}"${hero ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="cards">${cards}</div>
-        <div class="pod" title="${esc(isMe ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
-          ${avatarHtml(seat.name, level, !isMe)}
+        <div class="pod" title="${esc(isMe ? `${seat.name} · ${tag}` : this.seatTitle(seat, tag))}">
+          ${avatarHtml(seat.name, level, !isMe, isMe ? player().avatar : null)}${isMe ? '' : grudgeBadge(this.moodOf(seat))}
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
           ${isMe ? (currentTitle() ? `<span class="lvl lv-human ttl">${esc(currentTitle()!)}</span>` : '') : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>
@@ -1268,6 +1376,14 @@ class Game implements DevGame {
   }
 }
 
+const GRUDGE_FACES: Record<number, string> = { [-1]: '😏', 1: '😒', 2: '😠', 3: '🔥' };
+
+/** A little mark on a regular's avatar when they have feelings about the player. */
+function grudgeBadge(m: Mood): string {
+  if (!m.label) return '';
+  return `<span class="grudge g${m.level < 0 ? 'm' : m.level}" aria-label="${esc(m.label)}">${GRUDGE_FACES[m.level]}</span>`;
+}
+
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
@@ -1276,7 +1392,7 @@ function ordinal(n: number): string {
 
 let game: Game | null = null;
 let blackjack: BlackjackTable | null = null;
-let house: RouletteTable | BaccaratTable | VideoPokerTable | null = null;
+let house: RouletteTable | BaccaratTable | VideoPokerTable | SlotsTable | null = null;
 let resizeTimer: number | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
@@ -1286,6 +1402,25 @@ window.addEventListener('resize', () => {
     house?.render();
   }, 150);
 });
+
+/** What the player is doing, for crash reports: "Texas Hold'em · cash", "Blackjack", "Online poker"… */
+function whereNow(): string {
+  const online = activeTable();
+  if (online) return `Online ${online.game}`;
+  if (game) {
+    const s = game.setup;
+    return `${VARIANTS[s.variant]?.name ?? s.variant} · ${s.practice ? 'practice' : FORMAT_NAMES[s.format] ?? s.format}`;
+  }
+  if (blackjack) return 'Blackjack';
+  if (house instanceof RouletteTable) return 'Roulette';
+  if (house instanceof BaccaratTable) return 'Baccarat';
+  if (house instanceof VideoPokerTable) return 'Video poker';
+  const page = document.querySelector('main');
+  if (page?.classList.contains('profile-page')) return 'Profile';
+  if (page?.classList.contains('welcome') || page?.classList.contains('auth')) return 'Sign-in';
+  if (page?.classList.contains('room')) return 'Online room';
+  return page?.classList.contains('lobby') ? 'Lobby' : 'Starting up';
+}
 
 /** Opens the last player (online if signed in), or asks who's playing on a first visit. */
 async function boot() {
@@ -1298,6 +1433,7 @@ async function boot() {
   const local = new LocalAccountStore(storage);
   const auth = onlineEnabled(ONLINE) ? new OnlineAuth(ONLINE, storage) : null;
   initAccounts(local, auth, storage);
+  setCrashAuth(auth);
   initOnlinePlay({
     app,
     auth,

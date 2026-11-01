@@ -90,6 +90,22 @@ to list every table and `table CODE` to work on one you aren't sitting at. `kick
 `close` remove a person or end a table. The table server looks the account up in the
 `admins` table itself before doing any of it, and every change goes in `admin_log`.
 
+## Crash reports
+
+When a player's game hits an error, it sends a short report: the error and where in the code
+it happened, what they were playing, their browser and which deploy they were on. Admins see
+them in the dashboard's **Crashes** tab, grouped so the same error from many players is one
+report with a count. **Mark fixed** hides a report until the error happens again.
+
+To turn it on, run [`crashes.sql`](crashes.sql) once in the SQL Editor, after `admin.sql`.
+Type `crashtest` in the console to send a test report and check it arrives.
+
+Anyone playing can send reports, signed in or not, so the database guards it: reports only go
+in through `report_crash()`, which trims every field, takes at most 30 an hour from one
+connection or account (600 from everybody), only 60 new kinds of error an hour, and keeps the
+newest 500. Only admins can read them. Reports never include page addresses' query or
+`#` part (sign-in links put tokens there), and connections are kept only as a salted hash.
+
 ## Playing with friends (online tables)
 
 Signed-in players can make a private table, send its five-letter code (or invite link) to
@@ -138,9 +154,49 @@ but invites to a table also need `multiplayer.sql`. Until it's run, the Friends 
 friends aren't switched on yet.
 
 Browsers can't read the friends tables at all: everything goes through the `friends_*`
-functions, which only ever return friend codes, names, colours and titles, never an email or
+functions, which only ever return friend codes, names, colours, faces and titles, never an email or
 account id. While the game is open it checks in every 20 seconds, which is what shows a player
 as online (anyone seen in the last 75 seconds).
+
+## Sending chips to friends
+
+Friends can send each other chips from their banks. To switch it on, run
+[`gifts.sql`](gifts.sql) once in the SQL Editor (after `friends.sql` and `banks.sql`).
+Running it again is safe. Until then the Send chips buttons don't show.
+
+The server does the bookkeeping: `send_chips()` takes the chips out of the sender's saved bank
+and puts the gift in the friend's inbox, and `collect_gifts()` adds it to the friend's bank
+limits so it saves cleanly. To stop chips being farmed with spare accounts:
+
+- only friends (both said yes), only from the bank (not chips at a table), and only players
+  with 10 hands played
+- each gift is 100 to 10,000 chips; an account can send 10,000 and be sent 20,000 in any 24 hours
+- sending gives back no win allowance (ordinary losses do), so a gift can't make room for
+  edited winnings
+
+Browsers can't read the `chip_gifts` table. `select * from chip_gifts order by created_at desc`
+in the SQL Editor shows every gift.
+
+## Faces and profile pictures
+
+Players pick a face for their badge from the profile page: their first letter, one of the
+game's faces, or a picture they upload. Faces show at online tables, on the leaderboard and
+in friends lists. Picking from the game's faces needs no setup. For uploads, and for faces on
+the leaderboard and in friends lists:
+
+1. Run [`avatars.sql`](avatars.sql) once in the SQL Editor (after `setup.sql` and `admin.sql`).
+   It makes the public `avatars` storage bucket and its rules.
+2. Run [`leaderboard.sql`](leaderboard.sql) and [`friends.sql`](friends.sql) again, so they
+   hand out faces.
+3. Faces at online tables come with the `poker-table` function, which redeploys on its own when
+   this is merged to `main`.
+
+The game squares and shrinks a picture to 160×160 and re-saves it as a JPEG before sending it,
+so no location or camera details go along. The bucket itself only takes JPEGs of 64 KB or
+less, from signed-in accounts, at a random name (links never show who uploaded them), at most
+three per account. Each account can delete only its own pictures. If a picture isn't
+appropriate, the developer console's `edit <player> picture off` deletes it and stops that
+account uploading more (`picture on` lets it again); faces from the game's set still work.
 
 ## Achievements from online tables
 
@@ -167,7 +223,7 @@ the claim time, so changing the device clock or editing a saved player can't col
 Players kept only in a browser use the browser's clock.
 
 The leaderboard ranks online players by chip bank, biggest pot and achievements unlocked. Anyone
-can open it, even signed out, and it only shows each player's name, colour, title and score.
+can open it, even signed out, and it only shows each player's name, colour, face, title and score.
 Players appear after 10 hands, and anyone can take a player off it from the leaderboard page.
 
 To switch both on, open **SQL Editor → New query**, paste everything from

@@ -380,6 +380,20 @@ test('people wear only titles they have earned, and everyone at the table sees t
   assert.equal(s.db.view(body.tableId, 'alice').seats.find((x) => x.name === 'Bob')!.title, 'Card Room Regular', 'earned for real, it shows');
 });
 
+test('faces show at the table, and only well-formed ones', async () => {
+  const s = setup();
+  const pic = 'u:0123456789abcdef0123456789abcdef';
+  const { body } = await s.call('alice', { op: 'create', name: 'Alice', settings: s.settings, playerId: 'pr_alice', avatar: 'f:fox' });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob', avatar: 'u:../../evil' });
+  assert.deepEqual(s.db.view(body.tableId, 'bob').members.map((m) => m.avatar), ['f:fox', null]);
+  await s.call('alice', { op: 'start', tableId: body.tableId });
+  await s.call('bob', { op: 'join', code: body.code, name: 'Bob', playerId: 'pr_bob', avatar: pic });
+  const v = s.db.view(body.tableId, 'alice');
+  assert.equal(v.seats.find((x) => x.name === 'Alice')!.avatar, 'f:fox');
+  assert.equal(v.seats.find((x) => x.name === 'Bob')!.avatar, pic, 'a new face shows when they come back');
+  assert.ok(v.seats.filter((x) => !x.isHuman).every((x) => x.avatar === null));
+});
+
 test('a table keeps going when achievements cannot be saved', async () => {
   const s = setup({ seats: 3 });
   s.db.creditAwards = async () => {

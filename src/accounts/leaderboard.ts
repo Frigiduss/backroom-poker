@@ -4,6 +4,7 @@
 import { BonusClaim } from './bonus';
 import { OnlineAuth, OnlineError, restRequest } from './online';
 import { safeColor } from './profile';
+import { cleanAvatar } from './avatars';
 
 type Fetch = typeof fetch;
 
@@ -18,6 +19,8 @@ export interface LeaderRow {
   rank: number;
   name: string;
   color: string;
+  /** The player's face (see avatars.ts), or null for their first letter. */
+  avatar: string | null;
   /** Achievement id of the player's title, if they've unlocked it. */
   title: string | null;
   value: number;
@@ -46,6 +49,7 @@ export async function fetchLeaderboard(auth: OnlineAuth, board: Board, limit = 2
     rank: Number(r.rank ?? 0),
     name: String(r.name ?? 'Player'),
     color: safeColor(r.color),
+    avatar: cleanAvatar(r.avatar),
     title: typeof r.title === 'string' ? r.title : null,
     value: Number(r.value ?? 0),
     mine: r.mine === true,

@@ -13,6 +13,7 @@ import { Round, handTotal } from '../engine/blackjack';
 import type { Coup, BacResult } from '../engine/baccarat';
 import { SpinResult, isZero } from '../engine/roulette';
 import { VpHand, VpResult, isAcesLine, isQuadsLine } from '../engine/videopoker';
+import type { SlotSpin } from '../engine/slots';
 import type { Hand } from '../engine/hand';
 import { Difficulty, Format } from '../engine/table';
 import { VARIANTS, VARIANT_ORDER, VariantId, showdownValue } from '../engine/variants';
@@ -22,7 +23,7 @@ export type Counters = Record<string, number>;
 export type Tier = 1 | 2 | 3 | 4;
 export const TIER_NAMES: Record<Tier, string> = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Diamond' };
 
-export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'videopoker' | 'online';
+export type AchievementGroup = 'career' | 'hands' | 'games' | 'formats' | 'bots' | 'blackjack' | 'casino' | 'videopoker' | 'slots' | 'online';
 export const GROUP_NAMES: Record<AchievementGroup, string> = {
   career: 'Career',
   hands: 'Big hands',
@@ -32,9 +33,10 @@ export const GROUP_NAMES: Record<AchievementGroup, string> = {
   blackjack: 'Blackjack',
   casino: 'Roulette and baccarat',
   videopoker: 'Video poker',
+  slots: 'Slots',
   online: 'Online with friends',
 };
-export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'videopoker', 'online'];
+export const GROUP_ORDER: AchievementGroup[] = ['career', 'hands', 'games', 'formats', 'bots', 'blackjack', 'casino', 'videopoker', 'slots', 'online'];
 
 export interface Achievement {
   id: string;
@@ -53,7 +55,7 @@ export interface Achievement {
 }
 
 /** Counters that keep the best value seen rather than a running total. */
-const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin', 'rl.bigWin', 'bac.bigWin', 'bac.bestRun', 'vp.bigWin']);
+const MAX_COUNTERS = new Set(['bigPotBB', 'bestRun', 'peakBank', 'cashBestBB', 'online.bigPotBB', 'bj.bestRun', 'bj.bigWin', 'rl.bigWin', 'bac.bigWin', 'bac.bestRun', 'vp.bigWin', 'sl.bigWin', 'sl.mostLines']);
 export const isMaxCounter = (key: string): boolean => MAX_COUNTERS.has(key);
 export const isOnlineCounter = (key: string): boolean => key.startsWith('online.');
 
@@ -318,6 +320,24 @@ ladder('videopoker', 'vp.bigWin', [
 ]);
 ladder('videopoker', 'vp.royals', [
   { id: 'vp-royal', name: 'Royal Jackpot', desc: 'Draw a royal flush in video poker.', tier: 4, goal: 1, title: 'Jackpot' },
+]);
+
+// The slot machine.
+ladder('slots', 'sl.spins', [
+  { id: 'sl-spins-100', name: 'Pull the Lever', desc: 'Spin the slot machine 100 times.', tier: 1, goal: 100 },
+  { id: 'sl-spins-2500', name: 'One-Armed Bandit', desc: 'Spin the slot machine 2,500 times.', tier: 2, goal: 2500, title: 'One-Armed Bandit' },
+]);
+ladder('slots', 'sl.mostLines', [
+  { id: 'sl-lines-3', name: 'Lit Up', desc: 'Win on three pay lines in one spin.', tier: 2, goal: 3 },
+]);
+ladder('slots', 'sl.crowns', [
+  { id: 'sl-crowns', name: 'Crowned', desc: 'Line up three crowns.', tier: 2, goal: 1 },
+]);
+ladder('slots', 'sl.bigWin', [
+  { id: 'sl-win-2500', name: 'Coin Shower', desc: 'Win 2,500 chips on one spin of the slots.', tier: 3, goal: 2500 },
+]);
+ladder('slots', 'sl.sevens', [
+  { id: 'sl-sevens', name: 'Triple Seven', desc: 'Line up three sevens for the top prize.', tier: 4, goal: 1, title: 'Lucky Sevens' },
 ]);
 
 // Online with friends: credited by the table server only.
@@ -590,6 +610,19 @@ export function videoPokerTally(hand: VpHand, r: VpResult): Tally {
   if (isQuadsLine(r.line)) add('vp.quads');
   if (isAcesLine(r.line, hand.cards)) add('vp.aces');
   if (r.line === 'royal') add('vp.royals');
+  return t;
+}
+
+/** What one spin of the slot machine adds to the player's record. */
+export function slotsTally(r: SlotSpin): Tally {
+  const t = emptyTally();
+  if (!r.staked) return t;
+  const add = (k: string) => (t.sum[k] = (t.sum[k] ?? 0) + 1);
+  add('sl.spins');
+  if (r.net > 0) t.max['sl.bigWin'] = r.net;
+  if (r.wins.length) t.max['sl.mostLines'] = r.wins.length;
+  if (r.wins.some((w) => w.pay === 'crowns')) add('sl.crowns');
+  if (r.wins.some((w) => w.pay === 'sevens')) add('sl.sevens');
   return t;
 }
 

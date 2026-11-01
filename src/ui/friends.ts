@@ -5,9 +5,11 @@
 import {
   ACHIEVEMENT_BY_ID, Friend, FriendCard, FriendsNotSetUpError, FriendsState, OnlineAuth, OnlineError, TableInvite,
   addFriend, answerFriend, cleanFriendCode, dismissInvite, inviteFriend, removeFriend, seenText, syncFriends,
+  ChipGift, GIFT_MAX, GIFT_MIN, GIFT_RECEIVE_DAY, GIFT_SEND_DAY, GiftsNotSetUpError, GiftsState, collectGifts, giftProblem, sendChips, syncGifts,
 } from '../accounts';
-import { esc, titleHtml } from './dom';
-import { isOnline } from './profiles';
+import { esc, fmt, titleHtml } from './dom';
+import { faceHtml } from './faces';
+import { isOnline, player, savePlayer } from './profiles';
 import { play } from './sound';
 
 interface Hooks {
@@ -30,6 +32,11 @@ let fresh: FriendsState | null = null;
 let owner = '';
 let problem = '';
 let notSetUp = false;
+/** Gifts waiting and today's sending allowance, for the account in `owner`. */
+let gifts: GiftsState | null = null;
+let giftsNotSetUp = false;
+/** Gifts already shown as a pop-up. */
+const poppedGifts = new Set<string>();
 let timer: number | undefined;
 let syncing: Promise<void> | null = null;
 /** Invites already shown as a pop-up, so each pops up once. */
@@ -45,6 +52,9 @@ const ready = () => !!(hooks?.auth?.current && isOnline());
 /** The friends list of the account signed in now, or null until it's read. */
 const mine = (): FriendsState | null => (fresh && owner === hooks?.auth?.current?.userId ? fresh : null);
 const inviteKey = (i: TableInvite) => `${i.from}/${i.table}/${i.at}`;
+const giftKey = (g: ChipGift) => `${g.from}/${g.at}/${g.amount}`;
+/** Gifts waiting for the account signed in now. */
+const myGifts = (): ChipGift[] => (gifts && mine() ? gifts.waiting : []);
 
 export function initFriends(h: Hooks) {
   hooks = h;
@@ -80,9 +90,19 @@ export function sync(): Promise<void> {
   syncing ??= (async () => {
     try {
       const who = hooks!.auth!.current?.userId ?? '';
-      const got = await syncFriends(hooks!.auth!);
-      if (who !== owner) popped.clear();
+      const [got, g] = await Promise.all([
+        syncFriends(hooks!.auth!),
+        giftsNotSetUp ? Promise.resolve(null) : syncGifts(hooks!.auth!).catch((err) => {
+          if (err instanceof GiftsNotSetUpError) giftsNotSetUp = true;
+          return null;
+        }),
+      ]);
+      if (who !== owner) {
+        popped.clear();
+        poppedGifts.clear();
+      }
       fresh = got;
+      gifts = g ?? (who === owner ? gifts : null);
       owner = who;
       problem = '';
     } catch (err) {
@@ -92,6 +112,7 @@ export function sync(): Promise<void> {
     }
     refreshBadge();
     popInvites();
+    popGifts();
     onChange?.();
   })().finally(() => (syncing = null));
   return syncing;
@@ -101,7 +122,7 @@ export function sync(): Promise<void> {
 
 const attention = () => {
   const s = mine();
-  return s ? s.incoming.length + s.invites.length : 0;
+  return s ? s.incoming.length + s.invites.length + myGifts().length : 0;
 };
 
 function badgeInner(): string {
@@ -133,7 +154,7 @@ export function lobbyInvitesHtml(): string {
 
 function inviteRowHtml(i: TableInvite): string {
   return `<div class="fr-invite" data-from="${esc(i.from)}" data-table="${esc(i.table)}">
-    <span class="pfp sm" style="--pfp:${esc(i.color)}" aria-hidden="true">${esc(i.name.slice(0, 1).toUpperCase())}</span>
+    ${faceHtml(i, 'sm')}
     <span class="fr-invite-text"><b>${esc(i.name)}</b> invited you to ${esc(i.game)} · table <b class="code-tag">${esc(i.table)}</b></span>
     <span class="fr-invite-btns">
       <button type="button" class="btn btn-sm btn-primary" data-inv="join">Join</button>
@@ -175,20 +196,14 @@ function popInvites() {
   if (!s) return;
   const news = s.invites.filter((i) => !popped.has(inviteKey(i)) && Date.now() - i.at < 10 * 60_000);
   if (!news.length) return;
-  let box = document.getElementById('invite-pops');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'invite-pops';
-    box.setAttribute('role', 'status');
-    document.body.appendChild(box);
-  }
+  const box = popBox();
   for (const i of news) {
     popped.add(inviteKey(i));
     const el = document.createElement('div');
     el.className = 'fr-pop';
     el.dataset.from = i.from;
     const busy = hooks?.busy() ?? false;
-    el.innerHTML = `<span class="pfp sm" style="--pfp:${esc(i.color)}" aria-hidden="true">${esc(i.name.slice(0, 1).toUpperCase())}</span>
+    el.innerHTML = `${faceHtml(i, 'sm')}
       <span class="fr-pop-text"><b>${esc(i.name)}</b> invited you to ${esc(i.game)}${busy ? '. Finish up here and it\'s waiting in the lobby.' : '.'}</span>
       <span class="fr-pop-btns">${busy ? '' : '<button type="button" class="btn btn-sm btn-primary" data-pop="join">Join</button><button type="button" class="btn btn-sm" data-pop="watch">Watch</button>'}
       <button type="button" class="btn btn-sm fr-x" data-pop="close" aria-label="Close">✕</button></span>`;
@@ -200,6 +215,81 @@ function popInvites() {
     window.setTimeout(() => el.remove(), 30_000);
     play('turn');
   }
+}
+
+// ---------- chips from friends ----------
+
+/** Shows the player's new bank on the lobby badge, if it's on screen. */
+function refreshBank() {
+  const em = document.querySelector('#open-profile .pb-text em');
+  if (em) em.textContent = fmt(player().bank);
+}
+
+/**
+ * Collects every gift waiting into the current player's bank and saves it. Returns a line to
+ * show, like "Collected 2,000 chips from Dana."
+ */
+async function collectAll(): Promise<string> {
+  if (!hooks?.auth) return '';
+  const p = player();
+  const r = await collectGifts(hooks.auth, p);
+  if (gifts) gifts.waiting = [];
+  document.querySelectorAll('.fr-pop.gift').forEach((el) => el.remove());
+  if (r.amount > 0) {
+    await savePlayer();
+    play('chips');
+  }
+  refreshBadge();
+  refreshBank();
+  const names = [...new Set(r.gifts.map((g) => g.name))];
+  return r.amount > 0
+    ? `Collected ${fmt(r.amount)} chips from ${names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ')}. Your bank is now ${fmt(p.bank)}.`
+    : 'Nothing to collect right now.';
+}
+
+function popBox(): HTMLElement {
+  let box = document.getElementById('invite-pops');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'invite-pops';
+    box.setAttribute('role', 'status');
+    document.body.appendChild(box);
+  }
+  return box;
+}
+
+function popGifts() {
+  const news = myGifts().filter((g) => !poppedGifts.has(giftKey(g)));
+  if (!news.length) return;
+  for (const g of news) poppedGifts.add(giftKey(g));
+  const total = news.reduce((t, g) => t + g.amount, 0);
+  const first = news[0];
+  const el = document.createElement('div');
+  el.className = 'fr-pop gift';
+  const busy = hooks?.busy() ?? false;
+  const who = news.length > 1 ? 'Your friends' : first.name;
+  el.innerHTML = `${faceHtml(first, 'sm')}
+    <span class="fr-pop-text"><b>${esc(who)}</b> sent you <b class="gift-amt">${fmt(total)}</b> chips${busy ? '. Collect them from Friends in the lobby.' : '.'}</span>
+    <span class="fr-pop-btns">${busy ? '' : '<button type="button" class="btn btn-sm btn-primary" data-pop="collect">Collect</button>'}
+    <button type="button" class="btn btn-sm fr-x" data-pop="close" aria-label="Close">✕</button></span>`;
+  el.querySelectorAll<HTMLButtonElement>('[data-pop]').forEach((b) => (b.onclick = async () => {
+    if (b.dataset.pop === 'close') return el.remove();
+    if (hooks?.busy()) return el.remove();
+    b.disabled = true;
+    try {
+      const line = await collectAll();
+      el.querySelector('.fr-pop-text')!.textContent = line;
+      el.querySelector('.fr-pop-btns [data-pop="collect"]')?.remove();
+      window.setTimeout(() => el.remove(), 6000);
+      onChange?.();
+    } catch (e) {
+      b.disabled = false;
+      el.querySelector('.fr-pop-text')!.textContent = (e as Error).message;
+    }
+  }));
+  popBox().appendChild(el);
+  window.setTimeout(() => el.remove(), 30_000);
+  play('chips');
 }
 
 // ---------- inviting from a table ----------
@@ -295,10 +385,46 @@ export function openInvitePicker(table: string) {
 // ---------- the friends page ----------
 
 function friendFace(f: FriendCard & { online?: boolean }): string {
-  return `<span class="fr-face"><span class="pfp" style="--pfp:${esc(f.color)}" aria-hidden="true">${esc(f.name.slice(0, 1).toUpperCase())}</span>${f.online === undefined ? '' : `<i class="dot${f.online ? ' on' : ''}" aria-hidden="true"></i>`}</span>`;
+  return `<span class="fr-face">${faceHtml(f)}${f.online === undefined ? '' : `<i class="dot${f.online ? ' on' : ''}" aria-hidden="true"></i>`}</span>`;
 }
 
 const titleOf = (f: FriendCard) => (f.title ? ACHIEVEMENT_BY_ID.get(f.title)?.title : null);
+
+/** The friend whose Send chips form is open on the friends page, by code. */
+let sendTo = '';
+
+function giftsHtml(): string {
+  const list = myGifts();
+  if (!list.length) return '';
+  const total = list.reduce((t, g) => t + g.amount, 0);
+  return `<section class="fr-section fr-gifts">
+    <h3 class="sl">Chips from friends</h3>
+    <ul class="fr-list">${list.map((g) => `<li class="fr-row">
+      ${faceHtml(g)}
+      <span class="fr-who"><b>${esc(g.name)}</b><span class="fr-seen">Sent you <b class="gift-amt">${fmt(g.amount)}</b> chips</span></span>
+    </li>`).join('')}</ul>
+    <button type="button" class="btn btn-primary" id="collect-gifts">Collect ${fmt(total)} chips</button>
+  </section>`;
+}
+
+function sendFormHtml(f: Friend): string {
+  const left = gifts?.left ?? GIFT_SEND_DAY;
+  const p = player();
+  const most = Math.max(0, Math.min(GIFT_MAX, left, p.bank));
+  const start = Math.min(1000, most);
+  return `<li class="fr-send">
+    <form class="fr-send-form" id="send-form" data-code="${esc(f.code)}">
+      <label class="sl" for="send-amount">Chips for ${esc(f.name)}</label>
+      <div class="fr-send-row">
+        <input class="text-input" id="send-amount" type="number" inputmode="numeric" min="${GIFT_MIN}" max="${most}" step="100" value="${start || ''}" ${most < GIFT_MIN ? 'disabled' : ''}>
+        ${[500, 1000, 5000].filter((n) => n <= most).map((n) => `<button type="button" class="btn btn-sm" data-amt="${n}">${fmt(n)}</button>`).join('')}
+        <button type="submit" class="btn btn-sm btn-primary" ${most < GIFT_MIN ? 'disabled' : ''}>Send</button>
+        <button type="button" class="btn btn-sm" id="send-cancel">Cancel</button>
+      </div>
+      <p class="fine">From your bank of ${fmt(p.bank)}. You can send ${fmt(left)} more today (${fmt(GIFT_SEND_DAY)} a day), and a friend can be sent ${fmt(GIFT_RECEIVE_DAY)} a day.</p>
+    </form>
+  </li>`;
+}
 
 function pageHtml(prefill: string, note: string): string {
   if (notSetUp) return `<p class="form-error">Friends aren't switched on yet. It needs supabase/friends.sql run on the server.</p>`;
@@ -320,6 +446,7 @@ function pageHtml(prefill: string, note: string): string {
     </form>
     ${note ? `<p class="notice" role="status">${esc(note)}</p>` : ''}
     <p class="form-error" id="friends-page-error" role="alert">${problem ? esc(problem) : ''}</p>
+    ${giftsHtml()}
     ${s.incoming.length ? `<section class="fr-section">
       <h3 class="sl">Friend requests</h3>
       <ul class="fr-list">${s.incoming.map((f) => `<li class="fr-row">
@@ -333,8 +460,8 @@ function pageHtml(prefill: string, note: string): string {
       ${friends.length ? `<ul class="fr-list">${friends.map((f) => `<li class="fr-row">
         ${friendFace(f)}
         <span class="fr-who"><b>${esc(f.name)}</b>${titleHtml(titleOf(f))}<span class="fr-seen${f.online ? ' on' : ''}">${seenText(f)}</span></span>
-        <span class="fr-btns"><button type="button" class="btn btn-sm fr-remove" data-remove="${esc(f.code)}" data-name="${esc(f.name)}">Remove</button></span>
-      </li>`).join('')}</ul>` : '<p class="fine">No friends yet. Add one with their friend code above.</p>'}
+        <span class="fr-btns">${giftsNotSetUp ? '' : `<button type="button" class="btn btn-sm${sendTo === f.code ? ' on' : ''}" data-send="${esc(f.code)}">Send chips</button>`}<button type="button" class="btn btn-sm fr-remove" data-remove="${esc(f.code)}" data-name="${esc(f.name)}">Remove</button></span>
+      </li>${sendTo === f.code && !giftsNotSetUp ? sendFormHtml(f) : ''}`).join('')}</ul>` : '<p class="fine">No friends yet. Add one with their friend code above.</p>'}
     </section>
     ${s.outgoing.length ? `<section class="fr-section">
       <h3 class="sl">Waiting for an answer</h3>
@@ -411,6 +538,46 @@ export async function renderFriends(app: HTMLElement, onBack: () => void) {
     app.querySelectorAll<HTMLButtonElement>('[data-accept]').forEach((b) => (b.onclick = () => void act(() => answerFriend(auth, b.dataset.accept!, true), 'Friend added.')));
     app.querySelectorAll<HTMLButtonElement>('[data-decline]').forEach((b) => (b.onclick = () => void act(() => answerFriend(auth, b.dataset.decline!, false))));
     app.querySelectorAll<HTMLButtonElement>('[data-cancel]').forEach((b) => (b.onclick = () => void act(() => removeFriend(auth, b.dataset.cancel!))));
+    app.querySelectorAll<HTMLButtonElement>('[data-send]').forEach((b) => (b.onclick = () => {
+      sendTo = sendTo === b.dataset.send ? '' : b.dataset.send!;
+      note = '';
+      problem = '';
+      draw();
+      (document.getElementById('send-amount') as HTMLInputElement | null)?.focus();
+    }));
+    document.getElementById('send-cancel')?.addEventListener('click', () => {
+      sendTo = '';
+      draw();
+    });
+    app.querySelectorAll<HTMLButtonElement>('[data-amt]').forEach((b) => (b.onclick = () => {
+      (document.getElementById('send-amount') as HTMLInputElement).value = b.dataset.amt!;
+    }));
+    const sendForm = document.getElementById('send-form') as HTMLFormElement | null;
+    if (sendForm) sendForm.onsubmit = (e) => {
+      e.preventDefault();
+      const amount = Math.floor(Number((document.getElementById('send-amount') as HTMLInputElement).value));
+      const p = player();
+      const why = giftProblem(p, amount, gifts?.left ?? GIFT_SEND_DAY);
+      if (why) {
+        problem = why;
+        return draw();
+      }
+      void act(async () => {
+        // The server takes the chips from the saved bank, so save first.
+        await savePlayer();
+        const r = await sendChips(auth, p, sendForm.dataset.code!, amount);
+        await savePlayer();
+        if (gifts) gifts.left = r.left;
+        sendTo = '';
+        note = `Sent ${fmt(r.amount)} chips to ${r.name}. Your bank is now ${fmt(p.bank)}.`;
+        play('chips');
+      });
+    };
+    document.getElementById('collect-gifts')?.addEventListener('click', () => {
+      void act(async () => {
+        note = await collectAll();
+      });
+    });
     app.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach((b) => (b.onclick = () => {
       if (!confirm(`Remove ${b.dataset.name} from your friends?`)) return;
       void act(() => removeFriend(auth, b.dataset.remove!));
@@ -434,7 +601,7 @@ export async function renderFriends(app: HTMLElement, onBack: () => void) {
   bind();
   // A check-in every 20 seconds refreshes who's online, but not while a code is being typed.
   onChange = () => {
-    if (document.activeElement?.id !== 'friend-code') draw();
+    if (document.activeElement?.id !== 'friend-code' && document.activeElement?.id !== 'send-amount') draw();
   };
   await sync();
 }
