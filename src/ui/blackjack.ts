@@ -8,6 +8,7 @@ import { announce } from './achievements';
 import { bindConsoleButton, consoleEnabled, toggleConsole } from './console';
 import type { DevBlackjack } from './console-blackjack';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, withHero } from './dom';
+import { GUIDE_ICON, openGuide } from './guide';
 import { currentTitle, player, savePlayer, serverAwards } from './profiles';
 import { SoundName, play, setVolume } from './sound';
 import { PERSONA_NAMES, TalkEvent, lineFor, personaFor } from '../bots/persona';
@@ -614,6 +615,7 @@ export class BlackjackTable {
         </div>
         <div class="tb-actions">
           ${consoleEnabled() ? `<button type="button" class="icon-btn" id="dev-toggle" title="Developer console (\`)">${icon('m5 7 5 5-5 5M12 18h7')}<span>Console</span></button>` : ''}
+<button type="button" class="icon-btn" id="open-guide" title="How to play">${icon(GUIDE_ICON)}<span>Rules</span></button>
           <button type="button" class="icon-btn" id="sound-toggle" aria-pressed="${sound}" title="${sound ? 'Mute sounds (M)' : 'Turn sounds on (M)'}">${icon(sound ? 'M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z' : 'M4 9v6h4l5 4V5L8 9H4Zm12 .5 5 5m0-5-5 5')}<span>${sound ? 'Sound' : 'Muted'}</span></button>
           <button type="button" class="icon-btn" id="open-settings" title="Settings">${icon('M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.5h4l.4-2.5c.6-.2 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z')}<span>Settings</span></button>
           <button type="button" class="icon-btn" id="leave" title="Leave table">${icon('M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11')}<span>Leave</span></button>
@@ -746,6 +748,7 @@ export class BlackjackTable {
     bindConsoleButton();
     on('sound-toggle', () => this.toggleSound());
     on('open-settings', () => this.openModal('settings'));
+    on('open-guide', () => openGuide('blackjack'));
     on('leave', () => (this.inPlay ? this.openModal('leave') : this.h.leave()));
     on('bj-menu', () => this.h.leave());
     on('confirm-leave', () => this.h.leave());

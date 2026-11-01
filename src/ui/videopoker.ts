@@ -72,6 +72,7 @@ export function bindVpSetupCard(vp: VpSetup, update: (fn: () => void) => void) {
 export class VideoPokerTable extends HouseTable<VpSetup> {
   protected readonly title = 'Video Poker';
   protected readonly cls = 'vp';
+  protected readonly guideId = 'videopoker' as const;
   protected readonly numberKeysPickChips = false;
   private readonly rng = createRng();
   private hand: VpHand | null = null;

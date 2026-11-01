@@ -162,6 +162,7 @@ const SPIN_MS: Record<'relaxed' | 'normal' | 'fast', number> = { relaxed: 5600, 
 export class RouletteTable extends HouseTable<RlSetup> {
   protected readonly title = 'Roulette';
   protected readonly cls = 'rl';
+  protected readonly guideId = 'roulette' as const;
   private readonly rng = createRng();
   /** Chips on the layout for the next spin. */
   private bets: Layout = {};
