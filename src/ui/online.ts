@@ -168,30 +168,30 @@ export function bindFriendsPanel(pick: () => { settings: TableSettings; name: st
   if (signIn) signIn.onclick = () => hooks.signIn();
   const make = document.getElementById('make-table');
   if (make) make.onclick = () => go(async () => {
-    const { settings, name, playerId, title } = pick();
-    return (await client!.send({ op: 'create', name, settings, playerId, title })).view;
+    const { settings, name, playerId, title, avatar } = pick();
+    return (await client!.send({ op: 'create', name, settings, playerId, title, avatar })).view;
   });
   const form = document.getElementById('join-form') as HTMLFormElement | null;
   if (form) form.onsubmit = (e) => {
     e.preventDefault();
     const code = (document.getElementById('join-code') as HTMLInputElement).value.trim();
     if (!code) return err('Type the code your friend sent you.');
-    const { name, playerId, title } = pick();
-    void go(async () => (await client!.send({ op: 'join', code, name, playerId, title })).view);
+    const { name, playerId, title, avatar } = pick();
+    void go(async () => (await client!.send({ op: 'join', code, name, playerId, title, avatar })).view);
   };
   const watchBtn = document.getElementById('watch-table');
   const watch = () => {
     const code = (document.getElementById('join-code') as HTMLInputElement).value.trim();
     if (!code) return err('Type the code of the table you want to watch.');
-    const { name, playerId, title } = pick();
-    void go(async () => (await client!.send({ op: 'watch', code, name, playerId, title })).view);
+    const { name, playerId, title, avatar } = pick();
+    void go(async () => (await client!.send({ op: 'watch', code, name, playerId, title, avatar })).view);
   };
   if (watchBtn) watchBtn.onclick = watch;
   const resume = document.getElementById('resume-table');
   if (resume && resumable) resume.onclick = () => go(async () => {
-    const { name, playerId, title } = pick();
+    const { name, playerId, title, avatar } = pick();
     // A watcher goes back to watching; joining would sit them down.
-    return (await client!.send({ op: resumable!.watching ? 'watch' : 'join', code: resumable!.code, name, playerId, title })).view;
+    return (await client!.send({ op: resumable!.watching ? 'watch' : 'join', code: resumable!.code, name, playerId, title, avatar })).view;
   });
 
   if (signedIn() && !checkedResume) {
@@ -433,7 +433,7 @@ class OnlineTable {
   private sitIn() {
     const v = this.view;
     const me = pickMe?.() ?? { name: v.members.find((m) => m.you)?.name ?? 'Player' };
-    void this.send({ op: 'join', code: v.code, name: me.name, playerId: me.playerId, title: me.title });
+    void this.send({ op: 'join', code: v.code, name: me.name, playerId: me.playerId, title: me.title, avatar: me.avatar });
   }
 
   private act(a: Action) {
@@ -622,7 +622,7 @@ class OnlineTable {
     const s = v.settings;
     const watchers = v.members.filter((m) => !m.left && m.watching);
     const seats: string[] = v.members.filter((m) => !m.left && !m.watching).map((m) =>
-      `<li class="filled"><span class="avatar lv-human">${esc(m.name.slice(0, 1).toUpperCase())}</span><span class="rs-name">${esc(m.name)}${titleHtml(m.title)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
+      `<li class="filled">${avatarHtml(m.name, 'human', false, m.avatar ?? null)}<span class="rs-name">${esc(m.name)}${titleHtml(m.title)}</span>${m.host ? '<span class="rs-tag host">Host</span>' : ''}${m.you ? '<span class="rs-tag">You</span>' : ''}</li>`);
     const bj = s.game === 'blackjack';
     const open = bj ? Math.min(s.bots ?? 0, Math.max(0, s.seats - seats.length)) : Math.max(0, s.seats - seats.length);
     if (bj) for (let i = 0; i < open; i++) seats.push('<li class="open"><span class="avatar lv-medium">?</span><span class="rs-name">Bot</span><span class="rs-tag">Plays by the book</span></li>');
@@ -758,7 +758,7 @@ class OnlineTable {
       const seatHtml = `<div class="${classes.join(' ')}" data-seat="${seat.id}"${hero ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(seat.isHuman ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
-          ${avatarHtml(seat.name, level, !seat.isHuman)}
+          ${avatarHtml(seat.name, level, !seat.isHuman, seat.avatar ?? null)}
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
           ${badge}${clock}
         </div>

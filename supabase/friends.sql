@@ -1,6 +1,7 @@
 -- Back Room Poker: friends, who's online, and table invites.
 -- Run this once, after setup.sql (and multiplayer.sql, for table invites), in the SQL Editor
--- (New query → paste → Run). Running it again is safe. If multiplayer.sql hasn't been run yet,
+-- (New query → paste → Run). Running it again is safe, and needed after an update that changes it
+-- (faces in the friends list: 2026-11). If multiplayer.sql hasn't been run yet,
 -- friends and who's online still work; invites to a table wait until it has.
 --
 --   * friend_accounts   each account's friend code and when it was last seen in the game
@@ -107,7 +108,7 @@ begin
 end;
 $$;
 
--- What a friend sees of an account: its player's name, colour and title (only if earned).
+-- What a friend sees of an account: its player's name, colour, face and title (only if earned).
 create or replace function public.friend_card(p_user uuid)
 returns jsonb
 language sql
@@ -119,13 +120,14 @@ as $$
     select jsonb_build_object(
       'name', left(coalesce(nullif(p.data ->> 'name', ''), 'Player'), 14),
       'color', p.data ->> 'color',
+      'avatar', case when p.data ->> 'avatar' ~ '^(f:[a-z]{2,12}|u:[0-9a-f]{32})$' then p.data ->> 'avatar' end,
       'title', case when jsonb_typeof(p.data #> '{achievements,unlocked}') = 'object'
         and (p.data #> '{achievements,unlocked}') ? (p.data ->> 'title') then p.data ->> 'title' end)
     from public.players p
     where p.owner = p_user
     order by p.updated_at desc
     limit 1
-  ), jsonb_build_object('name', 'Player', 'color', null, 'title', null));
+  ), jsonb_build_object('name', 'Player', 'color', null, 'avatar', null, 'title', null));
 $$;
 
 -- The account behind a friend code, or an error a player can read.
@@ -211,6 +213,7 @@ begin
     'invites', coalesce((
       select jsonb_agg(jsonb_build_object(
           'from', f.code, 'name', public.friend_card(i.from_user) ->> 'name', 'color', public.friend_card(i.from_user) ->> 'color',
+          'avatar', public.friend_card(i.from_user) ->> 'avatar',
           'table', i.code, 'game', i.game, 'variant', i.variant, 'structure', i.structure,
           'at', floor(extract(epoch from i.created_at) * 1000))
         order by i.created_at desc)

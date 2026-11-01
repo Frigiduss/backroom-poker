@@ -13,7 +13,7 @@ import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table } fro
 import { VARIANTS, VariantDef } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { AdminCommand, AdminTableInfo } from '../online/protocol';
-import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips } from '../accounts';
+import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer } from './profiles';
 import { BjTarget, DevBlackjack, blackjackHelp, runBlackjack } from './console-blackjack';
@@ -967,7 +967,7 @@ const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'edit', usage: 'edit <player> bank <n> | name <new> | stat <name> <n> | resetstats | board on|off', group: 'Accounts',
+    name: 'edit', usage: 'edit <player> bank <n> | name <new> | stat <name> <n> | resetstats | board on|off | picture on|off', group: 'Accounts',
     help: 'Changes any player, in any account. If they are playing right now, their next save can undo it.',
     async run(args, out) {
       const target = await findPlayer(args[0]);
@@ -999,8 +999,25 @@ const COMMANDS: Command[] = [
         await onlineAdmin().setLeaderboardHidden(target.profile.id, on === 'off');
         await admin?.log(on === 'off' ? 'hide from leaderboard' : 'show on leaderboard', { player: target.profile.id, name: target.profile.name });
         out(on === 'off' ? `${name} is off the leaderboard.` : `${name} can show on the leaderboard again.`, 'ok');
+      } else if (what === 'picture') {
+        const on = (args[2] ?? '').toLowerCase();
+        if (on !== 'on' && on !== 'off') throw new UsageError('Say picture off (delete it and stop uploads) or picture on.');
+        if (on === 'off') {
+          const key = pictureKey(target.profile.avatar);
+          const deleted = await onlineAdmin().setPictureBlocked(target.owner, true, key);
+          if (key) await changePlayer(target, (p) => {
+            p.avatar = null;
+            p.updatedAt = Date.now();
+          }, 'remove picture', { picture: key });
+          await admin?.log('block pictures', { player: target.profile.id, name: target.profile.name, picture: key, deleted });
+          out(`${name} can't upload pictures any more${key ? (deleted ? ' and their picture is deleted' : ', but their picture couldn\'t be deleted (is avatars.sql run?)') : ''}. Faces from the game still work.`, 'ok');
+        } else {
+          await onlineAdmin().setPictureBlocked(target.owner, false);
+          await admin?.log('allow pictures', { player: target.profile.id, name: target.profile.name });
+          out(`${name} can upload pictures again.`, 'ok');
+        }
       } else {
-        throw new UsageError('Say what to change: bank, name, stat, resetstats or board.');
+        throw new UsageError('Say what to change: bank, name, stat, resetstats, board or picture.');
       }
     },
   },

@@ -1,14 +1,18 @@
 // Bot faces and the speech bubbles that float up over a seat, shared by the poker and
 // blackjack tables and the online chat.
 import { personaFor } from '../bots/persona';
+import { avatarLook } from '../accounts';
 import { esc } from './dom';
+import { faceInner } from './faces';
 
-/** A seat's avatar: a regular's face for bots, the first letter of the name for people. */
-export function avatarHtml(name: string, level: string, bot: boolean): string {
+/** A seat's avatar: a regular's face for bots; for people, the face they picked or the first letter of the name. */
+export function avatarHtml(name: string, level: string, bot: boolean, avatar: string | null = null): string {
   const face = bot ? personaFor(name)?.face : undefined;
-  return face
-    ? `<span class="avatar face lv-${level}" aria-hidden="true">${face}</span>`
-    : `<span class="avatar lv-${level}">${esc(name.slice(0, 1).toUpperCase())}</span>`;
+  if (face) return `<span class="avatar face lv-${level}" aria-hidden="true">${face}</span>`;
+  const look = bot ? 'letter' : avatarLook(avatar).kind;
+  if (look === 'face') return `<span class="avatar face lv-${level}" aria-hidden="true">${faceInner(avatar, name)}</span>`;
+  if (look === 'picture') return `<span class="avatar pic lv-${level}" aria-hidden="true">${faceInner(avatar, name)}</span>`;
+  return `<span class="avatar lv-${level}">${esc(name.slice(0, 1).toUpperCase())}</span>`;
 }
 
 /** Hover text for a bot's seat: who they are, and their one-line story when they have one. */

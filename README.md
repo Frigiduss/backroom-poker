@@ -52,6 +52,10 @@ Signed in, you can also:
 - **Add friends** with their six-character friend code (or friend link), see who's online,
   and invite them to your table in one tap. Invites pop up on their screen with Join and
   Watch buttons. Only friends who've both said yes see each other's name and online status.
+- **Send chips to a friend** from your bank (after 10 hands): up to 10,000 a day, and a friend
+  can be sent up to 20,000 a day. Gifts wait in their Friends list until they collect them.
+- **Pick a face** for your badge from the game's set, or upload your own picture. It shows at
+  online tables, on the leaderboard and in friends lists. (Faces from the set work offline too.)
 - **Watch a table** without taking a seat, from its code or watch link.
 - **Chat** at the table.
 - **Climb the leaderboard** for chip bank, biggest pot and achievements (players appear
@@ -153,7 +157,7 @@ The engine and bots have no DOM dependencies, so they can be reused on other pla
 
 ### Supabase backend
 
-Online accounts, tables, achievements, the leaderboard, the daily bonus and friends run on
+Online accounts, tables, achievements, the leaderboard, the daily bonus, friends, chip gifts and pictures run on
 [Supabase](https://supabase.com). Without it the game still works fully offline against bots.
 Setup is a handful of SQL files run once in the Supabase SQL editor:
 
@@ -166,6 +170,8 @@ Setup is a handful of SQL files run once in the Supabase SQL editor:
 | `supabase/admin.sql` | Admin accounts |
 | `supabase/friends.sql` | Friends, who's online, and table invites |
 | `supabase/banks.sql` | Limits on how fast an online chip bank can grow, so a save can't be edited to cheat |
+| `supabase/gifts.sql` | Sending chips to friends, with daily limits |
+| `supabase/avatars.sql` | Uploaded profile pictures (storage bucket and its rules) |
 | `supabase/security.sql` | Two-step sign-in, for projects set up before it (new projects get it from the files above) |
 
 Step-by-step instructions are in [supabase/README.md](supabase/README.md). Only the public

@@ -8,3 +8,6 @@ export * from './bonus';
 export * from './leaderboard';
 export * from './stats';
 export * from './friends';
+export * from './avatars';
+export * from './pictures';
+export * from './gifts';

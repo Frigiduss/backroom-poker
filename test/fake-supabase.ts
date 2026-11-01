@@ -35,6 +35,12 @@ export class FakeSupabase {
   /** Table codes each user is at, standing in for poker_views (code → user ids). */
   seated = new Map<string, { users: string[]; game: string; variant?: string; structure?: string }>();
 
+  /** supabase/gifts.sql: every gift sent. Null until set up. */
+  gifts: { from: string; to: string; amount: number; at: number; collected: boolean }[] | null = [];
+  /** supabase/avatars.sql: uploaded pictures by name, and accounts blocked from uploading. Null until set up. */
+  pictures: Map<string, { owner: string; bytes: number; type: string }> | null = new Map();
+  pictureBlocked = new Set<string>();
+
   /** Authenticator apps by user id. The right code is always 246810. */
   factors = new Map<string, { id: string; status: 'verified' | 'unverified' }[]>();
   /** Access tokens that finished two-step sign-in. */
@@ -60,9 +66,15 @@ export class FakeSupabase {
     return [...this.users].find(([, u]) => u.id === id)?.[0] ?? '';
   }
 
-  handle(method: string, url: string, headers: Record<string, string>, bodyText: string | null): FakeReply {
+  handle(method: string, url: string, headers: Record<string, string>, bodyText: string | null, blob?: Blob): FakeReply {
     const u = new URL(url);
     this.calls.push(`${method} ${u.pathname}${u.search}`);
+    if (u.pathname.startsWith('/storage/v1/object/') && !this.pictures) return { status: 400, body: { statusCode: '404', error: 'Bucket not found', message: 'Bucket not found' } };
+    if (u.pathname.startsWith('/storage/v1/object/') && this.pictures && u.pathname !== '/storage/v1/object/list/avatars') {
+      const uidS = this.tokens.get((headers.authorization ?? headers.Authorization ?? '').replace(/^Bearer /, ''));
+      const isAdmin = !!uidS && this.admins.has(uidS);
+      return this.storage(method, u.pathname, uidS, isAdmin, headers, blob ?? bodyText);
+    }
     const body = bodyText ? JSON.parse(bodyText) : {};
     const bearer = (headers.authorization ?? headers.Authorization ?? '').replace(/^Bearer /, '');
     const uid = this.tokens.get(bearer);
@@ -205,12 +217,22 @@ export class FakeSupabase {
         body: scored.map((x, i) => ({ ...x, rank: scored.findIndex((y) => y.value === x.value) + 1, rn: i + 1 }))
           .filter((x) => x.rn <= limit || x.r.owner === uid)
           .map((x) => ({
-            rank: x.rank, name: x.d.name, color: x.d.color, value: x.value, mine: !!uid && x.r.owner === uid,
+            rank: x.rank, name: x.d.name, color: x.d.color, avatar: (x.d as { avatar?: string }).avatar ?? null, value: x.value, mine: !!uid && x.r.owner === uid,
             title: x.d.title && x.d.achievements?.unlocked && x.d.title in x.d.achievements.unlocked ? x.d.title : null,
           })),
       };
     }
     if (p.startsWith('/rest/v1/rpc/friends_') && this.friendAccounts) return this.friends(p.slice('/rest/v1/rpc/'.length), uid, bearer, body);
+    if (['/rest/v1/rpc/send_chips', '/rest/v1/rpc/gifts_sync', '/rest/v1/rpc/collect_gifts'].includes(p) && this.gifts && this.friendAccounts) {
+      return this.chipGifts(p.slice('/rest/v1/rpc/'.length), uid, bearer, body);
+    }
+    if (p.startsWith('/storage/v1/object/') && this.pictures) return this.storage(method, p, uid, admin, headers, bodyText);
+    if (p === '/rest/v1/avatar_blocked') {
+      if (!admin) return denied;
+      if (method === 'POST') this.pictureBlocked.add(body.owner);
+      if (method === 'DELETE') this.pictureBlocked.delete(u.searchParams.get('owner')?.replace(/^eq\./, '') ?? '');
+      return { status: 201 };
+    }
     if (p === '/rest/v1/leaderboard_hidden') {
       if (!admin) return denied;
       if (method === 'POST') this.hidden.add(body.player_id);
@@ -260,8 +282,8 @@ export class FakeSupabase {
     const friends = (a: string, b: string) => !!link(a, b) && !!link(b, a);
     const card = (u: string) => {
       const row = this.rows.filter((r) => r.owner === u).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-      const d = (row?.data ?? {}) as { name?: string; color?: string; title?: string; achievements?: { unlocked?: Record<string, unknown> } };
-      return { name: (d.name || 'Player').slice(0, 14), color: d.color ?? null, title: d.title && d.achievements?.unlocked && d.title in d.achievements.unlocked ? d.title : null };
+      const d = (row?.data ?? {}) as { name?: string; color?: string; avatar?: string; title?: string; achievements?: { unlocked?: Record<string, unknown> } };
+      return { name: (d.name || 'Player').slice(0, 14), color: d.color ?? null, avatar: d.avatar ?? null, title: d.title && d.achievements?.unlocked && d.title in d.achievements.unlocked ? d.title : null };
     };
     const mine = this.friendCode(uid);
     if (fn === 'friends_sync') {
@@ -328,10 +350,99 @@ export class FakeSupabase {
     return { status: 404, body: { code: 'PGRST202', message: `no function ${fn}` } };
   }
 
+  /** send_chips, gifts_sync and collect_gifts from supabase/gifts.sql. */
+  private chipGifts(fn: string, uid: string | undefined, bearer: string, body: Record<string, unknown>): FakeReply {
+    if (!uid) return { status: 401, body: { code: '42501', message: 'Sign in to an online account to use friends.' } };
+    if (!this.mfaOk(bearer, uid)) return { status: 403, body: { code: '42501', message: 'Finish two-step sign-in first.' } };
+    const gifts = this.gifts!;
+    const fa = this.friendAccounts!;
+    const now = this.now ?? Date.now();
+    const bad = (message: string, status = 400) => ({ status, body: { code: 'P0001', message } });
+    const day = (pick: (g: (typeof gifts)[number]) => boolean) => gifts.filter((g) => pick(g) && g.at > now - 86_400_000).reduce((t, g) => t + g.amount, 0);
+    const nameOf = (u: string) => {
+      const row = this.rows.filter((r) => r.owner === u).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+      return ((row?.data as { name?: string })?.name || 'Player').slice(0, 14);
+    };
+    this.friendCode(uid);
+    if (fn === 'gifts_sync') {
+      return {
+        status: 200,
+        body: {
+          waiting: gifts.filter((g) => g.to === uid && !g.collected).sort((a, b) => b.at - a.at).map((g) => {
+            const d = (this.rows.find((r) => r.owner === g.from)?.data ?? {}) as { color?: string; avatar?: string };
+            return { from: fa.get(g.from)?.code, name: nameOf(g.from), color: d.color ?? null, avatar: d.avatar ?? null, amount: g.amount, at: g.at };
+          }),
+          left: Math.max(0, 10000 - day((g) => g.from === uid)),
+        },
+      };
+    }
+    const row = this.rows.find((r) => r.id === body.p_player && r.owner === uid);
+    if (!row) return { status: 403, body: { code: '42501', message: "That player isn't in your account." } };
+    const d = row.data as { bank?: number; table?: unknown; stats?: { hands?: number } };
+    if (fn === 'collect_gifts') {
+      const taken = gifts.filter((g) => g.to === uid && !g.collected);
+      for (const g of taken) g.collected = true;
+      return { status: 200, body: { amount: taken.reduce((t, g) => t + g.amount, 0), gifts: taken.map((g) => ({ name: nameOf(g.from), amount: g.amount })) } };
+    }
+    const them = [...fa].find(([, a]) => a.code === String(body.p_code ?? ''))?.[0];
+    if (!them) return bad(`No player has the friend code ${String(body.p_code ?? '')}. Check it with your friend.`);
+    if (them === uid) return bad("You can't send chips to yourself.");
+    if (!(this.friendLinks.has(`${uid}>${them}`) && this.friendLinks.has(`${them}>${uid}`))) return { status: 403, body: { code: '42501', message: 'You can only send chips to a friend.' } };
+    const amount = Number(body.p_amount);
+    if (!(amount >= 100)) return bad('Send at least 100 chips.');
+    if (amount > 10000) return bad('A gift can be at most 10,000 chips.');
+    const sent = day((g) => g.from === uid);
+    if (sent + amount > 10000) return bad(`You can send ${(10000 - sent).toLocaleString('en-US')} more chips today (10,000 a day).`);
+    const got = day((g) => g.to === them);
+    if (got + amount > 20000) return bad(`${nameOf(them)} can only be sent ${(20000 - got).toLocaleString('en-US')} more chips today (20,000 a day).`);
+    if (d.table) return bad('Leave your table first. Gifts come out of your bank.');
+    if ((d.stats?.hands ?? 0) < 10) return bad('Play 10 hands before sending chips.');
+    const bank = Math.floor(d.bank ?? 0);
+    if (bank < amount) return bad(`Your bank only has ${bank.toLocaleString('en-US')} chips.`);
+    row.data = { ...d, bank: bank - amount };
+    gifts.push({ from: uid, to: them, amount, at: now, collected: false });
+    return { status: 200, body: { amount, bank: bank - amount, left: 10000 - sent - amount, name: nameOf(them) } };
+  }
+
+  /** The `avatars` bucket with the rules from supabase/avatars.sql. */
+  private storage(method: string, p: string, uid: string | undefined, admin: boolean, headers: Record<string, string>, body: unknown): FakeReply {
+    const pics = this.pictures!;
+    if (p === '/storage/v1/object/list/avatars') {
+      return { status: 200, body: [...pics].filter(([, x]) => x.owner === uid || admin).map(([name]) => ({ name })) };
+    }
+    const m = /^\/storage\/v1\/object\/(public\/)?avatars\/(.+)$/.exec(p);
+    if (!m) return { status: 400, body: { statusCode: '404', error: 'Bucket not found', message: 'Bucket not found' } };
+    const name = m[2];
+    if (method === 'GET') return pics.has(name) ? { status: 200, body: 'jpeg' } : { status: 400, body: { statusCode: '404', message: 'Object not found' } };
+    if (!uid) return { status: 400, body: { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' } };
+    if (method === 'DELETE') {
+      const x = pics.get(name);
+      if (!x || (x.owner !== uid && !admin)) return { status: 400, body: { statusCode: '404', message: 'Object not found' } };
+      pics.delete(name);
+      return { status: 200, body: [{ name }] };
+    }
+    const type = headers['Content-Type'] ?? headers['content-type'] ?? '';
+    const bytes = typeof body === 'string' ? body.length : (body as { size?: number })?.size ?? 0;
+    if (type !== 'image/jpeg') return { status: 400, body: { statusCode: '415', error: 'invalid_mime_type', message: `mime type ${type} is not supported` } };
+    if (bytes > 65536) return { status: 400, body: { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' } };
+    const count = [...pics.values()].filter((x) => x.owner === uid).length;
+    if (!/^[0-9a-f]{32}\.jpg$/.test(name) || this.pictureBlocked.has(uid) || count >= 3) {
+      return { status: 400, body: { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' } };
+    }
+    if (pics.has(name)) return { status: 400, body: { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' } };
+    pics.set(name, { owner: uid, bytes, type });
+    return { status: 200, body: { Key: `avatars/${name}` } };
+  }
+
   /** A fetch function that answers from this fake. */
   fetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
     if (this.offline) throw new TypeError('Failed to fetch');
-    const r = this.handle(init.method ?? 'GET', String(input), (init.headers ?? {}) as Record<string, string>, (init.body as string) ?? null);
+    // Uploads send a Blob; the fake only needs its size.
+    const raw = init.body as unknown;
+    const bodyText = raw instanceof Blob ? 'x'.repeat(raw.size) : (raw as string) ?? null;
+    const r = String(input).includes('/storage/v1/object/') && raw instanceof Blob
+      ? this.handle(init.method ?? 'GET', String(input), (init.headers ?? {}) as Record<string, string>, null, raw)
+      : this.handle(init.method ?? 'GET', String(input), (init.headers ?? {}) as Record<string, string>, bodyText);
     return new Response(r.body === undefined ? null : JSON.stringify(r.body), { status: r.status });
   };
 }

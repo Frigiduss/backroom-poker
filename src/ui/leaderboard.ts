@@ -3,6 +3,7 @@ import {
   ACHIEVEMENTS, ACHIEVEMENT_BY_ID, BOARD_NAMES, Board, LEADERBOARD_MIN_HANDS, LeaderRow, NotSetUpError,
   bonusAmount, bonusReady, fetchLeaderboard, nextBonusAt, streakDay,
 } from '../accounts';
+import { faceHtml } from './faces';
 import { esc, fmt, titleHtml } from './dom';
 import { claimDailyBonus, isOnline, onlineAuth, player, savePlayer, setNotice } from './profiles';
 import { play } from './sound';
@@ -54,7 +55,7 @@ function rowHtml(r: LeaderRow, b: Board): string {
   const medal = r.rank <= 3 ? ` medal m${r.rank}` : '';
   return `<li class="lb-row${r.mine ? ' mine' : ''}">
     <span class="lb-rank${medal}">${r.rank}</span>
-    <span class="pfp" style="--pfp:${esc(r.color)}" aria-hidden="true">${esc(r.name.slice(0, 1).toUpperCase())}</span>
+    ${faceHtml(r)}
     <span class="lb-name"><b>${esc(r.name)}</b>${titleHtml(title)}</span>
     <span class="lb-value">${valueText(b, r.value)}</span>
   </li>`;

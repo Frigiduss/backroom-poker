@@ -269,6 +269,7 @@ function renderSetup() {
     name: me.name,
     playerId: me.id,
     title: currentTitle() ? me.title : null,
+    avatar: me.avatar,
     settings: {
       variant: setup.variant, structure: struct, format: setup.format, difficulty: setup.difficulty,
       stackBB: setup.stackBB, blindSpeed: setup.blindSpeed, seats: setup.format === 'headsup' ? 2 : setup.opponents + 1,
@@ -837,7 +838,7 @@ class Game implements DevGame {
       const seatHtml = `<div class="${classes.join(' ')}" data-seat="${seat.id}"${hero ? '' : ` style="left:${p.x}%;top:${p.y}%"`}>
         <div class="cards">${cards}</div>
         <div class="pod" title="${esc(isMe ? `${seat.name} · ${tag}` : botTitle(seat.name, tag))}">
-          ${avatarHtml(seat.name, level, !isMe)}
+          ${avatarHtml(seat.name, level, !isMe, isMe ? player().avatar : null)}
           <span class="plate"><span class="nm">${esc(seat.name)}</span><span class="stk">${fmt(stack)}</span></span>
           ${isMe ? (currentTitle() ? `<span class="lvl lv-human ttl">${esc(currentTitle()!)}</span>` : '') : `<span class="lvl lv-${level}">${DIFFICULTY_NAMES[seat.difficulty!]}</span>`}
         </div>

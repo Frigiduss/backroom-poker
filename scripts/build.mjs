@@ -74,7 +74,7 @@ const csp = (script) => '\n<meta http-equiv="Content-Security-Policy" content="'
   `script-src 'sha256-${createHash('sha256').update(script).digest('base64')}'`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://*.supabase.co",
   "media-src 'self' data: blob:",
   "connect-src 'self' https://*.supabase.co",
   "worker-src 'self' blob:",

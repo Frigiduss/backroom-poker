@@ -4,6 +4,7 @@
 import { VARIANTS, VariantId, STRUCTURE_NAMES, Structure } from '../engine/variants';
 import { OnlineAuth, OnlineError, restRequest } from './online';
 import { safeColor } from './profile';
+import { cleanAvatar } from './avatars';
 
 type Fetch = typeof fetch;
 
@@ -17,6 +18,8 @@ export interface FriendCard {
   code: string;
   name: string;
   color: string;
+  /** Their face (see avatars.ts), or null for their first letter. */
+  avatar: string | null;
   /** Achievement id of the title they wear, only if they've earned it. */
   title: string | null;
 }
@@ -32,6 +35,7 @@ export interface TableInvite {
   from: string;
   name: string;
   color: string;
+  avatar: string | null;
   /** The table's code. */
   table: string;
   /** What's played there, for showing: "Pot Limit Omaha", "Blackjack". */
@@ -56,7 +60,7 @@ export class FriendsNotSetUpError extends OnlineError {}
 const str = (x: unknown, max = 40): string => (typeof x === 'string' ? x.slice(0, max) : '');
 
 function card(r: Record<string, unknown>): FriendCard {
-  return { code: cleanFriendCode(str(r.code)), name: str(r.name, 14) || 'Player', color: safeColor(r.color), title: typeof r.title === 'string' ? r.title : null };
+  return { code: cleanFriendCode(str(r.code)), name: str(r.name, 14) || 'Player', color: safeColor(r.color), avatar: cleanAvatar(r.avatar), title: typeof r.title === 'string' ? r.title : null };
 }
 
 function gameText(r: Record<string, unknown>): string {
@@ -76,7 +80,7 @@ export function parseFriends(r: Record<string, unknown>): FriendsState {
     incoming: list(r.incoming).map(card),
     outgoing: list(r.outgoing).map(card),
     invites: list(r.invites).map((i) => ({
-      from: cleanFriendCode(str(i.from)), name: str(i.name, 14) || 'A friend', color: safeColor(i.color),
+      from: cleanFriendCode(str(i.from)), name: str(i.name, 14) || 'A friend', color: safeColor(i.color), avatar: cleanAvatar(i.avatar),
       table: str(i.table, 8).toUpperCase().replace(/[^A-Z0-9]/g, ''), game: gameText(i), at: Number(i.at) || 0,
     })).filter((i) => i.table),
   };
