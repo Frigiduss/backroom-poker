@@ -12,6 +12,7 @@ const calls: string[] = [];
 const credited: { owner: string; player_id: string; sum: Record<string, number>; max: Record<string, number> }[] = [];
 const ADMIN = '11111111-2222-4333-8444-555555555555';
 const adminLog: { admin: string; action: string }[] = [];
+const pushAsked: string[] = [];
 let n = 0;
 
 const reply = (status: number, body?: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status });
@@ -79,6 +80,10 @@ async function fakeSupabase(input: RequestInfo | URL, init: RequestInit = {}): P
     views.delete(`${eq('table_id')}/${eq('user_id')}`);
     return reply(204);
   }
+  if (url.pathname === '/rest/v1/rpc/push_targets' && method === 'POST') {
+    pushAsked.push(body.p_user);
+    return reply(200, []);
+  }
   return reply(404, { message: `unexpected ${method} ${url.pathname}` });
 }
 
@@ -119,6 +124,10 @@ test('the deployed function signs people in, makes a table and plays a hand over
   assert.equal(views.size, 2, 'a view row for each person');
   const bobView = views.get(`${made.tableId}/bob`)!.view as { hand: { players: { id: string; cards: (number | null)[] }[] }; mySeat: string };
   for (const p of bobView.hand.players) assert.equal(p.cards.every((c) => c !== null), p.id === bobView.mySeat);
+
+  await new Promise((r) => setTimeout(r, 10));
+  const bobsTurn = !!(views.get(`${made.tableId}/bob`)!.view as { legal: unknown }).legal;
+  assert.deepEqual(pushAsked, bobsTurn ? ['bob'] : [], 'Bob is looked up for a notification if the game waits on him');
 
   const left = await (await post(h, 'bob', { op: 'leave', tableId: made.tableId })).json();
   assert.ok(left.ok);

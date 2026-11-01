@@ -614,6 +614,8 @@ input[type="range"]:disabled { opacity: .35; }
 .account-panel .step { margin: 0; }
 .account-panel p { margin: 0; color: var(--muted); }
 .account-panel p b { color: var(--text); }
+.notify-body { display: grid; gap: 10px; }
+.notify-body .row-btns { margin-top: 4px; }
 .account-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
 .account-form .row-btns { grid-column: 1 / -1; }
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

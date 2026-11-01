@@ -15,6 +15,20 @@ export class TableClient {
   }
 
   async send(req: Request): Promise<Reply> {
+    return (await this.post(req)) as unknown as Reply;
+  }
+
+  /** The key browsers sign up for notifications with (src/online/push.ts). */
+  async pushKey(): Promise<string> {
+    return String((await this.post({ op: 'push-key' })).key ?? '');
+  }
+
+  /** Lets the server send a notification about an invite just made to the friend with this code. Never throws. */
+  async pushInvite(friendCode: string): Promise<void> {
+    await this.post({ op: 'push-invite', code: friendCode }).catch(() => undefined);
+  }
+
+  private async post(req: unknown): Promise<Record<string, unknown>> {
     const token = await this.auth.token();
     let res: Response;
     try {
@@ -29,7 +43,7 @@ export class TableClient {
     const body = (await res.json().catch(() => ({}))) as Partial<Reply> & { error?: string; message?: string };
     if (res.status === 404 && !('ok' in body)) throw new OnlineError("Online tables aren't switched on yet: the poker-table function isn't deployed on the server.", 404);
     if (!res.ok || !body.ok) throw new OnlineError(body.error ?? body.message ?? `The table server said no (${res.status}).`, res.status);
-    return body as Reply;
+    return body as Record<string, unknown>;
   }
 
   /** Developer console requests ('admin' and 'tables'). The server refuses them unless the account is an admin. */

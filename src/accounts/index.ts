@@ -12,4 +12,5 @@ export * from './avatars';
 export * from './pictures';
 export * from './gifts';
 export * from './crashes';
+export * from './push';
 export * from './seasons';

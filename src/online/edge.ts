@@ -4,7 +4,9 @@
 import { assuranceOf } from '../accounts/online';
 import { RestTableDb } from './rest-db';
 import { handle } from './server';
+import { Pusher, TurnNotice, handlePush } from './push';
 
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 declare const Deno: {
   env: { get(name: string): string | undefined };
   serve(handler: (req: Request) => Response | Promise<Response>): void;
@@ -26,6 +28,17 @@ function serviceKey(): string {
 
 const KEY = serviceKey();
 const db = new RestTableDb(URL_BASE, KEY);
+const pusher = new Pusher(URL_BASE, KEY);
+
+/** Work that carries on after the answer has gone back, so a notification never slows a move down. */
+const pending = new Set<Promise<unknown>>();
+function later(p: Promise<unknown>) {
+  const done = p.catch((err) => console.error(err)).finally(() => pending.delete(done));
+  pending.add(done);
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(done);
+}
+
+const notify = (n: TurnNotice) => later(pusher.turn(n));
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -60,7 +73,7 @@ Deno.serve(async (req) => {
     if (!userId) return json(401, { ok: false, error: 'Sign in to play online.' });
     if (userId === 'code') return json(401, { ok: false, error: 'Finish two-step sign-in to play online.' });
     const body = await req.json().catch(() => null);
-    const out = await handle(db, userId, body);
+    const out = body?.op === 'push-key' || body?.op === 'push-invite' ? await handlePush(pusher, userId, body) : await handle(db, userId, body, { notify });
     return json(out.status, out.body);
   } catch (err) {
     console.error(err);
