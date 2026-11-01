@@ -3,8 +3,9 @@
 // whatever the lines pay goes back into the bank once the last reel lands.
 import { credit, setBlackjackBank, slotsTally } from '../accounts';
 import { createRng } from '../engine/cards';
-import { LINES, LINE_NAMES, MAX_LINES, PAYS, PayId, REELS, ROW_COUNT, SlotSpin, Sym, SYMBOL_NAMES, spinSlots, windowAt } from '../engine/slots';
+import { LINES, LINE_NAMES, MAX_LINES, PAYS, PayId, REELS, ROW_COUNT, SlotSpin, Sym, SYMBOL_NAMES, highRollStops, settleSpin, spinSlots, windowAt } from '../engine/slots';
 import { esc, fmt } from './dom';
+import { setSlotsHighRoll, slotsHighRoll } from './console';
 import { HouseTable, chipRackHtml, houseCardHtml, seg } from './house';
 import { play } from './sound';
 
@@ -82,6 +83,8 @@ export class SlotsTable extends HouseTable<SlSetup> {
   private stops: number[] = REELS.map((strip) => Math.floor(Math.random() * strip.length));
   /** A pull in progress: the reels are turning and the win isn't paid yet. */
   private spinning: SlotSpin | null = null;
+  /** The spin in play was fixed by the console, so it earns no achievements. */
+  private rigged = false;
   private result: SlotSpin | null = null;
   private landTimer: number | undefined;
   private note = '';
@@ -96,7 +99,8 @@ export class SlotsTable extends HouseTable<SlSetup> {
   }
 
   protected infoHtml() {
-    return `${SLOT_NAME} · Coin <b>${fmt(this.h.setup.chip)}</b>`;
+    const flag = slotsHighRoll() ? ' · <button type="button" class="dev-flag reveal-flag" id="highroll-off" title="Turned on with the console\'s highroll. Tap to turn it off.">High roll ✕</button>' : '';
+    return `${SLOT_NAME} · Coin <b>${fmt(this.h.setup.chip)}</b>${flag}`;
   }
 
   private say(text: string) {
@@ -135,7 +139,9 @@ export class SlotsTable extends HouseTable<SlSetup> {
       if (fits < 1) return this.say('Your bank can’t cover a coin this size.');
       return this.say(`Your bank covers ${fits} line${fits > 1 ? 's' : ''} of ${fmt(chip)}, not ${lines}.`);
     }
-    const s = spinSlots(lines, chip, this.rng);
+    // The console's highroll fixes the reels on three sevens.
+    this.rigged = slotsHighRoll();
+    const s = this.rigged ? settleSpin(highRollStops(), lines, chip) : spinSlots(lines, chip, this.rng);
     setBlackjackBank(this.profile, this.bank - s.staked);
     this.spinning = s;
     this.result = null;
@@ -166,7 +172,7 @@ export class SlotsTable extends HouseTable<SlSetup> {
     this.spinning = null;
     this.result = s;
     setBlackjackBank(this.profile, this.bank + s.paid);
-    credit(this.profile, slotsTally(s));
+    if (!this.rigged) credit(this.profile, slotsTally(s));
     if (s.wins.some((w) => w.pay === 'sevens' || w.pay === 'crowns')) play('blackjack');
     else if (s.paid > s.staked) play('win');
     else if (s.paid) play('chips');
@@ -279,6 +285,10 @@ export class SlotsTable extends HouseTable<SlSetup> {
     this.on('sl-lines', () => this.cycleLines());
     this.on('sl-max', () => this.spinMax());
     this.on('sl-spin', () => this.spin());
+    this.on('highroll-off', () => {
+      setSlotsHighRoll(false);
+      this.render();
+    });
   }
 
   protected onKey(k: string, e: KeyboardEvent) {

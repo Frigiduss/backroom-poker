@@ -127,6 +127,11 @@ export function settleSpin(stops: readonly number[], lines: number, coin: number
   return { stops: [...stops], grid, lines: n, coin, wins, staked, paid, net: paid - staked };
 }
 
+/** Stops that put a seven on the middle row of every reel: the top prize on line 1, which every bet plays. For the console. */
+export function highRollStops(): number[] {
+  return REELS.map((strip) => strip.indexOf('seven'));
+}
+
 /** One pull of the handle. */
 export function spinSlots(lines: number, coin: number, rng: Rng): SlotSpin {
   const stops = REELS.map((strip) => Math.floor(rng.next() * strip.length));

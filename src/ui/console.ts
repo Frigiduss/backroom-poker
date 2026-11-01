@@ -66,6 +66,12 @@ interface Command {
 const HISTORY_KEY = 'backroom-poker-console-history';
 
 let hooks: DevHooks;
+/** The console's highroll: every slots spin lands three sevens, until turned off or the page reloads. */
+let highRoll = false;
+export const slotsHighRoll = (): boolean => highRoll;
+export function setSlotsHighRoll(on: boolean) {
+  highRoll = on;
+}
 let admin: AdminApi | null = null;
 let auth: OnlineAuth | null = null;
 let checkedFor = '';
@@ -670,6 +676,14 @@ const COMMANDS: Command[] = [
     run(args, out) {
       const on = args[0] ? args[0] === 'on' : !hooks.reveal();
       out(`Bots' cards ${hooks.reveal(on) ? 'face up' : 'face down'}.`, 'ok');
+    },
+  },
+  {
+    name: 'highroll', usage: 'highroll [on | off]', group: 'Table', help: 'Every slots spin lands three sevens on the middle line until you turn it off or reload. A High roll tag in the top bar turns it off. Rigged spins earn no achievements.',
+    run(args, out) {
+      setSlotsHighRoll(args[0] ? args[0] === 'on' : !highRoll);
+      out(highRoll ? 'High roll on: slots spins land three sevens.' : 'High roll off: slots spins are random again.', 'ok');
+      hooks.redraw();
     },
   },
   {
