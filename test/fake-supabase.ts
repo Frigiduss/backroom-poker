@@ -44,6 +44,33 @@ export class FakeSupabase {
   /** supabase/avatars.sql: uploaded pictures by name, and accounts blocked from uploading. Null until set up. */
   pictures: Map<string, { owner: string; bytes: number; type: string }> | null = new Map();
   pictureBlocked = new Set<string>();
+  /** supabase/moderation.sql: suspensions by account, admin changes waiting for a player's game, deleted player ids. Null until set up. */
+  moderation: {
+    bans: Map<string, { until: number | null; reason: string; at: number }>;
+    overrides: Map<string, { owner: string; fields: Record<string, unknown>; lock: string | null; collected: boolean }>;
+    deleted: Map<string, string>;
+  } | null = { bans: new Map(), overrides: new Map(), deleted: new Map() };
+
+  private bannedNow(uid: string) {
+    const b = this.moderation?.bans.get(uid);
+    return !!b && (b.until === null || b.until > (this.now ?? Date.now()));
+  }
+
+  /** What moderation.sql's trigger does to a save from a player's own game. */
+  private moderate(id: string, uid: string, data: Record<string, unknown>, isNew: boolean): FakeReply | null {
+    const m = this.moderation;
+    if (!m) return null;
+    if (this.bannedNow(uid)) return { status: 400, body: { code: 'P0001', message: 'This account is suspended, so nothing is saved online.' } };
+    if (isNew && m.deleted.has(id)) return { status: 400, body: { code: 'P0001', message: 'An admin deleted this player.' } };
+    const o = m.overrides.get(id);
+    if (o && !o.collected) {
+      const { stats, ...rest } = o.fields;
+      Object.assign(data, rest);
+      if (stats) data.stats = { ...(data.stats as object), ...(stats as object) };
+    }
+    if (o?.lock) data.name = o.lock;
+    return null;
+  }
 
   /** Authenticator apps by user id. The right code is always 246810. */
   factors = new Map<string, { id: string; status: 'verified' | 'unverified' }[]>();
@@ -171,6 +198,10 @@ export class FakeSupabase {
       if (method === 'POST') {
         const existing = this.rows.find((r) => r.id === body.id);
         if (existing && existing.owner !== uid && !admin) return { status: 403, body: { code: '42501', message: 'new row violates row-level security policy for table "players"' } };
+        if (!admin) {
+          const refused = this.moderate(body.id, uid, body.data, !existing);
+          if (refused) return refused;
+        }
         if (existing) Object.assign(existing, { data: body.data, updated_at: body.updated_at });
         else this.rows.push({ id: body.id, owner: uid, data: body.data, updated_at: body.updated_at });
         return { status: 201 };
@@ -185,6 +216,69 @@ export class FakeSupabase {
       }
     }
     if (p === '/rest/v1/rpc/is_admin') return uid ? { status: 200, body: admin } : denied;
+    if (p.startsWith('/rest/v1/rpc/') && this.moderation) {
+      const m = this.moderation;
+      const fn = p.slice('/rest/v1/rpc/'.length);
+      const adminOnly = ['admin_edit_player', 'admin_delete_player', 'admin_ban', 'admin_unban', 'admin_bans', 'admin_bank_guard'];
+      if (adminOnly.includes(fn) && !admin) return { status: 403, body: { code: '42501', message: 'Only admins can do that.' } };
+      if (fn === 'ban_status') {
+        if (!uid) return denied;
+        const b = m.bans.get(uid);
+        return { status: 200, body: this.bannedNow(uid) ? { banned: true, until: b!.until ? new Date(b!.until).toISOString() : null, reason: b!.reason } : { banned: false } };
+      }
+      if (fn === 'collect_overrides') {
+        if (!uid) return denied;
+        if (m.deleted.get(body.p_player) === uid) return { status: 200, body: { deleted: true } };
+        if (!this.rows.some((r) => r.id === body.p_player && r.owner === uid)) return { status: 403, body: { code: '42501', message: "That player isn't in your account." } };
+        const o = m.overrides.get(body.p_player);
+        const fields = o && !o.collected ? o.fields : {};
+        if (o) o.collected = true;
+        return { status: 200, body: { fields, nameLocked: !!o?.lock } };
+      }
+      if (fn === 'admin_edit_player') {
+        const row = this.rows.find((r) => r.id === body.p_player);
+        if (!row) return { status: 400, body: { code: 'P0001', message: 'That player is gone.' } };
+        const f = body.p_fields as Record<string, unknown>;
+        const data = row.data as Record<string, unknown>;
+        const { stats, ...rest } = f;
+        Object.assign(data, rest);
+        if (stats) data.stats = { ...(data.stats as object), ...(stats as object) };
+        const o = m.overrides.get(row.id);
+        const empty = !Object.keys(f).length;
+        const fields = empty ? o?.fields ?? {} : o && !o.collected ? { ...o.fields, ...rest, ...(stats || o.fields.stats ? { stats: { ...(o.fields.stats as object), ...(stats as object) } } : {}) } : f;
+        const lock = body.p_lock_name === false ? null : body.p_lock_name || (o?.lock && f.name) ? String(f.name) : o?.lock ?? null;
+        m.overrides.set(row.id, { owner: row.owner, fields, lock, collected: empty ? o?.collected ?? true : false });
+        return { status: 200, body: data };
+      }
+      if (fn === 'admin_delete_player') {
+        const row = this.rows.find((r) => r.id === body.p_player);
+        if (!row) return { status: 200, body: false };
+        this.rows = this.rows.filter((r) => r !== row);
+        m.deleted.set(row.id, row.owner);
+        m.overrides.delete(row.id);
+        return { status: 200, body: true };
+      }
+      if (fn === 'admin_ban') {
+        if (this.admins.has(body.p_owner)) return { status: 400, body: { code: 'P0001', message: "Admins can't be suspended. Remove them from admins first." } };
+        const until = body.p_days ? (this.now ?? Date.now()) + body.p_days * 86_400_000 : null;
+        m.bans.set(body.p_owner, { until, reason: String(body.p_reason ?? ''), at: this.now ?? Date.now() });
+        const hid = this.rows.filter((r) => r.owner === body.p_owner && !this.hidden.has(r.id));
+        for (const r of hid) this.hidden.add(r.id);
+        return { status: 200, body: { until: until ? new Date(until).toISOString() : null, hidden: hid.length } };
+      }
+      if (fn === 'admin_unban') {
+        const had = m.bans.delete(body.p_owner);
+        if (had) for (const r of this.rows.filter((x) => x.owner === body.p_owner)) this.hidden.delete(r.id);
+        return { status: 200, body: had };
+      }
+      if (fn === 'admin_bans') {
+        return {
+          status: 200,
+          body: [...m.bans].filter(([id]) => this.bannedNow(id)).map(([owner, b]) => ({ owner, email: this.emailOf(owner), until: b.until ? new Date(b.until).toISOString() : null, reason: b.reason, at: new Date(b.at).toISOString() })),
+        };
+      }
+      if (fn === 'admin_bank_guard') return { status: 200, body: [] };
+    }
     if (p === '/rest/v1/rpc/admin_accounts') {
       if (!admin) return { status: 403, body: { code: '42501', message: 'Only admins can list accounts.' } };
       return {

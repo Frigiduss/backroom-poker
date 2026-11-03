@@ -8,6 +8,10 @@
   color: var(--ink); background: #8ff0b0; border-radius: 4px; padding: 3px 6px; vertical-align: middle;
 }
 .adm-pill { background: var(--gold); text-transform: none; letter-spacing: 0; }
+.adm-pill-bad { background: #ff9a8c; white-space: nowrap; }
+.adm-warn { color: #ffb3a8; font-weight: 700; }
+.adm-sub { margin: 4px 0 8px; font-size: 15px; color: var(--muted); }
+.adm-sub:not(:first-child) { margin-top: 20px; }
 .adm-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; margin: 0; white-space: nowrap; }
 .adm-suit { color: var(--gold); font-size: 20px; }
 .adm-link { background: none; border: 0; padding: 0; color: var(--gold-hi); text-decoration: underline; }

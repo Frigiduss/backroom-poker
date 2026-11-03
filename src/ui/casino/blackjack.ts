@@ -503,7 +503,11 @@ export class BlackjackTable {
       setStack(id, n) {
         const i = t.spots.findIndex((s) => s.id === id);
         const r = t.round;
-        if (r && !r.isComplete) r.seats[i].stack = n;
+        if (r && !r.isComplete) {
+          r.seats[i].stack = n;
+          // Changed chips mid-round: the round earns no achievements.
+          r.rigged = true;
+        }
         if (t.spots[i].isHuman) setBlackjackBank(t.profile, n);
         else t.spots[i].stack = n;
         if (r && !r.isComplete) t.sync();

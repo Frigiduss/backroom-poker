@@ -9,13 +9,14 @@ import { simulateEquity } from '../bots/equity';
 import { buildView } from '../bots/view';
 import { Card, cardLabel, createRng, parseCard } from '../engine/cards';
 import { Hand, rigProblem } from '../engine/hand';
-import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table } from '../engine/table';
+import { BotStyle, DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, Seat, Table, hasMaster } from '../engine/table';
 import { VARIANTS, VariantDef } from '../engine/variants';
 import { TableClient } from '../online/client';
 import { AdminCommand, AdminTableInfo } from '../online/protocol';
-import { AdminApi, AdminPlayer, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey, SEASONS, seasonOn } from '../accounts';
+import { AdminApi, AdminFields, AdminPlayer, BankGuard, ModerationNotSetUpError, OnlineAuth, Profile, ProfileStats, chipsOf, cleanName, emptyProfileStats, noteChips, pictureKey, SEASONS, seasonOn } from '../accounts';
 import { esc, fmt } from './dom';
 import { player, savePlayer, serverAwards } from './player/profiles';
+import { applyAdminFields } from '../accounts/moderation';
 import { applyLook } from './player/looks';
 import { previewSeason, previewedSeason } from './player/season';
 import { testCrash } from './crash';
@@ -37,6 +38,8 @@ export interface DevGame {
   step(): void;
   /** Deals the next hand if the current one is finished. */
   deal(): void;
+  /** Stops this game counting for achievements, stats and rivals, as a rigged hand does. */
+  taint(): void;
 }
 
 export interface DevHooks {
@@ -51,6 +54,8 @@ export interface DevHooks {
   onlineTable(): { tableId: string; code: string; game?: 'poker' | 'blackjack' } | null;
   /** The practice blackjack table on screen, if any. */
   blackjack(): DevBlackjack | null;
+  /** The name of the casino game on screen (roulette, slots…), if any. */
+  casino?(): string | null;
   /** Where the console runs: in the game (the default), or on the admin dashboard, which has no tables or players of its own. */
   place?: 'game' | 'dashboard';
 }
@@ -307,8 +312,10 @@ export function need<T>(x: T | null | undefined, msg: string): T {
 }
 
 function currentGame(): DevGame {
+  const casino = hooks.casino?.();
   return need(hooks.game(), hooks.place === 'dashboard'
     ? 'Pick an online table first with table CODE (tables lists them). Practice tables only exist inside the game.'
+    : casino ? `Table commands work at poker and blackjack tables. At ${casino === 'Slots' ? 'slots, highroll works' : `${casino.toLowerCase()}, only the Your player and Accounts commands work`}.`
     : 'Start a game first: this command works at the table.');
 }
 
@@ -355,12 +362,21 @@ export function table(rows: (string | number)[][], head: string[]): string {
 
 const STAT_FIELDS = Object.keys(emptyProfileStats()).filter((k) => k !== 'byVariant' && k !== 'bestFinish') as (keyof ProfileStats)[];
 
-function setStat(p: Profile, field: string | undefined, value: string | undefined) {
+function statField(field: string | undefined): keyof ProfileStats {
   const f = STAT_FIELDS.find((k) => k.toLowerCase() === need(field, `Name a stat: ${STAT_FIELDS.join(', ')}.`).toLowerCase());
   if (!f) throw new UsageError(`Stats you can set: ${STAT_FIELDS.join(', ')}.`);
+  return f;
+}
+
+function statValue(value: string | undefined): number {
   const v = Number(need(value, 'Give a number.'));
   if (!Number.isFinite(v)) throw new UsageError(`"${value}" isn't a number.`);
-  (p.stats[f] as number) = Math.round(v);
+  return Math.round(v);
+}
+
+function setStat(p: Profile, field: string | undefined, value: string | undefined) {
+  const f = statField(field);
+  (p.stats[f] as number) = statValue(value);
   p.updatedAt = Date.now();
   return f;
 }
@@ -396,8 +412,13 @@ async function findPlayer(ref: string | undefined): Promise<AdminPlayer> {
   return need(hits[0], `No player matches "${ref}". Run players to see everyone.`);
 }
 
-/** Applies a change to any player. The one being played here changes in place so it isn't overwritten later. */
-async function changePlayer(target: AdminPlayer, change: (p: Profile) => void, action: string, detail: Record<string, unknown>) {
+/**
+ * Applies a change to any player. The one being played here changes in place so it isn't
+ * overwritten later. Anyone else's goes through the database (supabase/moderation.sql), which
+ * keeps it in force until their game picks it up, so a game they have open can't undo it.
+ * Without moderation.sql it's saved straight over their row, as before, and says so.
+ */
+async function changePlayer(target: AdminPlayer, fields: AdminFields, out: Out, action: string, detail: Record<string, unknown>, lockName: boolean | null = null) {
   let mine: Profile | null = null;
   try {
     mine = player();
@@ -405,15 +426,34 @@ async function changePlayer(target: AdminPlayer, change: (p: Profile) => void, a
     /* no player open */
   }
   if (mine && mine.id === target.profile.id) {
-    change(mine);
+    applyAdminFields(mine, fields as Record<string, unknown>);
     await savePlayer();
     hooks.redraw();
   } else {
-    change(target.profile);
-    await onlineAdmin().savePlayer(target.profile);
+    try {
+      const saved = await onlineAdmin().editPlayer(target.profile.id, fields, lockName);
+      if (saved) target.profile = saved;
+    } catch (err) {
+      if (!(err instanceof ModerationNotSetUpError)) throw err;
+      applyAdminFields(target.profile, fields as Record<string, unknown>);
+      await onlineAdmin().savePlayer(target.profile);
+      out('Saved, but if they are playing right now their next save can undo it. Run supabase/moderation.sql so changes stick.', 'dim');
+    }
   }
   await admin?.log(action, { player: target.profile.id, name: target.profile.name, ...detail });
 }
+
+/** The ban and bank limits for every account, or empty maps when they aren't set up. */
+async function moderationInfo(): Promise<{ guards: Map<string, BankGuard>; bans: Map<string, { until: number | null; reason: string }> }> {
+  const api = onlineAdmin();
+  const [guards, bans] = await Promise.all([
+    api.bankGuards().catch(() => new Map<string, BankGuard>()),
+    api.bans().catch(() => []),
+  ]);
+  return { guards, bans: new Map(bans.map((b) => [b.owner, b])) };
+}
+
+const untilText = (until: number | null): string => (until ? `until ${new Date(until).toLocaleString()}` : 'until lifted');
 
 const ago = (iso: string | null): string => {
   if (!iso) return 'never';
@@ -546,7 +586,8 @@ const ONLINE_TABLE: Record<string, (args: string[], out: Out) => Promise<void>> 
     await remote({ do: 'stack', seat: seat.id, amount: amount(args[1], hp ? hp.stack : seat.stack) }, out);
   },
   async bot(args, out) {
-    const seat = remoteSeat(await remote({ do: 'inspect' }), args[0]);
+    const info = await remote({ do: 'inspect' });
+    const seat = remoteSeat(info, args[0]);
     if (seat.isHuman) throw new UsageError(`${seat.name} is a person.`);
     let difficulty: Difficulty | undefined;
     let style: BotStyle | undefined;
@@ -555,6 +596,7 @@ const ONLINE_TABLE: Record<string, (args: string[], out: Out) => Promise<void>> 
       else if (a in STYLE_NAMES) style = a as BotStyle;
       else throw new UsageError(`"${a}" isn't a difficulty or a style.`);
     }
+    if (difficulty === 'master' && !(info.settings.variant === 'holdem' && info.settings.structure === 'NL')) throw new UsageError('Master bots only play No-Limit Hold\'em.');
     if (!difficulty && !style) return out(`${esc(seat.name)} plays <b>${DIFFICULTY_NAMES[seat.difficulty ?? 'medium']} · ${STYLE_NAMES[seat.style ?? 'balanced']}</b>`);
     await remote({ do: 'bot', seat: seat.id, difficulty, style }, out);
   },
@@ -691,6 +733,7 @@ const COMMANDS: Command[] = [
   {
     name: 'season', usage: 'season [winter | off]', group: 'Your player', help: 'Previews a seasonal event out of season until you turn it off or reload: its lobby banner, and its felt and card back free to pick. Games played in a preview count for nothing.',
     run(args, out) {
+      if (hooks.place === 'dashboard') throw new UsageError('Seasons preview inside the game. Open the game and type season there.');
       const id = args[0] ?? (previewedSeason() ? 'off' : '');
       if (!id) return out(`Seasonal events: ${SEASONS.map((s) => `${s.id} (${s.name})`).join(', ')}. Today: ${seasonOn()?.name ?? 'none on'}.`, 'dim');
       if (id === 'off') {
@@ -764,7 +807,7 @@ const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'stack', usage: 'stack <seat> <amount | +n | -n>', group: 'Table', help: 'Sets a seat\'s chips at the table. Your extra chips go to your bank when you leave a cash game.',
+    name: 'stack', usage: 'stack <seat> <amount | +n | -n>', group: 'Table', help: 'Sets a seat\'s chips at the table. Your extra chips go to your bank when you leave a cash game. The game then earns no achievements.',
     run(args, out) {
       const g = currentGame();
       const t = g.table;
@@ -781,12 +824,14 @@ const COMMANDS: Command[] = [
       }
       seat.stack = n;
       if (n > 0) seat.busted = false;
+      g.taint();
       g.refresh();
       out(`${esc(seat.name)}: ${fmt(now)} → <b>${fmt(n)}</b>`, 'ok');
+      out('This game no longer counts for achievements.', 'dim');
     },
   },
   {
-    name: 'bot', usage: 'bot <seat> [difficulty] [style]', group: 'Table', help: `Shows or swaps a bot's brain. Difficulties: ${DIFFICULTIES.join(', ')}. Styles: ${Object.keys(STYLE_NAMES).join(', ')}.`,
+    name: 'bot', usage: 'bot <seat> [difficulty] [style]', group: 'Table', help: `Shows or swaps a bot's brain (master only in No-Limit Hold'em). Swapping one means the game earns no achievements. Difficulties: ${DIFFICULTIES.join(', ')}. Styles: ${Object.keys(STYLE_NAMES).join(', ')}.`,
     run(args, out) {
       const g = currentGame();
       const seat = seatOf(g.table, args[0]);
@@ -798,10 +843,12 @@ const COMMANDS: Command[] = [
         else if (a in STYLE_NAMES) st = a as BotStyle;
         else throw new UsageError(`"${a}" isn't a difficulty or a style.`);
       }
+      if (d === 'master' && !hasMaster(g.table.variant.id, g.table.hand?.structure ?? g.table.config.structure)) throw new UsageError('Master bots only play No-Limit Hold\'em.');
       if (args.length > 1) {
         seat.difficulty = d;
         seat.style = st;
         g.bots.set(seat.id, new Bot(d, st));
+        g.taint();
         g.refresh();
       }
       out(`${esc(seat.name)} plays <b>${DIFFICULTY_NAMES[d]} · ${STYLE_NAMES[st]}</b>`, args.length > 1 ? 'ok' : undefined);
@@ -832,6 +879,7 @@ const COMMANDS: Command[] = [
       const g = currentGame();
       const a = (args[0] ?? (g.autopilot ? 'off' : 'expert')).toLowerCase();
       if (a === 'off') g.autopilot = null;
+      else if (a === 'master' && !hasMaster(g.table.variant.id, g.table.hand?.structure ?? g.table.config.structure)) throw new UsageError('Master only plays No-Limit Hold\'em. Try expert.');
       else if ((DIFFICULTIES as string[]).includes(a)) g.autopilot = new Bot(a as Difficulty);
       else throw new UsageError(`Use a difficulty (${DIFFICULTIES.join(', ')}) or off.`);
       g.refresh();
@@ -880,7 +928,8 @@ const COMMANDS: Command[] = [
       const n = Math.max(1, Math.floor(Number(args[0]) || 0));
       if (!args[0] || !n) throw new UsageError('Give a level number, like level 5.');
       t.level = n - 1;
-      out(`Blind level ${n} from the next hand.`, 'ok');
+      currentGame().taint();
+      out(`Blind level ${n} from the next hand. This game no longer counts for achievements.`, 'ok');
     },
   },
   {
@@ -986,23 +1035,27 @@ const COMMANDS: Command[] = [
     },
   },
   {
-    name: 'players', usage: 'players [search]', group: 'Accounts', help: 'Every player in every account, richest first. Search by name or email.',
+    name: 'players', usage: 'players [search]', group: 'Accounts', help: 'Every player in every account, richest first. Search by name or email. Capped counts saves the server cut back for winning faster than play allows: a sign of an edited bank.',
     async run(args, out) {
       const api = onlineAdmin();
-      const [players, accounts] = await Promise.all([api.players(), api.accounts().catch(() => [])]);
+      const [players, accounts, mod] = await Promise.all([api.players(), api.accounts().catch(() => []), moderationInfo()]);
       known = players;
       const email = new Map(accounts.map((a) => [a.id, a.email]));
       const q = args.join(' ').toLowerCase();
       const rows = players
         .filter((x) => !q || x.profile.name.toLowerCase().includes(q) || (email.get(x.owner) ?? '').toLowerCase().includes(q))
         .sort((a, b) => b.profile.bank - a.profile.bank);
-      out(table(rows.map((x) => [`<code>${shortId(x.profile.id)}</code>`, esc(x.profile.name), esc(email.get(x.owner) ?? x.owner.slice(0, 8)), x.profile.bank, x.profile.stats.hands, ago(x.updatedAt)]), ['Id', 'Name', 'Account', 'Bank', 'Hands', 'Saved']));
-      out(`${rows.length} player${rows.length === 1 ? '' : 's'}. Use the id with edit.`, 'dim');
+      out(table(rows.map((x) => [
+        `<code>${shortId(x.profile.id)}</code>`,
+        esc(x.profile.name) + (mod.bans.has(x.owner) ? ' <span class="dev-tag">banned</span>' : ''),
+        esc(email.get(x.owner) ?? x.owner.slice(0, 8)), x.profile.bank, x.profile.stats.hands, mod.guards.get(x.owner)?.capped ?? '–', ago(x.updatedAt),
+      ]), ['Id', 'Name', 'Account', 'Bank', 'Hands', 'Capped', 'Saved']));
+      out(`${rows.length} player${rows.length === 1 ? '' : 's'}. Use the id with edit, inspect or ban.`, 'dim');
     },
   },
   {
-    name: 'edit', usage: 'edit <player> bank <n> | name <new> | stat <name> <n> | resetstats | board on|off | picture on|off', group: 'Accounts',
-    help: 'Changes any player, in any account. If they are playing right now, their next save can undo it.',
+    name: 'edit', usage: 'edit <player> bank <n> | name <new> | unlock | stat <name> <n> | resetstats | board on|off | picture on|off', group: 'Accounts',
+    help: 'Changes any player, in any account. Changes stick even if they are playing right now. A new name stays until you run edit <player> unlock.',
     async run(args, out) {
       const target = await findPlayer(args[0]);
       const what = (args[1] ?? '').toLowerCase();
@@ -1010,22 +1063,30 @@ const COMMANDS: Command[] = [
       if (what === 'bank') {
         const before = target.profile.bank;
         const n = amount(args[2], before);
-        await changePlayer(target, (p) => setBank(p, n), 'edit bank', { from: before, to: n });
+        await changePlayer(target, { bank: n, stats: { peakBank: Math.max(target.profile.stats.peakBank, n) } }, out, 'edit bank', { from: before, to: n });
         out(`${name}'s bank ${fmt(before)} → <b>${fmt(n)}</b>`, 'ok');
       } else if (what === 'name') {
         const nm = cleanName(args.slice(2).join(' '));
         if (!nm) throw new UsageError('Give the new name.');
-        await changePlayer(target, (p) => {
-          p.name = nm;
-          p.updatedAt = Date.now();
-        }, 'edit name', { to: nm });
-        out(`${name} is now <b>${esc(nm)}</b>`, 'ok');
+        await changePlayer(target, { name: nm }, out, 'edit name', { to: nm }, true);
+        out(`${name} is now <b>${esc(nm)}</b>, and keeps that name until you run edit ${shortId(target.profile.id)} unlock.`, 'ok');
+      } else if (what === 'unlock') {
+        try {
+          await onlineAdmin().editPlayer(target.profile.id, {}, false);
+        } catch (err) {
+          if (err instanceof ModerationNotSetUpError) throw new UsageError('Names are only locked once supabase/moderation.sql is run.');
+          throw err;
+        }
+        await admin?.log('unlock name', { player: target.profile.id, name: target.profile.name });
+        out(`${name} can rename themselves again.`, 'ok');
       } else if (what === 'stat') {
-        let field = '';
-        await changePlayer(target, (p) => (field = setStat(p, args[2], args[3])), 'edit stat', { stat: args[2], to: args[3] });
-        out(`${name}: ${field} = <b>${esc(args[3])}</b>`, 'ok');
+        const f = statField(args[2]);
+        const v = statValue(args[3]);
+        await changePlayer(target, { stats: { [f]: v } }, out, 'edit stat', { stat: f, to: v });
+        out(`${name}: ${f} = <b>${fmt(v)}</b>`, 'ok');
       } else if (what === 'resetstats') {
-        await changePlayer(target, resetStats, 'reset stats', {});
+        const now = Date.now();
+        await changePlayer(target, { stats: { ...emptyProfileStats(target.profile.bank) }, history: [[now, chipsOf(target.profile)]] }, out, 'reset stats', {});
         out(`${name}'s stats reset.`, 'ok');
       } else if (what === 'board') {
         const on = (args[2] ?? '').toLowerCase();
@@ -1039,10 +1100,11 @@ const COMMANDS: Command[] = [
         if (on === 'off') {
           const key = pictureKey(target.profile.avatar);
           const deleted = await onlineAdmin().setPictureBlocked(target.owner, true, key);
-          if (key) await changePlayer(target, (p) => {
-            p.avatar = null;
-            p.updatedAt = Date.now();
-          }, 'remove picture', { picture: key });
+          if (key) {
+            target.profile.avatar = null;
+            target.profile.updatedAt = Date.now();
+            await onlineAdmin().savePlayer(target.profile);
+          }
           await admin?.log('block pictures', { player: target.profile.id, name: target.profile.name, picture: key, deleted });
           out(`${name} can't upload pictures any more${key ? (deleted ? ' and their picture is deleted' : ', but their picture couldn\'t be deleted (is avatars.sql run?)') : ''}. Faces from the game still work.`, 'ok');
         } else {
@@ -1051,22 +1113,27 @@ const COMMANDS: Command[] = [
           out(`${name} can upload pictures again.`, 'ok');
         }
       } else {
-        throw new UsageError('Say what to change: bank, name, stat, resetstats, board or picture.');
+        throw new UsageError('Say what to change: bank, name, unlock, stat, resetstats, board or picture.');
       }
     },
   },
   {
-    name: 'inspect', usage: 'inspect <player>', group: 'Accounts', help: 'Everything saved for one player.',
+    name: 'inspect', usage: 'inspect <player>', group: 'Accounts', help: 'Everything saved for one player, with their bank limits and any ban.',
     async run(args, out) {
       const t = await findPlayer(args[0]);
       const p = t.profile;
+      const mod = await moderationInfo();
       out(`<b>${esc(p.name)}</b> · ${esc(p.id)} · owner ${esc(t.owner)} · bank <b>${fmt(p.bank)}</b>${p.table ? ` · ${fmt(p.table.paidIn)} at a ${p.table.kind} table` : ''}`);
+      const ban = mod.bans.get(t.owner);
+      if (ban) out(`Suspended ${esc(untilText(ban.until))}${ban.reason ? `: ${esc(ban.reason)}` : ''}`, 'err');
+      const g = mod.guards.get(t.owner);
+      if (g) out(`Bank limits: <b>${fmt(g.allowance)}</b> of winning can save now · <b>${fmt(g.capped)}</b> save${g.capped === 1 ? '' : 's'} capped · last free refill ${g.lastRefill ? ago(new Date(g.lastRefill).toISOString()) : 'never'}`, g.capped ? 'err' : 'dim');
       out(table(STAT_FIELDS.map((k) => [k, p.stats[k] as number]), ['Stat', 'Value']));
       out(`<pre class="dev-pre">${esc(JSON.stringify(p.settings, null, 1))}</pre>`, 'dim');
     },
   },
   {
-    name: 'delete', usage: 'delete <player> yes', group: 'Accounts', help: 'Deletes a player for good. Add yes to confirm.',
+    name: 'delete', usage: 'delete <player> yes', group: 'Accounts', help: 'Deletes a player for good, even if they are playing right now. Add yes to confirm.',
     async run(args, out) {
       const t = await findPlayer(args[0]);
       try {
@@ -1075,10 +1142,46 @@ const COMMANDS: Command[] = [
         if (err instanceof UsageError) throw err;
       }
       if ((args[1] ?? '').toLowerCase() !== 'yes') return out(`This deletes <b>${esc(t.profile.name)}</b> (bank ${fmt(t.profile.bank)}, ${fmt(t.profile.stats.hands)} hands) for good. Run <b>delete ${shortId(t.profile.id)} yes</b> to go ahead.`, 'err');
-      await onlineAdmin().deletePlayer(t.profile.id);
+      try {
+        await onlineAdmin().deletePlayerForGood(t.profile.id);
+      } catch (err) {
+        if (!(err instanceof ModerationNotSetUpError)) throw err;
+        await onlineAdmin().deletePlayer(t.profile.id);
+        out('Deleted, but if they are playing right now their game can save the player back. Run supabase/moderation.sql so deletes stick.', 'dim');
+      }
       await admin?.log('delete player', { player: t.profile.id, name: t.profile.name, bank: t.profile.bank });
       known = known.filter((x) => x !== t);
       out(`Deleted ${esc(t.profile.name)}.`, 'ok');
+    },
+  },
+  {
+    name: 'ban', usage: 'ban <player> [days] [reason]', group: 'Accounts',
+    help: 'Suspends the player\'s account, for a number of days or until unban. They see why in the lobby; the server stops their saves, online tables, friends, gifts, bonus and challenges, and takes them off the leaderboard meanwhile.',
+    async run(args, out) {
+      const t = await findPlayer(args[0]);
+      if (t.owner === auth?.current?.userId) throw new UsageError('That\'s your own account.');
+      const days = /^\d+(\.\d+)?$/.test(args[1] ?? '') ? Number(args[1]) : null;
+      const reason = args.slice(days === null ? 1 : 2).join(' ').trim().slice(0, 200);
+      const r = await onlineAdmin().ban(t.owner, days, reason);
+      await admin?.log('ban', { player: t.profile.id, name: t.profile.name, owner: t.owner, days, reason });
+      out(`${esc(t.profile.name)}'s account is suspended ${esc(untilText(r.until))}${reason ? ` (${esc(reason)})` : ''}.${r.hidden ? ' Off the leaderboard while it lasts.' : ''}`, 'ok');
+    },
+  },
+  {
+    name: 'unban', usage: 'unban <player>', group: 'Accounts', help: 'Lifts a suspension and puts them back on the leaderboard.',
+    async run(args, out) {
+      const t = await findPlayer(args[0]);
+      const lifted = await onlineAdmin().unban(t.owner);
+      if (lifted) await admin?.log('unban', { player: t.profile.id, name: t.profile.name, owner: t.owner });
+      out(lifted ? `${esc(t.profile.name)} can play again.` : `${esc(t.profile.name)} wasn't suspended.`, lifted ? 'ok' : undefined);
+    },
+  },
+  {
+    name: 'bans', usage: 'bans', group: 'Accounts', help: 'Every suspended account, newest first.',
+    async run(_, out) {
+      const list = await onlineAdmin().bans();
+      if (!list.length) return out('Nobody is suspended.');
+      out(table(list.map((b) => [esc(b.email), esc(untilText(b.until)), esc(b.reason || '–'), new Date(b.at).toLocaleDateString()]), ['Account', 'Suspended', 'Reason', 'Since']));
     },
   },
   {

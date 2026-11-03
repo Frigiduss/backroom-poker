@@ -13,7 +13,7 @@ import {
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
-import { currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice, weeklyChallenges } from './player/profiles';
+import { banNoticeHtml, checkAdminChanges, currentTitle, goOnline, initAccounts, renderAuth, setWelcomeSettings, openPlayer, player, playerBadgeHtml, renderNewPassword, renderProfile, savePlayer, serverAwards, takeNotice, weeklyChallenges } from './player/profiles';
 import { announce, checkAchievements, renderAchievements } from './player/achievements';
 import { renderStats } from './player/stats';
 import { HISTORY_ICON, handHistoryOpen, openHandHistory, saveHand } from './player/history';
@@ -180,7 +180,7 @@ function renderSetup() {
       </div>
       <div class="lobby-top">${consoleButtonHtml()}${lobbyExtrasHtml()}${challengesButtonHtml()}${friendsButtonHtml()}${playerBadgeHtml()}</div>
     </header>
-    ${notice || announcement ? `<div class="notices">${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
+    ${notice || announcement || banNoticeHtml() ? `<div class="notices">${banNoticeHtml()}${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ''}${announcement ? `<p class="notice announce" role="status">${esc(announcement)}</p>` : ''}</div>` : ''}
     ${seasonBannerHtml(me, allCounters(me, serverAwards()))}
 
     <div class="lobby-grid">
@@ -306,6 +306,12 @@ function renderSetup() {
   bindChallengesButton(app, renderSetup);
   bindLobbyFriends(app, renderSetup);
   void refreshConsoleAccess();
+  // Changes an admin made to this player, and whether the account is suspended.
+  void checkAdminChanges().then((r) => {
+    const inLobby = !game && !blackjack && !house && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)');
+    if (r.deleted) void openPlayer(renderSetup, app);
+    else if (r.redraw && inLobby) renderSetup();
+  });
   if (awardsChecked !== me.id) {
     // Once per player: pick up achievements the table server credited since last time.
     awardsChecked = me.id;
@@ -613,6 +619,13 @@ class Game implements DevGame {
     }
     if (hand.toAct === this.humanIndex && !this.autopilot) return;
     this.timer = window.setTimeout(() => this.botAct(), this.botDelay ?? this.thinkTime(hand, base));
+  }
+
+  /** The console changed stacks, bots or blinds: like a rigged hand, this game earns nothing from here. */
+  taint() {
+    this.tainted = true;
+    const h = this.table.hand;
+    if (h && !h.isComplete) h.wasRigged = true;
   }
 
   refresh() {
@@ -1506,6 +1519,7 @@ async function boot() {
     },
     onlineTable: activeTable,
     blackjack: () => blackjack?.dev ?? null,
+    casino: () => (house ? ({ roulette: 'Roulette', baccarat: 'Baccarat', videopoker: 'Video poker', slots: 'Slots' } as Record<string, string>)[setup.game] ?? 'Casino' : null),
     announced: (text) => {
       announcement = text;
       if (!game && document.querySelector('main.lobby:not(.profile-page):not(.welcome):not(.room)')) renderSetup();

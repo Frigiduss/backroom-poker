@@ -3,6 +3,7 @@ import {
   BonusClaim, allCounters, applyBonus, canRefill, claimLocally, claimOnlineBonus, cleanName, createProfile, newId, refill, settleOpenTable,
   takeUnlocks, titleFor, ChallengeClaim, ChallengeSlot, ChallengeStatus, applyChallenge, challengeStatus, claimChallengeLocally, claimOnlineChallenge,
   profileCounters, startWeek, FACES, OnlineError, avatarLook, clearOldPictures, deletePicture, pictureKey, uploadPicture,
+  BanStatus, NOT_BANNED, banStatus, collectAdminChanges,
 } from '../../accounts';
 import { faceHtml, installFaceFallback } from './faces';
 import { shrinkPicture } from './picture';
@@ -124,6 +125,65 @@ export async function selectPlayer(p: Profile | null) {
   current = p;
   applyLook(p, serverAwards());
   await store.setCurrentId(p?.id ?? null);
+}
+
+// ---------- what an admin changed (supabase/moderation.sql) ----------
+
+/** How often the lobby asks the server about admin changes and suspensions. */
+const ADMIN_CHECK_MS = 20_000;
+let adminCheckedAt = 0;
+let adminCheckFor = '';
+let adminChecking: Promise<{ redraw: boolean; deleted: boolean }> | null = null;
+let ban: BanStatus = NOT_BANNED;
+let nameLocked = false;
+
+/** Whether the signed-in account is suspended (as of the last check). */
+export const banned = (): BanStatus => (isOnline() ? ban : NOT_BANNED);
+
+/** Whether an admin set this player's name and keeps it. */
+export const nameIsLocked = (): boolean => isOnline() && nameLocked;
+
+/**
+ * Asks the server, at most every 20 seconds, whether the account is suspended and whether
+ * an admin changed the current player. Changes go into the player and are saved. `redraw`
+ * says something on screen is out of date; `deleted` that an admin deleted the player.
+ */
+export function checkAdminChanges(force = false): Promise<{ redraw: boolean; deleted: boolean }> {
+  const p = current;
+  if (!p || !auth?.current || !isOnline()) return Promise.resolve({ redraw: false, deleted: false });
+  const key = `${auth.current.userId}/${p.id}`;
+  if (!force && key === adminCheckFor && Date.now() - adminCheckedAt < ADMIN_CHECK_MS) return Promise.resolve({ redraw: false, deleted: false });
+  adminChecking ??= (async () => {
+    adminCheckFor = key;
+    adminCheckedAt = Date.now();
+    const was = ban;
+    const wasLocked = nameLocked;
+    try {
+      ban = await banStatus(auth!);
+      const r = await collectAdminChanges(auth!, p);
+      if (r.deleted) {
+        if (current === p) current = null;
+        notice = 'An admin deleted your player. Make a new one to keep playing.';
+        return { redraw: true, deleted: true };
+      }
+      nameLocked = r.nameLocked;
+      if (r.changed && current === p) await savePlayer();
+      return { redraw: r.changed || ban.banned !== was.banned || nameLocked !== wasLocked, deleted: false };
+    } catch {
+      return { redraw: false, deleted: false }; // offline for now: try again next time
+    } finally {
+      adminChecking = null;
+    }
+  })();
+  return adminChecking;
+}
+
+/** The lobby's line for a suspended account, or ''. */
+export function banNoticeHtml(): string {
+  const b = banned();
+  if (!b.banned) return '';
+  const until = b.until ? `until ${new Date(b.until).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'until an admin lifts it';
+  return `<p class="notice banned" role="alert"><b>Your account is suspended ${esc(until)}.</b>${b.reason ? ` Reason: ${esc(b.reason)}.` : ''} Nothing you play is saved online, and online tables, friends and gifts are off meanwhile.</p>`;
 }
 
 // ---------- achievements credited by the table server ----------
@@ -532,7 +592,7 @@ export async function renderProfile(app: HTMLElement, onBack: () => void, onAchi
         ${avatarHtml(p, 'lg')}
         <div class="ph-text">
           <form id="rename-form" class="rename">
-            <input id="rename" class="name-input" maxlength="${NAME_MAX}" value="${esc(p.name)}" aria-label="Player name" autocomplete="off">
+            <input id="rename" class="name-input" maxlength="${NAME_MAX}" value="${esc(p.name)}" aria-label="Player name" autocomplete="off"${nameIsLocked() ? ' disabled title="An admin set this name, so it can\'t be changed."' : ''}>
             <button type="submit" class="btn btn-sm" id="rename-save" hidden>Save name</button>
           </form>
           ${titleHtml(currentTitle(), 'big')}

@@ -83,6 +83,17 @@ export class RestTableDb implements TableDb {
     }
   }
 
+  async banned(userId: string): Promise<boolean> {
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) return false;
+    try {
+      const { data } = await this.call(`account_bans?select=until&owner=eq.${userId}`);
+      const row = Array.isArray(data) ? (data[0] as { until: string | null } | undefined) : undefined;
+      return !!row && (row.until === null || Date.parse(row.until) > Date.now());
+    } catch {
+      return false; // moderation.sql hasn't been run
+    }
+  }
+
   async recent(limit: number): Promise<(TableRow & { updatedAt: string })[]> {
     const { data } = await this.call(`poker_tables?select=id,code,version,state,updated_at&order=updated_at.desc&limit=${Math.max(1, Math.floor(limit))}`);
     return (data as (TableRow & { updated_at: string })[]).map(({ updated_at, ...r }) => ({ ...r, updatedAt: updated_at }));

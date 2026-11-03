@@ -68,6 +68,10 @@ class MemoryDb implements TableDb {
   async isAdmin(userId: string) {
     return this.admins.has(userId);
   }
+  bans = new Set<string>();
+  async banned(userId: string) {
+    return this.bans.has(userId);
+  }
   async recent(limit: number) {
     return [...this.rows.values()].slice(0, limit).map((r) => ({ ...structuredClone(r), updatedAt: '2026-10-20T00:00:00Z' }));
   }

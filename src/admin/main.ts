@@ -4,7 +4,7 @@
 // and changes things through the same database rules (supabase/admin.sql) and table-server
 // admin checks as the console, and most buttons simply run a console command.
 import { ONLINE } from '../accounts/config';
-import { AdminApi, AdminLogEntry, AdminPlayer, CrashApi, CrashReport, Factor, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
+import { AdminApi, AdminBan, AdminLogEntry, AdminPlayer, BankGuard, CrashApi, CrashReport, Factor, OnlineAuth, OnlineError, onlineEnabled } from '../accounts';
 import { Card } from '../engine/cards';
 import { DIFFICULTY_NAMES } from '../engine/table';
 import { VARIANTS } from '../engine/variants';
@@ -233,11 +233,19 @@ function renderPanel() {
     panel.innerHTML = `
       <div class="adm-bar"><h2>Players</h2>
         <input type="search" id="adm-search" placeholder="Search by name or email" value="${esc(playerSearch)}" aria-label="Search players">
+        <select id="adm-sort" aria-label="Sort players">
+          ${([['bank', 'Richest first'], ['capped', 'Most capped first'], ['saved', 'Last saved first']] as const).map(([v, l]) => `<option value="${v}"${playerSort === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
         <button type="button" class="btn" id="adm-reload">Refresh</button></div>
       <div id="adm-data" class="adm-data"><p class="adm-muted">Loading…</p></div>`;
     const search = $<HTMLInputElement>('#adm-search')!;
     search.oninput = () => {
       playerSearch = search.value;
+      drawPlayers();
+    };
+    const sort = $<HTMLSelectElement>('#adm-sort')!;
+    sort.onchange = () => {
+      playerSort = sort.value as typeof playerSort;
       drawPlayers();
     };
     $('#adm-reload')!.onclick = () => void load();
@@ -453,37 +461,73 @@ function watchBlackjack(info: AdminTableInfo): string {
 
 let players: AdminPlayer[] = [];
 let emails = new Map<string, string>();
+/** Bank limits (banks.sql) and suspensions (moderation.sql) by account id. Empty when not set up. */
+let guards = new Map<string, BankGuard>();
+let bans = new Map<string, AdminBan>();
+let playerSort: 'bank' | 'capped' | 'saved' = 'bank';
+
+const loadModeration = async () => {
+  const [g, b] = await Promise.all([api!.bankGuards().catch(() => new Map<string, BankGuard>()), api!.bans().catch(() => [] as AdminBan[])]);
+  guards = g;
+  bans = new Map(b.map((x) => [x.owner, x]));
+};
 
 async function loadPlayers() {
-  const [list, accounts] = await Promise.all([api!.players(), api!.accounts().catch(() => [])]);
+  const [list, accounts] = await Promise.all([api!.players(), api!.accounts().catch(() => []), loadModeration()]);
   players = list;
   emails = new Map(accounts.map((a) => [a.id, a.email]));
   if (tab === 'players') drawPlayers();
 }
 
+const banPill = (owner: string) => {
+  const b = bans.get(owner);
+  return b ? ` <span class="adm-pill adm-pill-bad" title="Suspended ${b.until ? `until ${esc(new Date(b.until).toLocaleString())}` : 'until lifted'}: ${esc(b.reason || 'no reason given')}">banned</span>` : '';
+};
+
 function drawPlayers() {
   const el = $('#adm-data');
   if (!el) return;
   const q = playerSearch.trim().toLowerCase();
+  const capped = (x: AdminPlayer) => guards.get(x.owner)?.capped ?? 0;
   const rows = players
     .filter((x) => !q || x.profile.name.toLowerCase().includes(q) || (emails.get(x.owner) ?? '').toLowerCase().includes(q))
-    .sort((a, b) => b.profile.bank - a.profile.bank);
+    .sort((a, b) => playerSort === 'capped' ? capped(b) - capped(a) || b.profile.bank - a.profile.bank
+      : playerSort === 'saved' ? b.updatedAt.localeCompare(a.updatedAt) : b.profile.bank - a.profile.bank);
+  const me = auth?.current?.userId;
   el.innerHTML = rows.length
-    ? grid(rows.map((x) => [
-      `<b>${esc(x.profile.name)}</b> <code class="adm-muted">${shortId(x.profile.id)}</code>`,
-      esc(emails.get(x.owner) ?? shortId(x.owner)), fmt(x.profile.bank), fmt(x.profile.stats.hands), ago(x.updatedAt),
-      `<span class="adm-row-actions">
-        <button type="button" class="btn btn-sm" data-p="inspect" data-id="${esc(x.profile.id)}">Inspect</button>
-        <button type="button" class="btn btn-sm" data-p="bank" data-id="${esc(x.profile.id)}">Bank</button>
-        <button type="button" class="btn btn-sm" data-p="name" data-id="${esc(x.profile.id)}">Rename</button>
-        <button type="button" class="btn btn-sm adm-danger" data-p="delete" data-id="${esc(x.profile.id)}">Delete</button>
-      </span>`,
-    ]), ['Player', 'Account', 'Bank', 'Hands', 'Saved', ''])
-    + `<p class="adm-muted">${rows.length} of ${players.length} players. A player who is online right now can undo a change with their next save.</p>`
+    ? grid(rows.map((x) => {
+      const g = guards.get(x.owner);
+      return [
+        `<b>${esc(x.profile.name)}</b> <code class="adm-muted">${shortId(x.profile.id)}</code>${banPill(x.owner)}`,
+        esc(emails.get(x.owner) ?? shortId(x.owner)), fmt(x.profile.bank), fmt(x.profile.stats.hands),
+        g ? `<span class="${g.capped ? 'adm-warn' : 'adm-muted'}" title="Saves the server cut back for winning faster than play allows. ${fmt(g.allowance)} chips of winning can save right now.">${fmt(g.capped)}</span>` : '<span class="adm-muted">–</span>',
+        ago(x.updatedAt),
+        `<span class="adm-row-actions">
+          <button type="button" class="btn btn-sm" data-p="inspect" data-id="${esc(x.profile.id)}">Inspect</button>
+          <button type="button" class="btn btn-sm" data-p="bank" data-id="${esc(x.profile.id)}">Bank</button>
+          <button type="button" class="btn btn-sm" data-p="name" data-id="${esc(x.profile.id)}">Rename</button>
+          ${x.owner === me ? '' : bans.has(x.owner)
+            ? `<button type="button" class="btn btn-sm" data-p="unban" data-id="${esc(x.profile.id)}">Unban</button>`
+            : `<button type="button" class="btn btn-sm adm-danger" data-p="ban" data-id="${esc(x.profile.id)}">Ban</button>`}
+          <button type="button" class="btn btn-sm adm-danger" data-p="delete" data-id="${esc(x.profile.id)}">Delete</button>
+        </span>`,
+      ];
+    }), ['Player', 'Account', 'Bank', 'Hands', '<span title="Saves the server cut back for winning faster than real play allows">Capped</span>', 'Saved', ''])
+    + `<p class="adm-muted">${rows.length} of ${players.length} players. Changes stick even for players who are online right now. Capped counts saves the server cut back for winning faster than play allows: a high number is a sign of an edited bank.</p>`
     : `<p class="adm-muted">${players.length ? 'No player matches that search.' : 'No players yet.'}</p>`;
   el.querySelectorAll<HTMLButtonElement>('[data-p]').forEach((b) => (b.onclick = () => {
     const p = players.find((x) => x.profile.id === b.dataset.id)!.profile;
     if (b.dataset.p === 'inspect') return void run(`inspect ${p.id}`);
+    if (b.dataset.p === 'unban') return void run(`unban ${p.id}`);
+    if (b.dataset.p === 'ban') {
+      const days = prompt(`Suspend ${p.name}'s account for how many days? Leave it empty to suspend until you lift it.`, '7');
+      if (days === null) return;
+      const d = days.trim();
+      if (d && !/^\d+(\.\d+)?$/.test(d)) return consolePrint('Give a number of days, or leave it empty.', 'err');
+      const reason = prompt(`Reason, shown to ${p.name} in the lobby (optional)`, '');
+      if (reason === null) return;
+      return void run(`ban ${p.id}${d ? ` ${d}` : ''}${reason.trim() ? ` "${reason.trim().replace(/"/g, '')}"` : ''}`);
+    }
     if (b.dataset.p === 'bank') {
       const v = prompt(`New bank for ${p.name}. Amounts like 2.5k, +500 or -1k work.`, String(p.bank));
       if (v?.trim()) void run(`edit ${p.id} bank ${v.trim().replace(/\s+/g, '')}`);
@@ -497,14 +541,28 @@ function drawPlayers() {
 }
 
 async function loadAccounts() {
-  const list = await api!.accounts();
+  const [list, all] = await Promise.all([api!.accounts(), api!.players().catch(() => [] as AdminPlayer[]), loadModeration()]);
   const el = $('#adm-data');
   if (!el || tab !== 'accounts') return;
-  el.innerHTML = grid(list.map((a) => [
-    `${esc(a.email)}${a.admin ? ' <span class="adm-pill">admin</span>' : ''}`,
-    a.players ? `<button type="button" class="adm-link" data-email="${esc(a.email)}">${a.players} player${a.players === 1 ? '' : 's'}</button>` : '0',
-    ago(a.lastSignInAt), new Date(a.createdAt).toLocaleDateString(),
-  ]), ['Email', 'Players', 'Last sign-in', 'Joined']) + `<p class="adm-muted">${list.length} account${list.length === 1 ? '' : 's'}.</p>`;
+  // One player per account; older accounts can still hold extra players from before that.
+  const byOwner = new Map<string, AdminPlayer[]>();
+  for (const x of all) byOwner.set(x.owner, [...(byOwner.get(x.owner) ?? []), x]);
+  const suspended = [...bans.values()];
+  el.innerHTML = (suspended.length ? `
+    <h3 class="adm-sub">Suspended</h3>
+    ${grid(suspended.map((b) => [
+      esc(b.email), b.until ? `until ${esc(new Date(b.until).toLocaleString())}` : 'until lifted', esc(b.reason || '–'), ago(new Date(b.at).toISOString()),
+      byOwner.get(b.owner)?.[0] ? `<button type="button" class="btn btn-sm" data-unban="${esc(byOwner.get(b.owner)![0].profile.id)}">Unban</button>` : '',
+    ]), ['Account', 'Suspended', 'Reason', 'Since', ''])}
+    <h3 class="adm-sub">Every account</h3>` : '') + grid(list.map((a) => {
+    const mine = byOwner.get(a.id) ?? [];
+    return [
+      `${esc(a.email)}${a.admin ? ' <span class="adm-pill">admin</span>' : ''}${banPill(a.id)}`,
+      mine.length ? `<button type="button" class="adm-link" data-email="${esc(a.email)}">${esc(mine[0].profile.name)}</button>${mine.length > 1 ? ` <span class="adm-muted" title="Saved before accounts held one player each">+${mine.length - 1} old</span>` : ''}` : '<span class="adm-muted">none yet</span>',
+      ago(a.lastSignInAt), new Date(a.createdAt).toLocaleDateString(),
+    ];
+  }), ['Email', 'Player', 'Last sign-in', 'Joined']) + `<p class="adm-muted">${list.length} account${list.length === 1 ? '' : 's'}.</p>`;
+  el.querySelectorAll<HTMLButtonElement>('[data-unban]').forEach((b) => (b.onclick = () => void run(`unban ${b.dataset.unban}`)));
   el.querySelectorAll<HTMLButtonElement>('[data-email]').forEach((b) => (b.onclick = () => {
     playerSearch = b.dataset.email!;
     switchTab('players');

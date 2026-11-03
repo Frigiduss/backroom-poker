@@ -609,6 +609,7 @@ input[type="range"]:disabled { opacity: .35; }
   color: var(--text); font-size: 14px;
   background: rgba(230, 184, 92, .1); border: 1px solid rgba(230, 184, 92, .35); border-radius: 10px; padding: 8px 12px;
 }
+.notice.banned { background: rgba(224, 106, 106, .12); border-color: rgba(224, 106, 106, .5); }
 .unsaved { font-style: normal; color: var(--bad); }
 .account-panel { display: grid; gap: 12px; }
 .account-panel .step { margin: 0; }

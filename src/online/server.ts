@@ -88,6 +88,8 @@ export interface TableState {
   autoplayed?: string[];
   /** Developer console: nothing moves on its own while paused. */
   paused?: boolean;
+  /** Developer console: stacks, bots or blind levels were changed, so nothing here counts for achievements any more. */
+  tainted?: boolean;
   /** Developer console: cards to deal next hand, by seat id. */
   nextRig?: { hole: Record<string, Card[]>; board: Card[] } | null;
   /** A blackjack table (src/online/blackjack.ts); the poker fields above stay empty. */
@@ -164,6 +166,8 @@ export interface TableDb {
   creditAwards(credits: AwardCredit[]): Promise<void>;
   /** Whether this account is in the admins table (supabase/admin.sql). False if that isn't set up. */
   isAdmin(userId: string): Promise<boolean>;
+  /** Whether this account is suspended (supabase/moderation.sql). False if that isn't set up. */
+  banned(userId: string): Promise<boolean>;
   /** The most recently used tables, newest first. */
   recent(limit: number): Promise<(TableRow & { updatedAt: string })[]>;
   /** Records a developer console change in admin_log. Never throws. */
@@ -217,7 +221,7 @@ const memberAt = (state: TableState, seatId: string): Member | undefined =>
 function creditHand(state: TableState, t: Table, credits: AwardCredit[] | undefined) {
   const hand = t.hand;
   // A hand an admin rigged from the developer console proves nothing.
-  if (!credits || !hand?.isComplete || hand.wasRigged) return;
+  if (!credits || !hand?.isComplete || hand.wasRigged || state.tainted) return;
   const people = hand.players.map((_, i) => memberAt(state, t.handSeats[i]));
   const friends = people.flatMap((m, i) => (m ? [i] : []));
   people.forEach((m, i) => {
@@ -594,12 +598,16 @@ function turnPing(state: TableState, t: Table | null, requester: string, at: num
   return { userId: holder.userId, code: '', settings: state.settings };
 }
 
+const BAN_CHECKED = new Set<string>(['create', 'join', 'watch', 'start', 'chat', 'rebuy', 'back']);
+
 /** Handles one request from a signed-in person. */
 export async function handle(db: TableDb, userId: string, raw: unknown, opts: ServerOptions = {}): Promise<Outcome> {
   const now = opts.now ?? Date.now;
   const seed = opts.seed ?? secureSeed;
   try {
     const req = (raw ?? {}) as Request;
+    // A suspended account can finish the hand it's in and leave, but not sit down, chat or play on.
+    if (BAN_CHECKED.has(req.op) && (await db.banned(userId))) throw new TableError('This account is suspended, so online tables are off for now.', 403);
     if (req.op === 'create') return await create(db, userId, req, now(), seed);
     if (req.op === 'join') return await join(db, userId, req, now());
     if (req.op === 'watch') return await watch(db, userId, req, now());
@@ -1025,6 +1033,7 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         const e: AdminEdit = { t: 'stack', seat: seat.id, n };
         applyEdit(t, e);
         state.events.push(e);
+        state.tainted = true;
         message = `${seat.name} now has ${n} chips.`;
         break;
       }
@@ -1033,9 +1042,11 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         if (seat.isHuman) throw new TableError(`${seat.name} is a person.`);
         const d = (cmd.difficulty && DIFFS.has(cmd.difficulty) ? cmd.difficulty : seat.difficulty ?? 'medium') as Difficulty;
         const st = (cmd.style && STYLE_SET.has(cmd.style) ? cmd.style : seat.style ?? 'balanced') as BotStyle;
+        if (d === 'master' && !hasMaster(t.variant.id, t.config.structure)) throw new TableError('Master bots only play No-Limit Hold\'em.');
         const e: AdminEdit = { t: 'bot', seat: seat.id, d, s: st };
         applyEdit(t, e);
         state.events.push(e);
+        state.tainted = true;
         message = `${seat.name} plays ${d} ${st}.`;
         break;
       }
@@ -1046,6 +1057,7 @@ async function adminChange(db: TableDb, userId: string, req: Extract<Request, { 
         const e: AdminEdit = { t: 'level', n: n - 1 };
         applyEdit(t, e);
         state.events.push(e);
+        state.tainted = true;
         message = `Blind level ${n} from the next hand.`;
         break;
       }
