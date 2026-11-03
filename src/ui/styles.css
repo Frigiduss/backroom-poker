@@ -1965,6 +1965,8 @@ button.link-btn.plain { background: none; border: 0; padding: 4px; font-size: 14
   .ch-list { grid-template-columns: 1fr; }
   .ch-card { grid-template-rows: none; padding: 14px; gap: 8px; }
   .ch-desc { font-size: 16px; }
+}
+
 /* ---------- Seasonal event banner ---------- */
 .season-banner {
   display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-radius: 14px;
