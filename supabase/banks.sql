@@ -13,8 +13,9 @@
 --   * a refill (bank under 1,000 topped up to 10,000) is free once an hour
 --   * a daily bonus collected through claim_daily_bonus() adds its chips to the allowance
 --   * the biggest pot can't jump past 50,000 (a full table of 200-big-blind stacks is 36,000).
---     A player who had the Penthouse buy-in (50,000) before the save can show up to 600,000:
---     six 100-big-blind stacks at 250/500 is 300,000, and stacks grow over a session
+--     unless the player had more chips than that before the save: a pot can take from each of
+--     the five others at most what the player put in, so it is never more than six times the
+--     player's chips (that is what lets Penthouse pots, where the blinds climb, save)
 -- Admins (console edits) and the server's own key aren't limited. Editing a saved player in
 -- the browser can therefore only ever add as much as real winning could.
 
@@ -85,7 +86,7 @@ begin
   end if;
   new.data := jsonb_set(new.data, '{bank}', to_jsonb(after_bank));
 
-  pot_cap := greatest(before_pot, case when before_total >= 50000 then 600000 else 50000 end);
+  pot_cap := greatest(before_pot, 50000, 6 * before_total);
   if public.lb_num(new.data #> '{stats,biggestPot}') > pot_cap then
     new.data := jsonb_set(new.data, '{stats,biggestPot}', to_jsonb(pot_cap));
     capped := true;

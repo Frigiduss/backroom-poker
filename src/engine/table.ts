@@ -35,6 +35,13 @@ export interface TableConfig {
   bigBlind: number;
   /** Tournaments: hands between blind increases. */
   handsPerLevel: number;
+  /**
+   * A cash game whose blinds climb: the big blind at each level, moving up every
+   * handsPerLevel hands and staying at the last. Rebuys are for as many big blinds as the
+   * starting stack, at the blinds of the moment, and as the blinds go up the bots top their
+   * stacks up to that size, so the money at the table grows with the stakes.
+   */
+  climb?: readonly number[];
   seats: SeatConfig[];
   seed?: Seed;
 }
@@ -126,7 +133,26 @@ export class Table {
   }
 
   get stakes(): Stakes {
+    const climb = this.config.climb;
+    if (climb?.length) return stakesFor(this.variant, climb[Math.min(this.level, climb.length - 1)], 0, this.config.format);
     return stakesFor(this.variant, this.config.bigBlind, this.level, this.config.format);
+  }
+
+  /** Blinds rise as hands go by: tournaments, and cash games that climb. */
+  get levelsRise(): boolean {
+    return this.isTournament || !!this.config.climb?.length;
+  }
+
+  /** At the top of a climbing game's ladder the blinds stay put. */
+  get atTopLevel(): boolean {
+    const climb = this.config.climb;
+    return !!climb?.length && this.level >= climb.length - 1;
+  }
+
+  /** What a cash rebuy (or a bot's top-up) comes to now: the starting stack's big blinds at today's blinds. */
+  get rebuyStack(): number {
+    if (!this.config.climb?.length) return this.config.startingStack;
+    return Math.round((this.config.startingStack / this.config.bigBlind) * this.stakes.bb);
   }
 
   get liveSeats(): Seat[] {
@@ -138,7 +164,7 @@ export class Table {
   }
 
   handsUntilNextLevel(): number {
-    if (!this.isTournament) return Infinity;
+    if (!this.levelsRise || this.atTopLevel) return Infinity;
     const per = Math.max(1, this.config.handsPerLevel);
     return per - (this.handNumber % per);
   }
@@ -165,7 +191,11 @@ export class Table {
         break;
       }
     }
-    if (this.isTournament && this.handNumber > 0 && this.handNumber % Math.max(1, this.config.handsPerLevel) === 0) this.level++;
+    if (this.levelsRise && !this.atTopLevel && this.handNumber > 0 && this.handNumber % Math.max(1, this.config.handsPerLevel) === 0) {
+      this.level++;
+      // New money arrives with the new stakes: every bot sits behind a full stack at them.
+      if (!this.isTournament) for (const s of live) if (!s.isHuman && s.stack < this.rebuyStack) s.stack = this.rebuyStack;
+    }
     this.handNumber++;
     this.handSeats = live.map((s) => s.id);
     const buttonId = this.seats[this.button].id;
@@ -220,7 +250,7 @@ export class Table {
   rebuy(seatId: string): void {
     const s = this.seats.find((x) => x.id === seatId);
     if (!s || this.isTournament) return;
-    s.stack = this.config.startingStack;
+    s.stack = this.rebuyStack;
     s.busted = false;
     s.rebuys++;
   }

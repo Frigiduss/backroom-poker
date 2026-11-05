@@ -175,7 +175,7 @@ function renderSetup() {
               <button type="button" data-room="backroom" aria-pressed="${!upstairs}">Back room</button>
               <button type="button" data-room="penthouse" aria-pressed="${upstairs}" ${door.open ? '' : 'disabled'}>${door.open ? '' : '<svg class="lock" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z"/></svg>'}Penthouse</button>
             </div>
-            <span class="hint">${door.open ? `${esc(penthouseDoorLine(door, fmt))} Blinds ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)}, ${fmt(PENTHOUSE.buyIn)} buy-in.` : `Upstairs is invitation only. ${esc(penthouseDoorLine(door, fmt))}`}</span>
+            <span class="hint">${door.open ? `${esc(penthouseDoorLine(door, fmt))} Blinds start at ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)} and keep climbing. ${fmt(PENTHOUSE.buyIn)} buy-in.` : `Upstairs is invitation only. ${esc(penthouseDoorLine(door, fmt))}`}</span>
           </div>`;
 
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
@@ -378,6 +378,7 @@ function renderSetup() {
 /** The poker card when the player has taken the elevator: one game, high stakes, the sharpest bots. */
 function penthouseCardHtml(me: Profile, roomField: string): string {
   const cost = PENTHOUSE.buyIn;
+  const top = PENTHOUSE.climb[PENTHOUSE.climb.length - 1];
   const affordable = canAfford(me, cost);
   // Regulars with something to settle are the first ones seated upstairs.
   const guests = penthouseSeating(PERSONAS.filter((p) => moodOf(me.rivals[p.name]).level !== 0), me.rivals).slice(0, PENTHOUSE.opponents);
@@ -389,7 +390,7 @@ function penthouseCardHtml(me: Profile, roomField: string): string {
         <div class="ticket">
           <span class="eyebrow">Upstairs · invitation only</span>
           <b>${esc(PENTHOUSE.name)}</b>
-          <span>No-Limit Hold'em · blinds ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)} · six handed</span>
+          <span>No-Limit Hold'em · blinds from ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)} and climbing · six handed</span>
         </div>
         <div class="options">
           ${roomField}
@@ -405,7 +406,9 @@ function penthouseCardHtml(me: Profile, roomField: string): string {
           <div class="field">
             <span class="flabel">House rules</span>
             <ul class="ph-rules">
-              <li>Buy in for ${fmt(cost)}, which is ${PENTHOUSE.stackBB} big blinds. A rebuy costs the same.</li>
+              <li>The blinds go up every ${PENTHOUSE.handsPerLevel} hands, to ${fmt(top / 2)}/${fmt(top)} at the top.</li>
+              <li>Each time they go up, the bots buy in deeper: ${PENTHOUSE.stackBB} big blinds at the new stakes, up to ${fmt(top * PENTHOUSE.stackBB)} each.</li>
+              <li>Buy in for ${fmt(cost)}. A rebuy is ${PENTHOUSE.stackBB} big blinds at the stakes of the moment.</li>
               <li>No practice mode and no coach up here.</li>
               <li>Your stack goes back to your bank when you leave the table.</li>
             </ul>
@@ -524,7 +527,9 @@ class Game implements DevGame {
       format: s.format,
       startingStack: s.stackBB * bigBlindFor(s),
       bigBlind: bigBlindFor(s),
-      handsPerLevel: HANDS_PER_LEVEL[s.blindSpeed],
+      // Upstairs the blinds keep climbing, and the bots' stacks with them.
+      ...(penthouse ? { climb: PENTHOUSE.climb } : {}),
+      handsPerLevel: penthouse ? PENTHOUSE.handsPerLevel : HANDS_PER_LEVEL[s.blindSpeed],
       seats,
     });
     for (const seat of this.table.seats) if (!seat.isHuman) this.bots.set(seat.id, new Bot(seat.difficulty!, seat.style));
@@ -567,7 +572,7 @@ class Game implements DevGame {
     if (this.table.isTournament) abandonTournament(this.profile);
     else {
       const net = cashOut(this.profile, this.myStack());
-      if (!this.tainted) credit(this.profile, cashTally(net, this.table.config.bigBlind, this.penthouse));
+      if (!this.tainted) credit(this.profile, cashTally(net, this.table.stakes.bb, this.penthouse));
     }
     announce(takeUnlocks(this.profile, serverAwards()));
     savePlayer();
@@ -636,7 +641,12 @@ class Game implements DevGame {
       this.render();
       return;
     }
+    const level = this.table.level;
     this.table.nextHand();
+    if (this.penthouse && this.table.level > level) {
+      const st = this.table.stakes;
+      this.log.push({ text: `The stakes go up: blinds ${fmt(st.sb)}/${fmt(st.bb)}. New money sits down, and every bot now has at least ${fmt(this.table.rebuyStack)}.`, kind: 'rival', me: false });
+    }
     this.sync();
   }
 
@@ -949,9 +959,12 @@ class Game implements DevGame {
     const stakes = v.family === 'stud'
       ? `Limits <b>${fmt(s.smallBet)}/${fmt(s.bigBet)}</b> · ante ${fmt(s.ante)}`
       : `Blinds <b>${fmt(s.sb)}/${fmt(s.bb)}</b>${s.ante ? ` · ante ${fmt(s.ante)}` : ''}`;
+    const next = t.handsUntilNextLevel();
     const level = t.isTournament
-      ? ` · Level <b>${t.level + 1}</b> · next in ${t.handsUntilNextLevel()} hand${t.handsUntilNextLevel() === 1 ? '' : 's'} · <b>${t.liveSeats.length}</b> left`
-      : '';
+      ? ` · Level <b>${t.level + 1}</b> · next in ${next} hand${next === 1 ? '' : 's'} · <b>${t.liveSeats.length}</b> left`
+      : t.levelsRise
+        ? ` · Level <b>${t.level + 1}</b>${t.atTopLevel ? ' · <b class="ph-top">Top stakes</b>' : ` · stakes rise in ${next} hand${next === 1 ? '' : 's'}`}`
+        : '';
     const logScroll = document.querySelector('.log ol')?.scrollTop;
     const atBottom = (() => {
       const el = document.querySelector('.log ol');
@@ -1286,11 +1299,11 @@ class Game implements DevGame {
       return `<div class="overlay"><div class="modal" role="dialog">
         <h2>You're out of chips</h2>
         ${this.practice
-          ? `<p>It's a practice table, so another ${fmt(t.config.startingStack)} in practice chips is on the house.</p>`
-          : canAfford(this.profile, t.config.startingStack)
-          ? `<p>Buy back in for ${fmt(t.config.startingStack)} from your bank of ${fmt(this.profile.bank)}, or head back to the menu.${this.humanSeat.rebuys ? ` You have bought in ${this.humanSeat.rebuys + 1} times.` : ''}</p>`
-          : `<p>Your bank has ${fmt(this.profile.bank)} chips, not enough to buy back in for ${fmt(t.config.startingStack)}.${canRefill(this.profile) ? ' You can refill it from the game menu.' : ' Try a table with a smaller starting stack.'}</p>`}
-        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button>${this.practice || canAfford(this.profile, t.config.startingStack) ? '<button type="button" class="btn btn-primary" id="rebuy">Buy back in</button>' : ''}</div>
+          ? `<p>It's a practice table, so another ${fmt(t.rebuyStack)} in practice chips is on the house.</p>`
+          : canAfford(this.profile, t.rebuyStack)
+          ? `<p>Buy back in for ${fmt(t.rebuyStack)} from your bank of ${fmt(this.profile.bank)}, or head back to the menu.${this.humanSeat.rebuys ? ` You have bought in ${this.humanSeat.rebuys + 1} times.` : ''}</p>`
+          : `<p>Your bank has ${fmt(this.profile.bank)} chips, not enough to buy back in for ${fmt(t.rebuyStack)}.${canRefill(this.profile) ? ' You can refill it from the game menu.' : ' Try a table with a smaller starting stack.'}</p>`}
+        <div class="row"><button type="button" class="btn" id="confirm-leave">Back to menu</button>${this.practice || canAfford(this.profile, t.rebuyStack) ? '<button type="button" class="btn btn-primary" id="rebuy">Buy back in</button>' : ''}</div>
       </div></div>`;
     }
     if (this.modal === 'over') {
@@ -1346,7 +1359,7 @@ class Game implements DevGame {
       this.closeModal();
     });
     on('rebuy', () => {
-      if (!this.practice && !buyIn(this.profile, this.table.config.startingStack)) return;
+      if (!this.practice && !buyIn(this.profile, this.table.rebuyStack)) return;
       savePlayer();
       this.table.rebuy(this.humanId);
       this.modal = 'none';

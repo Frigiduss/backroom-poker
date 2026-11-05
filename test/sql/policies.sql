@@ -37,11 +37,11 @@ select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1');
 select pg_temp.ck((public.claim_daily_bonus('pa')->>'amount')::int = 1000, 'bonus claimed');
 update public.players set data = jsonb_set(data, '{bank}', to_jsonb((data->>'bank')::numeric + 1000)) where id='pa';
 select pg_temp.ck((select (data->>'bank')::numeric from public.players where id='pa') between 131000 and 131100, 'bonus chips save');
--- Penthouse pots: with the 50,000 buy-in in hand, a biggest pot up to 600k saves
-update public.players set data = jsonb_set(data, '{stats,biggestPot}', '250000') where id='pa';
-select pg_temp.ck((select (data#>>'{stats,biggestPot}')::numeric from public.players where id='pa') = 250000, 'penthouse pot saves');
-update public.players set data = jsonb_set(data, '{stats,biggestPot}', '9999999') where id='pa';
-select pg_temp.ck((select (data#>>'{stats,biggestPot}')::numeric from public.players where id='pa') = 600000, 'penthouse pot capped at 600k');
+-- Penthouse pots: a biggest pot up to six times the player's chips saves (A has about 131k)
+update public.players set data = jsonb_set(data, '{stats,biggestPot}', '700000') where id='pa';
+select pg_temp.ck((select (data#>>'{stats,biggestPot}')::numeric from public.players where id='pa') = 700000, 'penthouse pot saves');
+update public.players set data = jsonb_set(data, '{stats,biggestPot}', '99999999') where id='pa';
+select pg_temp.ck((select (data#>>'{stats,biggestPot}')::numeric from public.players where id='pa') between 786000 and 787000, 'pot capped at six times the player''s chips');
 -- admins aren't limited
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000c3');
 update public.players set data = jsonb_set(data, '{bank}', '7777777') where id='pa';

@@ -2985,3 +2985,4 @@ label.btn.busy { opacity: .55; pointer-events: none; }
   /* On a phone the room's name is the title; the game is always No-Limit Hold'em. */
   .topbar .title .ph-rest { display: none; }
 }
+.chip-info .ph-top { color: #f3dc9f; }
