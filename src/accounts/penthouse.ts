@@ -15,6 +15,12 @@ export const PENTHOUSE = {
   /** 100 big blinds at 250/500. */
   buyIn: 50_000,
   opponents: 5,
+  /**
+   * The big blind climbs every few hands and the bots buy in deeper each time, so the money
+   * gets bigger the longer the night goes: 250/500 up to 12,500/25,000 with 2.5 million stacks.
+   */
+  climb: [500, 1_000, 2_000, 5_000, 10_000, 25_000],
+  handsPerLevel: 8,
 } as const;
 
 /** A bank that has once reached this opens the door for good. */

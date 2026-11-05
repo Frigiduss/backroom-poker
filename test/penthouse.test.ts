@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { PENTHOUSE, PENTHOUSE_BANK, PENTHOUSE_RIVAL_CHIPS, bigRivals, cashTally, createProfile, penthouseAccess, penthouseDoorLine, penthouseSeating } from '../src/accounts';
 import { Rivalry, emptyRivalry, moodOf, normalizeRivals } from '../src/bots/rivals';
 import { PERSONA_NAMES } from '../src/bots/persona';
+import { Table } from '../src/engine/table';
+import { Bot } from '../src/bots/bot';
+import { buildView } from '../src/bots/view';
 
 /** A regular who has lost `bb` big blinds and `chips` chips to the player over 40 hands. */
 const rival = (bb: number, chips: number): Rivalry => ({ ...emptyRivalry(), hands: 40, net: bb, chips });
@@ -80,4 +83,35 @@ test('leaving the Penthouse ahead counts toward its achievement', () => {
   assert.equal(cashTally(60_000, 500, true).max.cashBestBB, 120);
   assert.equal(cashTally(60_000, 20).sum['ph.cashUp'], undefined);
   assert.equal(cashTally(-5_000, 500, true).sum['ph.cashUp'], undefined);
+});
+
+test('upstairs the blinds climb and the bots buy in deeper with them', () => {
+  const t = new Table({
+    variant: 'holdem', structure: 'NL', format: 'cash', startingStack: PENTHOUSE.buyIn, bigBlind: PENTHOUSE.bigBlind,
+    handsPerLevel: PENTHOUSE.handsPerLevel, climb: PENTHOUSE.climb, seed: 7,
+    seats: [{ name: 'You', isHuman: true }, ...['A', 'B', 'C'].map((name) => ({ name, isHuman: false, difficulty: 'easy' as const }))],
+  });
+  const seen: number[] = [];
+  const auto = new Bot('easy');
+  for (let n = 0; n < PENTHOUSE.handsPerLevel * (PENTHOUSE.climb.length + 1); n++) {
+    if (t.liveSeats.length < 2 || t.seats[0].busted) t.rebuy(t.seats[0].id);
+    const level = t.level;
+    const h = t.nextHand();
+    if (!seen.includes(h.stakes.bb)) seen.push(h.stakes.bb);
+    // When the stakes go up, every bot sits behind at least 100 big blinds of them.
+    if (t.level > level) for (const s of t.seats.slice(1)) assert.ok(s.stack >= t.rebuyStack || s.busted, `${s.name} ${s.stack}`);
+    while (!h.isComplete) h.act(h.normalize(auto.decide(buildView(h, h.toAct, t.stats))));
+    t.finishHand();
+  }
+  assert.deepEqual(seen, [...PENTHOUSE.climb]);
+  assert.equal(t.atTopLevel, true);
+  assert.equal(t.handsUntilNextLevel(), Infinity);
+  assert.equal(t.rebuyStack, 100 * 25_000);
+});
+
+test('ordinary cash games keep one blind level', () => {
+  const t = new Table({ variant: 'holdem', structure: 'NL', format: 'cash', startingStack: 2000, bigBlind: 20, handsPerLevel: 10, seats: [{ name: 'You', isHuman: true }, { name: 'A', isHuman: false, difficulty: 'easy' }] });
+  assert.equal(t.levelsRise, false);
+  assert.equal(t.rebuyStack, 2000);
+  assert.equal(t.handsUntilNextLevel(), Infinity);
 });
