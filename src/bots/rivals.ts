@@ -14,6 +14,8 @@ export interface Rivalry {
   hands: number;
   /** Big blinds the player has taken off this regular (negative when they're up on the player). */
   net: number;
+  /** Every chip that has changed hands between the two of them, either way. */
+  chips: number;
   /** Showdowns the player won against them, and lost to them. */
   beatThem: number;
   lostTo: number;
@@ -32,7 +34,7 @@ export interface Rivalry {
 
 export type Rivals = Record<string, Rivalry>;
 
-export const emptyRivalry = (): Rivalry => ({ hands: 0, net: 0, beatThem: 0, lostTo: 0, busted: 0, bustedBy: 0, pushed: 0, reads: emptyStats(), level: 0, last: 0 });
+export const emptyRivalry = (): Rivalry => ({ hands: 0, net: 0, chips: 0, beatThem: 0, lostTo: 0, busted: 0, bustedBy: 0, pushed: 0, reads: emptyStats(), level: 0, last: 0 });
 
 /** Hands together before a regular has an opinion of the player either way. */
 export const RIVAL_MIN_HANDS = 12;
@@ -105,6 +107,7 @@ export function noteHand(rivals: Rivals, bot: string, h: RivalHand): { mood: Moo
   const moved = h.moved;
   r.hands++;
   r.net = round1(r.net + moved / Math.max(1, h.bigBlind));
+  r.chips = Math.round(r.chips + Math.abs(moved));
   if (h.winner === 'player' && h.sameShowdown) r.beatThem++;
   if (h.winner === 'bot' && h.sameShowdown) r.lostTo++;
   if (h.botBusted && moved > 0) r.busted++;
@@ -197,7 +200,8 @@ export function normalizeRivals(raw: unknown, names: readonly string[]): Rivals 
     const reads = emptyStats();
     for (const k of Object.keys(reads) as (keyof PlayerStats)[]) reads[k] = Math.max(0, num(r.reads?.[k]));
     out[name] = {
-      hands: Math.max(0, num(r.hands)), net: num(r.net), beatThem: Math.max(0, num(r.beatThem)), lostTo: Math.max(0, num(r.lostTo)),
+      // Saves from before chips were counted: at least what the net in 20-chip big blinds shows.
+      hands: Math.max(0, num(r.hands)), net: num(r.net), chips: Math.max(0, num(r.chips), Math.round(Math.abs(num(r.net)) * 20)), beatThem: Math.max(0, num(r.beatThem)), lostTo: Math.max(0, num(r.lostTo)),
       busted: Math.max(0, num(r.busted)), bustedBy: Math.max(0, num(r.bustedBy)), pushed: Math.max(0, num(r.pushed)),
       reads, level: Math.max(0, Math.min(3, Math.floor(num(r.level)))), last: num(r.last),
     };

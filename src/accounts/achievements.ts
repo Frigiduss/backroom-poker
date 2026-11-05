@@ -198,6 +198,13 @@ ladder('formats', 'cashBestBB', [
   { id: 'session-100', name: 'Double Up', desc: 'Win 100 big blinds in one cash game.', tier: 1, goal: 100 },
   { id: 'session-500', name: 'Cleaned Them Out', desc: 'Win 500 big blinds in one cash game.', tier: 3, goal: 500, title: 'Table Captain' },
 ]);
+// The Penthouse, the high-stakes game upstairs (penthouse.ts).
+ladder('formats', 'ph.hands', [
+  { id: 'penthouse-25', name: 'Upstairs', desc: 'Play 25 hands in the Penthouse.', tier: 2, goal: 25 },
+]);
+ladder('formats', 'ph.cashUp', [
+  { id: 'penthouse-up', name: 'Top Floor', desc: 'Leave the Penthouse with more chips than you brought.', tier: 3, goal: 1, title: 'Penthouse Player' },
+]);
 ladder('formats', 'sngWins', [
   { id: 'sng-1', name: 'Sit & Go Winner', desc: 'Win a Sit & Go.', tier: 1, goal: 1 },
   { id: 'sng-10', name: 'Closer', desc: 'Win 10 Sit & Gos.', tier: 2, goal: 10, title: 'Closer' },
@@ -633,10 +640,11 @@ export function slotsTally(r: SlotSpin): Tally {
 }
 
 /** Leaving a cash game with `net` chips more (or less) than were bought in. */
-export function cashTally(net: number, bigBlind: number): Tally {
+export function cashTally(net: number, bigBlind: number, penthouse = false): Tally {
   const t = emptyTally();
   if (net > 0) {
     t.sum.cashUp = 1;
+    if (penthouse) t.sum['ph.cashUp'] = 1;
     t.max.cashBestBB = Math.floor(net / Math.max(1, bigBlind));
   }
   return t;

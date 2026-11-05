@@ -16,3 +16,4 @@ export * from './challenges';
 export * from './push';
 export * from './seasons';
 export * from './moderation';
+export * from './penthouse';
