@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEALERS, DealerMoment, WHISPER_CHANCE, WHISPER_DOWN_MINS, bacMoment, bjMoment, dealerByName, dealerLine, dealerSpeaks, pickDealer, rlMoment, shouldWhisper, whisperLine } from '../src/bots/dealers';
+import { BIG_POT_BB, DEALERS, DealerMoment, PENTHOUSE_DEALER, WHISPER_CHANCE, WHISPER_DOWN_MINS, bacMoment, bjMoment, dealerByName, dealerLine, dealerSpeaks, pickDealer, pkMoment, rlMoment, shouldWhisper, whisperLine } from '../src/bots/dealers';
 import { createRng } from '../src/engine/cards';
 
 const BJ: DealerMoment[] = ['hello', 'shuffle', 'playerBj', 'dealerBj', 'dealerBust', 'bigWin', 'win', 'lose', 'push'];
 const RL: DealerMoment[] = ['hello', 'noMore', 'zero', 'straight', 'repeat', 'bigWin', 'win', 'lose'];
 const BAC: DealerMoment[] = ['hello', 'shuffle', 'natural', 'tie', 'pair', 'bigWin', 'win', 'lose', 'push'];
-const MOMENTS = { blackjack: BJ, roulette: RL, baccarat: BAC };
+const PK: DealerMoment[] = ['hello', 'allin', 'monster', 'split', 'bigPot', 'blinds'];
+const MOMENTS = { blackjack: BJ, roulette: RL, baccarat: BAC, poker: PK };
 
 test('every dealer has a unique name, a face, a story and a line for every moment of their game', () => {
   assert.equal(new Set(DEALERS.map((d) => d.name.toLowerCase())).size, DEALERS.length);
@@ -24,6 +25,7 @@ test('every dealer has a unique name, a face, a story and a line for every momen
   assert.ok(DEALERS.filter((d) => d.game === 'blackjack').length >= 3);
   assert.ok(DEALERS.filter((d) => d.game === 'roulette').length >= 3);
   assert.ok(DEALERS.filter((d) => d.game === 'baccarat').length >= 3);
+  assert.ok(DEALERS.filter((d) => d.game === 'poker' && !d.upstairs).length >= 3);
 });
 
 test('a table gets a dealer for its own game', () => {
@@ -32,7 +34,12 @@ test('a table gets a dealer for its own game', () => {
     assert.equal(pickDealer('blackjack', rng).game, 'blackjack');
     assert.equal(pickDealer('roulette', rng).game, 'roulette');
     assert.equal(pickDealer('baccarat', rng).game, 'baccarat');
+    const pk = pickDealer('poker', rng);
+    assert.equal(pk.game, 'poker');
+    assert.notEqual(pk, PENTHOUSE_DEALER, 'the Penthouse dealer stays upstairs');
   }
+  assert.equal(PENTHOUSE_DEALER.game, 'poker');
+  assert.equal(PENTHOUSE_DEALER.name, 'Sterling');
   assert.equal(dealerByName('Hugo')?.game, 'baccarat');
   assert.equal(dealerByName('étienne')?.game, 'roulette');
 });
@@ -98,4 +105,34 @@ test('the dealer whispers advice only when the player is well down, rarely, and 
   assert.equal(WHISPER_CHANCE, 0.001);
   const rng = createRng(4);
   for (const g of ['blackjack', 'roulette', 'baccarat'] as const) assert.ok(whisperLine(g, rng).length > 0);
+});
+
+test('poker: the dealer names a rare hand, chops a split pot and pushes a big one', () => {
+  const base = { winningHands: ['Pair of Kings'], split: false, pot: 400, bb: 20, winner: 'Ada' };
+  assert.deepEqual(pkMoment({ ...base, winningHands: ['Four Kings'] }), { moment: 'monster', n: 'Four Kings' });
+  assert.deepEqual(pkMoment({ ...base, winningHands: ['Straight Flush, Nine high · 8-6-5-3-2'] }), { moment: 'monster', n: 'Straight Flush, Nine high' });
+  assert.deepEqual(pkMoment({ ...base, winningHands: ['Royal Flush'], split: true }), { moment: 'monster', n: 'Royal Flush' });
+  assert.deepEqual(pkMoment({ ...base, split: true }), { moment: 'split', n: '' });
+  assert.deepEqual(pkMoment({ ...base, pot: 20 * BIG_POT_BB }), { moment: 'bigPot', n: 'Ada' });
+  assert.equal(pkMoment(base), null);
+  assert.equal(pkMoment({ ...base, winningHands: ['Full House, Fours full of Kings'] }), null);
+  assert.equal(pkMoment({ ...base, winningHands: [], pot: 0, bb: 0 }), null);
+});
+
+test('a welcome with no name to drop in leaves out the lines that need one', () => {
+  const rng = createRng(6);
+  for (const d of DEALERS.filter((x) => x.game === 'poker')) {
+    for (let i = 0; i < 30; i++) {
+      const line = dealerLine(d, 'hello', rng);
+      assert.ok(line && !line.includes('{n}') && !/, \.|\s\./.test(line), `${d.name}: ${line}`);
+    }
+  }
+  const sterling = new Set(Array.from({ length: 40 }, () => dealerLine(PENTHOUSE_DEALER, 'hello', rng, 'Fridge')));
+  assert.ok([...sterling].some((l) => l.includes('Fridge')));
+});
+
+test('poker dealers whisper poker advice', () => {
+  const rng = createRng(7);
+  const seen = new Set(Array.from({ length: 60 }, () => whisperLine('poker', rng)));
+  assert.ok(seen.size >= 4);
 });

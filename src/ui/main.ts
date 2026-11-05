@@ -3,6 +3,7 @@ import { specFromView } from '../bots/equity';
 import { PERSONAS, Persona, TalkEvent, lineFor, personaFor, remarkAfter } from '../bots/persona';
 import { Mood, RivalEvent, moodOf, noteHand, rememberedStats, transferBetween, rivalLine, rivalrySummary, grudgeStyle } from '../bots/rivals';
 import { buildView } from '../bots/view';
+import { Dealer, PENTHOUSE_DEALER, PkMoment, dealerLine, dealerSpeaks, pickDealer, pkMoment, shouldWhisper, whisperLine } from '../bots/dealers';
 import { cardLabel, createRng, shuffle } from '../engine/cards';
 import { Action, Hand, LegalActions } from '../engine/hand';
 import { CLASSIC_DIFFICULTIES, DIFFICULTY_NAMES, Difficulty, FORMAT_NAMES, Format, PlayerStats, Seat, SeatConfig, Table, difficultiesFor, hasMaster } from '../engine/table';
@@ -82,7 +83,7 @@ interface Prefs {
   reveal: boolean;
   /** Bots chat at the table now and then. */
   talk: boolean;
-  /** The blackjack dealer and the roulette and baccarat croupiers chat now and then. */
+  /** The dealers (poker, blackjack) and the roulette and baccarat croupiers chat now and then. */
   dealerTalk: boolean;
   sound: boolean;
   volume: number;
@@ -486,6 +487,16 @@ class Game implements DevGame {
   /** Hand number of the last time a bot spoke, so the table is never too chatty. */
   private lastTalk = -10;
   private talkRng = createRng();
+  /** Who deals: one of the poker dealers, or the Penthouse's own. */
+  readonly dealer: Dealer;
+  /** Hand number of the dealer's last line, what they say on the next draw, and a whisper if any. */
+  private dealerLast = -10;
+  private dealerSays = '';
+  private dealerWhispers = '';
+  private whispered = false;
+  /** The dealer calls an all-in once a hand; and the blinds they last announced. */
+  private dealerAllIn = -1;
+  private blindsSeen = '';
   /** The player whose bank pays for this game. */
   private readonly profile = player();
   private recorded: Hand | null = null;
@@ -508,6 +519,7 @@ class Game implements DevGame {
     const s = penthouse ? penthouseSetup(chosen) : chosen;
     this.setup = s;
     this.penthouse = penthouse;
+    this.dealer = penthouse ? PENTHOUSE_DEALER : pickDealer('poker', this.talkRng);
     const v = VARIANTS[s.variant];
     const rng = createRng();
     const everyone = shuffle([...PERSONAS], rng).filter((p) => p.name.toLowerCase() !== (s.name || 'You').toLowerCase());
@@ -906,6 +918,14 @@ class Game implements DevGame {
   private talkDuring(hand: Hand, entries: Hand['log']) {
     const roll = () => this.talkRng.next();
     for (const e of entries) {
+      if (e.kind === 'start') {
+        // The dealer welcomes the table, and calls out new blinds when they go up.
+        const blinds = this.blindsText(hand);
+        // A player still called "You" gets a welcome without a name in it.
+        if (this.table.handNumber === 1) this.dealerSay('hello', this.humanSeat.name === 'You' ? '' : this.humanSeat.name);
+        else if (blinds !== this.blindsSeen) this.dealerSay('blinds', blinds);
+        this.blindsSeen = blinds;
+      }
       if (e.kind === 'start' && this.table.handNumber === 1) {
         const bots = this.table.seats.filter((x) => !x.isHuman);
         // A regular with a score to settle (or one who thinks they own the player) speaks first.
@@ -920,11 +940,69 @@ class Game implements DevGame {
         this.say(hand.players[e.player].id, 'allin');
       }
     }
+    // Everyone left is all in (or only one can still bet): the betting is over, so the dealer calls it.
+    const live = hand.players.filter((p) => p.status !== 'folded');
+    if (this.dealerAllIn !== this.table.handNumber && entries.some((e) => e.kind === 'action') && live.length >= 2
+      && live.some((p) => p.status === 'allin') && live.filter((p) => p.status === 'active').length <= 1
+      && (!hand.isComplete || hand.result?.showdown)) {
+      this.dealerAllIn = this.table.handNumber;
+      this.dealerSay('allin');
+    }
+  }
+
+  private blindsText(hand: Hand): string {
+    const s = hand.stakes;
+    return hand.variant.family === 'stud' ? `${fmt(s.smallBet)}/${fmt(s.bigBet)}` : `${fmt(s.sb)}/${fmt(s.bb)}`;
+  }
+
+  /** Now and then the dealer says something; nearly always about the big moments. */
+  private dealerSay(m: PkMoment, n = ''): boolean {
+    if (prefs.dealerTalk === false || !dealerSpeaks(m, this.table.handNumber - this.dealerLast, this.talkRng.next())) return false;
+    const line = dealerLine(this.dealer, m, this.talkRng, n);
+    if (!line) return false;
+    this.log.push({ text: `${this.dealer.name} (dealer): “${line}”`, kind: 'talk', me: false });
+    this.dealerLast = this.table.handNumber;
+    this.dealerSays = line;
+    return true;
+  }
+
+  /**
+   * What the dealer makes of a finished hand: a rare hand, a split pot or a big one. And, very
+   * rarely, when the player has lost a buy-in or more at a cash table, a quiet word of advice.
+   */
+  private dealerAfter(hand: Hand): boolean {
+    const res = hand.result;
+    if (!res) return false;
+    const won = res.won;
+    const top = won.indexOf(Math.max(...won));
+    const contested = res.pots.filter((p) => p.eligible.length > 1);
+    const m = pkMoment({
+      winningHands: res.showdown ? won.flatMap((w, i) => (w > 0 && res.handNames[i] ? [res.handNames[i]!] : [])) : [],
+      split: res.showdown && contested.some((p) => p.winnersHi.length > 1),
+      pot: won.reduce((a, b) => a + b, 0),
+      bb: hand.stakes.bb || hand.stakes.bigBet,
+      winner: top < 0 ? '' : top === this.humanIndex && hand.players[top].name === 'You' ? 'you' : hand.players[top].name,
+    });
+    const spoke = !!m && this.dealerSay(m.moment, m.n);
+    const t = this.table;
+    if (prefs.dealerTalk !== false && !this.whispered && !this.practice && !this.spectating && !t.isTournament && this.humanIndex >= 0) {
+      const me = this.humanSeat;
+      const down = (me.rebuys + 1) * t.config.startingStack - me.stack;
+      // Four big blinds a "minimum", so the whisper waits until a whole 100 big blind buy-in is gone.
+      if (shouldWhisper(down, t.config.bigBlind * 4, this.whispered, this.talkRng.next())) {
+        this.whispered = true;
+        this.dealerWhispers = whisperLine('poker', this.talkRng);
+        this.dealerSays = '';
+        return true;
+      }
+    }
+    return spoke;
   }
 
   /** Once a hand is over, maybe one bot has something to say about it. */
   private talkAfter(hand: Hand, rival: RivalMoment | null) {
     const res = hand.result;
+    const dealerSpoke = this.dealerAfter(hand);
     if (!res || this.lastTalk === this.table.handNumber) return;
     if (rival && this.sayRival(rival.seat, rival.event)) return;
     const remark = remarkAfter({
@@ -936,7 +1014,8 @@ class Game implements DevGame {
       bigBlind: hand.stakes.bb || hand.stakes.bigBet,
     }, this.talkRng.next());
     // Leave a quiet hand between remarks, except when someone busts.
-    if (remark && (this.table.handNumber - this.lastTalk > 1 || remark.event === 'bust')) this.say(remark.seat, remark.event);
+    // A bot doesn't talk over the dealer, unless someone just went broke.
+    if (remark && (this.table.handNumber - this.lastTalk > 1 || remark.event === 'bust') && (!dealerSpoke || remark.event === 'bust')) this.say(remark.seat, remark.event);
   }
 
   /** Engine text is third person ("Ada calls"). When the player is named "You", fix the verbs. */
@@ -1002,7 +1081,21 @@ class Game implements DevGame {
     if (ol) ol.scrollTop = atBottom || logScroll === undefined ? ol.scrollHeight : logScroll;
     this.bind();
     const said = this.talkQueue.splice(0);
-    if (said.length) requestAnimationFrame(() => said.forEach((l, k) => floatOver(l.seat, l.text, { delay: k * 0.4 })));
+    const dealerSays = this.dealerSays;
+    const whisper = this.dealerWhispers;
+    this.dealerSays = '';
+    this.dealerWhispers = '';
+    // The dealer goes first; the bots answer a moment later.
+    const after = dealerSays || whisper ? 0.5 : 0;
+    if (dealerSays) requestAnimationFrame(() => floatOver('dealer', dealerSays, { at: 'right' }));
+    if (whisper) requestAnimationFrame(() => floatOver('dealer', whisper, { at: 'right', whisper: true }));
+    if (said.length) requestAnimationFrame(() => said.forEach((l, k) => floatOver(l.seat, l.text, { delay: after + k * 0.4 })));
+  }
+
+  /** The dealer's name plate, under the pot. */
+  private dealerHtml(): string {
+    const d = this.dealer;
+    return `<div class="dealer-plate pk-dealer${d.upstairs ? ' upstairs' : ''}" data-seat="dealer" title="${esc(`${d.name} · Dealer\n${d.bio}`)}"><span class="dealer-face" aria-hidden="true">${d.face}</span><span class="dealer-who"><b>${esc(d.name)}</b><small>Dealer</small></span></div>`;
   }
 
   private seatLayout(): { x: number; y: number }[] {
@@ -1122,7 +1215,7 @@ class Game implements DevGame {
     const result = res ? `<div class="result" role="status">${esc(this.speak(res.summary[0] ?? ''))}</div>` : '';
     return withHero(`<div class="table">
       <div class="rail"><div class="felt"></div></div>
-      <div class="center"><div class="board">${board}</div>${result || potLabel}</div>
+      <div class="center"><div class="board">${board}</div>${result || potLabel}${this.dealerHtml()}</div>
       ${parts.join('')}
     </div>`, heroHtml);
   }
@@ -1282,6 +1375,7 @@ class Game implements DevGame {
         <label class="toggle"><input type="checkbox" id="pref-odds" ${prefs.showOdds ? 'checked' : ''}> Show my pot share against random hands</label>
         <label class="toggle"><input type="checkbox" id="pref-four" ${prefs.fourColor ? 'checked' : ''}> Four-colour deck (blue diamonds, green clubs)</label>
         <label class="toggle"><input type="checkbox" id="pref-talk" ${prefs.talk ? 'checked' : ''}> Let the bots chat at the table</label>
+        <label class="toggle"><input type="checkbox" id="pref-dealer" ${prefs.dealerTalk !== false ? 'checked' : ''}> Let the dealer chat</label>
         ${this.practice ? `<label class="toggle"><input type="checkbox" id="pref-reveal" ${prefs.reveal ? 'checked' : ''}> Show the bots' cards (practice tables only)</label>` : ''}
         <div class="row"><button type="button" class="btn btn-primary" id="close-modal">Done</button></div>
       </div></div>`;
@@ -1433,6 +1527,7 @@ class Game implements DevGame {
     pref('pref-four', 'fourColor');
     pref('pref-reveal', 'reveal');
     pref('pref-talk', 'talk');
+    pref('pref-dealer', 'dealerTalk');
     pref('pref-sound', 'sound');
     on('sound-toggle', () => this.toggleSound());
     on('reveal-off', () => {

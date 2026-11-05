@@ -1,15 +1,20 @@
-// The house's own staff: who deals blackjack, who spins the roulette wheel and who runs the
-// baccarat shoe. Each has a
+// The house's own staff: who deals blackjack, who spins the roulette wheel, who runs the
+// baccarat shoe and who deals the poker games (with one dealer kept for the Penthouse). Each has a
 // name, a face, a short story and a way of talking. They speak now and then about what just
 // happened, never about what to do: a dealer gives no advice.
 import { Rng } from '../engine/cards';
 
-export type DealerGame = 'blackjack' | 'roulette' | 'baccarat';
+export type DealerGame = 'blackjack' | 'roulette' | 'baccarat' | 'poker';
 
 export type BjMoment = 'hello' | 'shuffle' | 'playerBj' | 'dealerBj' | 'dealerBust' | 'bigWin' | 'win' | 'lose' | 'push';
 export type RlMoment = 'hello' | 'noMore' | 'zero' | 'straight' | 'repeat' | 'bigWin' | 'win' | 'lose';
 export type BacMoment = 'hello' | 'shuffle' | 'natural' | 'tie' | 'pair' | 'bigWin' | 'win' | 'lose' | 'push';
-export type DealerMoment = BjMoment | RlMoment | BacMoment;
+/**
+ * A poker dealer runs the game and stays out of it: they welcome the table, call an all-in,
+ * name a rare hand, chop a split pot, push a big one and announce new blinds.
+ */
+export type PkMoment = 'hello' | 'allin' | 'monster' | 'split' | 'bigPot' | 'blinds';
+export type DealerMoment = BjMoment | RlMoment | BacMoment | PkMoment;
 
 export interface Dealer {
   name: string;
@@ -20,8 +25,12 @@ export interface Dealer {
   /**
    * Their own lines; the house lines for the game fill in the rest. `{n}` is the number that came
    * up at roulette, and at baccarat the winning total (or the side that won, for `win`/`lose`).
+   * At poker it is the player's name for `hello`, the hand for `monster`, the winner for
+   * `bigPot` and the new blinds for `blinds`.
    */
   lines: Partial<Record<DealerMoment, string[]>>;
+  /** Deals only in the Penthouse, never in the back room. */
+  upstairs?: boolean;
 }
 
 export const DEALERS: readonly Dealer[] = [
@@ -130,10 +139,51 @@ export const DEALERS: readonly Dealer[] = [
     win: ['{n}! Yes!', 'Ooh, {n} for you.'],
     lose: ['Aw, {n}. It’ll swing back, darling.'],
   } },
+  // Poker
+  { name: 'Mack', face: '🧢', game: 'poker', bio: 'Twenty years in the card rooms. Calls everybody champ.', lines: {
+    hello: ['Evening, champ. Cards are in the air.', 'Pull up a chair, champ. Blinds are posted.'],
+    allin: ['All in and a call! Here we go, champs.', 'Here comes the board, folks. Let’s see a race.'],
+    monster: ['{n}! Twenty years and I still love that.', 'Whoa. {n}. Somebody frame that one.'],
+    split: ['Chop it up. Everybody’s a winner. Sort of.'],
+    bigPot: ['Big pot to {n}. Stack ’em up, champ.'],
+    blinds: ['Blinds go up, champs: {n}.'],
+  } },
+  { name: 'Owen', face: '🦉', game: 'poker', bio: 'Works the night shift. Quiet, quick, misses nothing.', lines: {
+    hello: ['Evening. Seat open, game’s running.', 'Hi. Good luck tonight.'],
+    allin: ['All in. Call.', 'All-in and called.'],
+    monster: ['{n}.', '{n}. Nice.'],
+    split: ['Split.', 'Chop.'],
+    bigPot: ['Pot to {n}.', '{n} takes it.'],
+  } },
+  { name: 'Lulu', face: '🍒', game: 'poker', bio: 'Deals with a grin and a running commentary nobody asked for.', lines: {
+    hello: ['Hiya {n}! Welcome to my table, it’s the fun one.', 'Ooh, new faces! Let’s shuffle up.'],
+    allin: ['ALL IN! Ooh, I’ve got goosebumps.', 'All in and a call! Somebody hold my hand.'],
+    monster: ['{n}?! Shut the front door.', 'Oh my gosh, {n}! I’m telling everyone.'],
+    split: ['A chop! Sharing is caring.', 'Same hand! You two should be friends.'],
+    bigPot: ['Look at that pile! All yours, {n}.', 'That’s a big one, {n}! Treat yourself.'],
+    blinds: ['Blinds are up! {n}. Things are getting spicy.'],
+  } },
+  { name: 'Viktor', face: '🧊', game: 'poker', bio: 'Ran the tournament floor for years. Calm as a frozen lake.', lines: {
+    hello: ['Good evening. Good luck, and please act in turn.', 'Welcome. Please keep your cards on the table.'],
+    allin: ['All in, and called. Dealing it out.', 'Players are all in. Dealing it out.'],
+    monster: ['{n}. Very rare. Very good.', '{n}. I note it for the record.'],
+    split: ['Equal hands. The pot is divided.'],
+    bigPot: ['A substantial pot to {n}.'],
+    blinds: ['Level up. Blinds are now {n}.', 'Blinds increase to {n}. Play continues.'],
+  } },
+  // The Penthouse
+  { name: 'Sterling', face: '🍸', game: 'poker', upstairs: true, bio: 'Deals only upstairs. Has never raised his voice, or needed to.', lines: {
+    hello: ['Good evening, {n}. We’ve been expecting you.', 'Welcome upstairs, {n}. The table is yours whenever you’re ready.'],
+    allin: ['All in, and called. Good luck to you both.', 'The chips are in. Let’s see the rest of the board.'],
+    monster: ['{n}. In this room, that is remembered.', '{n}. Exquisite.'],
+    split: ['The hands are equal. The pot is split, with my compliments.'],
+    bigPot: ['A considerable pot to {n}.', 'Congratulations, {n}. A pot worthy of the room.'],
+    blinds: ['The stakes rise. Blinds are now {n}.'],
+  } },
 ];
 
 /** What any dealer of this game might say, when they have nothing of their own. */
-const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlMoment, string[]>; baccarat: Record<BacMoment, string[]> } = {
+const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlMoment, string[]>; baccarat: Record<BacMoment, string[]>; poker: Record<PkMoment, string[]> } = {
   blackjack: {
     hello: ['Welcome to the table. Good luck.'],
     shuffle: ['Fresh shoe.', 'Shuffling up.'],
@@ -166,23 +216,38 @@ const HOUSE_LINES: { blackjack: Record<BjMoment, string[]>; roulette: Record<RlM
     lose: ['{n} wins this one.', 'Better luck next coup.'],
     push: ['Bets come back.'],
   },
+  poker: {
+    hello: ['Welcome to the game, {n}. Good luck.', 'Cards are in the air. Good luck, everyone.'],
+    allin: ['All in, and a call.', 'We have an all-in. Running them out.'],
+    monster: ['{n}. That doesn’t come along every night.', 'Look at that: {n}.'],
+    split: ['Split pot.', 'Same hand. We chop it up.'],
+    bigPot: ['Big pot to {n}.', 'Pushing a big one to {n}.'],
+    blinds: ['Blinds are going up: {n}.', 'New level. Blinds are {n}.'],
+  },
 };
+
+/** The one who deals in the Penthouse. */
+export const PENTHOUSE_DEALER: Dealer = DEALERS.find((d) => d.upstairs)!;
 
 const BY_NAME = new Map(DEALERS.map((d) => [d.name.toLowerCase(), d]));
 
 export const dealerByName = (name: string): Dealer | undefined => BY_NAME.get(name.toLowerCase());
 
-/** A dealer for a new sitting at this game. */
+/** A dealer for a new sitting at this game. The Penthouse's dealer stays upstairs. */
 export function pickDealer(game: DealerGame, rng: Rng): Dealer {
-  const staff = DEALERS.filter((d) => d.game === game);
+  const staff = DEALERS.filter((d) => d.game === game && !d.upstairs);
   return staff[Math.floor(rng.next() * staff.length)];
 }
 
-/** Something this dealer might say about a moment. Their own lines come up more often. */
+/**
+ * Something this dealer might say about a moment. Their own lines come up more often. With no
+ * `n` to fill in, lines that need one are left out when there are others to pick from.
+ */
 export function dealerLine(d: Dealer, moment: DealerMoment, rng: Rng, n = ''): string {
   const own = d.lines[moment] ?? [];
   const house = (HOUSE_LINES[d.game] as Record<DealerMoment, string[] | undefined>)[moment] ?? [];
-  const all = [...own, ...own, ...house];
+  let all = [...own, ...own, ...house];
+  if (!n && all.some((l) => !l.includes('{n}'))) all = all.filter((l) => !l.includes('{n}'));
   if (!all.length) return '';
   return all[Math.floor(rng.next() * all.length)].split('{n}').join(n);
 }
@@ -192,6 +257,7 @@ export const DEALER_CHANCE: Record<DealerMoment, number> = {
   hello: 1, shuffle: 0.8, playerBj: 0.9, dealerBj: 0.7, dealerBust: 0.45, bigWin: 0.9, win: 0.2, lose: 0.15, push: 0.2,
   noMore: 0.3, zero: 0.75, straight: 0.9, repeat: 0.8,
   natural: 0.7, tie: 0.8, pair: 0.9,
+  allin: 0.6, monster: 0.95, split: 0.5, bigPot: 0.45, blinds: 0.75,
 };
 
 /** What a blackjack round meant for the player, as the dealer sees it. */
@@ -261,6 +327,32 @@ export function bacMoment(v: BacCoupView): BacMoment {
   return 'push';
 }
 
+export interface PkHandView {
+  /** Each winner's hand name when it went to a showdown (high half only, for hi-lo games). */
+  winningHands: string[];
+  /** Two or more players shared a contested pot. */
+  split: boolean;
+  /** Chips in the pot at the end, and the big blind, to judge what counts as big. */
+  pot: number;
+  bb: number;
+  /** Who took the biggest share. */
+  winner: string;
+}
+
+/** A pot this many big blinds or more gets a word from the dealer. */
+export const BIG_POT_BB = 60;
+
+const MONSTER = /^(Four [A-Z]|Straight Flush|Royal Flush)/;
+
+/** The one thing a poker dealer would remark on after a hand, with the name to drop in, or null. */
+export function pkMoment(v: PkHandView): { moment: PkMoment; n: string } | null {
+  const monster = v.winningHands.map((h) => h.split(' · ')[0]).find((h) => MONSTER.test(h));
+  if (monster) return { moment: 'monster', n: monster };
+  if (v.split) return { moment: 'split', n: '' };
+  if (v.bb > 0 && v.pot >= v.bb * BIG_POT_BB) return { moment: 'bigPot', n: v.winner };
+  return null;
+}
+
 /**
  * Decides whether the dealer speaks this time. Small talk waits a couple of rounds after the
  * last line; big moments don't. `roll` is a 0..1 random number.
@@ -303,6 +395,14 @@ const WHISPERS: Record<DealerGame, string[]> = {
     'Little secret: the pair bets are pretty to look at and expensive to keep.',
     'Between us: the scoreboard is for show. The shoe doesn’t remember streaks.',
     'Psst. Chasing losses is how the house pays for the chandeliers. Take a breather.',
+  ],
+  poker: [
+    'Psst. Play fewer hands before the flop. Most of them are just expensive ways to fold later.',
+    'Between you and me: position is everything. Play more hands on the button, fewer up front.',
+    'Little secret: the bots who never bluff fold a lot. Steal their blinds.',
+    'Just between us: a call needs the right price. Count the pot before you chase a draw.',
+    'Psst. Chasing losses is how the house pays for the chandeliers. Take a breather.',
+    'Between us: if you can’t spot the weakest player at the table, take a break and come back.',
   ],
 };
 
