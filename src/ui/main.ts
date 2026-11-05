@@ -10,6 +10,7 @@ import { STRUCTURE_NAMES, Structure, VARIANTS, VariantId, describeHolding } from
 import {
   LocalAccountStore, OnlineAuth, Profile, TOURNAMENT_FEE, onlineEnabled, readAnnouncement, buyIn, canAfford, canRefill, cashOut, createProfile, enterTournament,
   finishTournament, prizeFor, recordHand, refill, setTableStack, abandonTournament, cashTally, credit, handTally, mergeTally, runAfter, takeUnlocks, tournamentTally, allCounters,
+  PENTHOUSE, PenthouseBots, penthouseAccess, penthouseSeating, penthouseDoorLine,
 } from '../accounts';
 import { cardHtml, chipsHtml, esc, fmt, isPhone, store, withHero } from './dom';
 import { ONLINE } from '../accounts/config';
@@ -67,6 +68,10 @@ interface Setup {
   sl: SlSetup;
   /** Free table with a coach: hints on every decision, no bank, stats or achievements. */
   practice: boolean;
+  /** Poker downstairs, or the high-stakes game upstairs once the player has the key. */
+  room: 'backroom' | 'penthouse';
+  /** Who plays in the Penthouse. */
+  phBots: PenthouseBots;
 }
 
 interface Prefs {
@@ -88,6 +93,7 @@ const LEGACY_SETUP_KEY = 'backroom-poker-setup';
 const LEGACY_PREFS_KEY = 'backroom-poker-prefs';
 const DEFAULT_SETUP: Setup = {
   game: 'poker', bj: DEFAULT_BJ, rl: DEFAULT_RL, bac: DEFAULT_BAC, vp: DEFAULT_VP, sl: DEFAULT_SL, variant: 'holdem', structures: {}, format: 'cash', opponents: 5, difficulty: 'medium', stackBB: 100, blindSpeed: 'normal', name: 'You', practice: false,
+  room: 'backroom', phBots: 'master',
 };
 const DEFAULT_PREFS: Prefs = { speed: 'normal', autoDeal: false, showOdds: true, fourColor: false, reveal: false, talk: true, dealerTalk: true, sound: true, volume: 0.7 };
 let setup: Setup = { ...DEFAULT_SETUP };
@@ -101,6 +107,8 @@ function loadSettings(p: Profile) {
   prefs = { ...DEFAULT_PREFS, ...(p.settings.prefs as Partial<Prefs> | undefined) };
   if (!VARIANTS[setup.variant]) setup.variant = 'holdem';
   if (!isHouseGame(setup.game)) setup.game = 'poker';
+  if (setup.room !== 'penthouse') setup.room = 'backroom';
+  if (setup.phBots !== 'expert') setup.phBots = 'master';
   setup.bj = { ...DEFAULT_BJ, ...setup.bj };
   setup.rl = { ...DEFAULT_RL, ...setup.rl };
   setup.bac = { ...DEFAULT_BAC, ...setup.bac };
@@ -157,6 +165,19 @@ function renderSetup() {
       .map(([val, label]) => `<button type="button" data-${name}="${val}" aria-pressed="${val === current}" ${disabled(val) ? 'disabled' : ''}>${label}</button>`)
       .join('')}</div>`;
 
+  // The high-stakes game upstairs: the room switch sits at the top of the poker card.
+  const door = penthouseAccess(me);
+  if (setup.room === 'penthouse' && !door.open) setup.room = 'backroom';
+  const upstairs = setup.game === 'poker' && setup.room === 'penthouse';
+  const roomField = `<div class="field room-field">
+            <span class="flabel">Room</span>
+            <div class="seg" role="group">
+              <button type="button" data-room="backroom" aria-pressed="${!upstairs}">Back room</button>
+              <button type="button" data-room="penthouse" aria-pressed="${upstairs}" ${door.open ? '' : 'disabled'}>${door.open ? '' : '<svg class="lock" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z"/></svg>'}Penthouse</button>
+            </div>
+            <span class="hint">${door.open ? `${esc(penthouseDoorLine(door, fmt))} Blinds ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)}, ${fmt(PENTHOUSE.buyIn)} buy-in.` : `Upstairs is invitation only. ${esc(penthouseDoorLine(door, fmt))}`}</span>
+          </div>`;
+
   const oppLabel = setup.difficulty === 'mixed' ? 'mixed' : DIFFICULTY_NAMES[setup.difficulty].toLowerCase();
   const cost = entryCost(setup);
   const affordable = setup.practice || canAfford(me, cost);
@@ -190,13 +211,15 @@ function renderSetup() {
         : setup.game === 'roulette' ? rlSetupCardHtml(setup.rl, me.bank, canRefill(me))
         : setup.game === 'baccarat' ? bacSetupCardHtml(setup.bac, me.bank, canRefill(me))
         : setup.game === 'videopoker' ? vpSetupCardHtml(setup.vp, me.bank, canRefill(me))
-        : setup.game === 'slots' ? slSetupCardHtml(setup.sl, me.bank, canRefill(me)) : `<aside class="panel setup-card" aria-label="Your table">
+        : setup.game === 'slots' ? slSetupCardHtml(setup.sl, me.bank, canRefill(me))
+        : upstairs ? penthouseCardHtml(me, roomField) : `<aside class="panel setup-card" aria-label="Your table">
         <div class="ticket">
           <span class="eyebrow">${setup.practice ? 'Your practice table' : 'Your table'}</span>
           <b>${STRUCTURE_NAMES[struct]} ${v.name}</b>
           <span>${FORMAT_NAMES[setup.format]} · you against ${setup.opponents} ${oppLabel} bot${setup.opponents > 1 ? 's' : ''}</span>
         </div>
         <div class="options">
+          ${roomField}
           <div class="field">
             <span class="flabel">Format</span>
             ${seg('format', (Object.keys(FORMAT_NAMES) as Format[]).map((f) => [f, FORMAT_NAMES[f].replace(' tournament', '')]), setup.format)}
@@ -275,6 +298,8 @@ function renderSetup() {
   app.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach((b) => (b.onclick = () => update(() => (setup.difficulty = b.dataset.difficulty as DifficultyChoice))));
   app.querySelectorAll<HTMLButtonElement>('[data-stack]').forEach((b) => (b.onclick = () => update(() => (setup.stackBB = Number(b.dataset.stack)))));
   app.querySelectorAll<HTMLButtonElement>('[data-blinds]').forEach((b) => (b.onclick = () => update(() => (setup.blindSpeed = b.dataset.blinds as BlindSpeed))));
+  app.querySelectorAll<HTMLButtonElement>('[data-room]').forEach((b) => (b.onclick = () => update(() => (setup.room = b.dataset.room === 'penthouse' ? 'penthouse' : 'backroom'))));
+  app.querySelectorAll<HTMLButtonElement>('[data-phbots]').forEach((b) => (b.onclick = () => update(() => (setup.phBots = b.dataset.phbots === 'expert' ? 'expert' : 'master'))));
   app.querySelectorAll<HTMLButtonElement>('[data-practice]').forEach((b) => (b.onclick = () => update(() => (setup.practice = b.dataset.practice === 'on'))));
   const opp = document.getElementById('opp') as HTMLInputElement | null;
   if (opp) {
@@ -350,9 +375,63 @@ function renderSetup() {
   };
 }
 
+/** The poker card when the player has taken the elevator: one game, high stakes, the sharpest bots. */
+function penthouseCardHtml(me: Profile, roomField: string): string {
+  const cost = PENTHOUSE.buyIn;
+  const affordable = canAfford(me, cost);
+  // Regulars with something to settle are the first ones seated upstairs.
+  const guests = penthouseSeating(PERSONAS.filter((p) => moodOf(me.rivals[p.name]).level !== 0), me.rivals).slice(0, PENTHOUSE.opponents);
+  const guestsHtml = guests.length
+    ? `<ul class="ph-guests">${guests.map((g) => `<li><b>${esc(g.name)}</b><span>${esc(moodOf(me.rivals[g.name]).label ?? '')}</span></li>`).join('')}</ul>`
+    : '<span class="hint">Five of the regulars, in their best clothes. Anyone holding a grudge against you gets a seat first.</span>';
+  const bots = (['expert', 'master'] as PenthouseBots[]).map((d) => [d, DIFFICULTY_NAMES[d]] as [PenthouseBots, string]);
+  return `<aside class="panel setup-card penthouse-card" aria-label="${esc(PENTHOUSE.name)}">
+        <div class="ticket">
+          <span class="eyebrow">Upstairs · invitation only</span>
+          <b>${esc(PENTHOUSE.name)}</b>
+          <span>No-Limit Hold'em · blinds ${fmt(PENTHOUSE.bigBlind / 2)}/${fmt(PENTHOUSE.bigBlind)} · six handed</span>
+        </div>
+        <div class="options">
+          ${roomField}
+          <div class="field">
+            <span class="flabel">Opponents</span>
+            <div class="seg" role="group">${bots.map(([d, label]) => `<button type="button" data-phbots="${d}" aria-pressed="${setup.phBots === d}">${label}</button>`).join('')}</div>
+            <span class="hint">${setup.phBots === 'master' ? 'Master bots: trained on millions of hands of No-Limit Hold\'em.' : 'Expert bots: they read your habits and adjust.'}</span>
+          </div>
+          <div class="field">
+            <span class="flabel">Waiting upstairs</span>
+            ${guestsHtml}
+          </div>
+          <div class="field">
+            <span class="flabel">House rules</span>
+            <ul class="ph-rules">
+              <li>Buy in for ${fmt(cost)}, which is ${PENTHOUSE.stackBB} big blinds. A rebuy costs the same.</li>
+              <li>No practice mode and no coach up here.</li>
+              <li>Your stack goes back to your bank when you leave the table.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="deal-box">
+          <span class="${affordable ? 'cost' : 'cost short'}">${affordable ? `Buy-in <b>${fmt(cost)}</b> from your bank of ${fmt(me.bank)}` : `The buy-in is ${fmt(cost)} and your bank has ${fmt(me.bank)}.`}</span>
+          <button type="button" class="btn btn-primary btn-lg ph-deal" id="deal" ${affordable ? '' : 'disabled'}>Take the elevator</button>
+        </div>
+      </aside>`;
+}
+
 /** Chips a game takes from the bank: the cash buy-in, or the tournament entry fee. */
 function entryCost(s: Setup): number {
+  if (s.room === 'penthouse') return PENTHOUSE.buyIn;
   return s.format === 'cash' ? s.stackBB * BIG_BLIND : TOURNAMENT_FEE;
+}
+
+const bigBlindFor = (s: Setup): number => (s.room === 'penthouse' ? PENTHOUSE.bigBlind : BIG_BLIND);
+
+/** The Penthouse plays one game: No-Limit Hold'em cash, six handed, 100 big blinds, no coach. */
+function penthouseSetup(s: Setup): Setup {
+  return {
+    ...s, game: 'poker', room: 'penthouse', variant: 'holdem', structures: { ...s.structures, holdem: 'NL' }, format: 'cash',
+    opponents: PENTHOUSE.opponents, difficulty: s.phBots, stackBB: PENTHOUSE.stackBB, practice: false,
+  };
 }
 
 function difficultyHint(d: DifficultyChoice): string {
@@ -421,11 +500,16 @@ class Game implements DevGame {
   private grudgeBots = new Map<string, Bot>();
   botDelay: number | null = null;
 
-  constructor(s: Setup) {
+  constructor(chosen: Setup) {
+    const penthouse = chosen.room === 'penthouse' && chosen.game === 'poker';
+    const s = penthouse ? penthouseSetup(chosen) : chosen;
     this.setup = s;
+    this.penthouse = penthouse;
     const v = VARIANTS[s.variant];
     const rng = createRng();
-    const regulars = shuffle([...PERSONAS], rng).filter((p) => p.name.toLowerCase() !== (s.name || 'You').toLowerCase());
+    const everyone = shuffle([...PERSONAS], rng).filter((p) => p.name.toLowerCase() !== (s.name || 'You').toLowerCase());
+    // Upstairs, the regulars with a score to settle get the first seats.
+    const regulars = penthouse ? penthouseSeating(everyone, this.profile.rivals) : everyone;
     const opponents = s.format === 'headsup' ? 1 : Math.min(s.opponents, v.maxPlayers - 1);
     const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rng.next() * xs.length)];
     const seats: SeatConfig[] = [{ name: s.name || 'You', isHuman: true }];
@@ -436,16 +520,19 @@ class Game implements DevGame {
     }
     this.table = new Table({
       variant: s.variant,
-      structure: structureFor(s.variant),
+      structure: penthouse ? 'NL' : structureFor(s.variant),
       format: s.format,
-      startingStack: s.stackBB * BIG_BLIND,
-      bigBlind: BIG_BLIND,
+      startingStack: s.stackBB * bigBlindFor(s),
+      bigBlind: bigBlindFor(s),
       handsPerLevel: HANDS_PER_LEVEL[s.blindSpeed],
       seats,
     });
     for (const seat of this.table.seats) if (!seat.isHuman) this.bots.set(seat.id, new Bot(seat.difficulty!, seat.style));
     if (s.practice) this.coach = new Bot('hard');
   }
+
+  /** The high-stakes game upstairs. */
+  readonly penthouse: boolean;
 
   /** Practice tables play for free chips and leave the player's record alone. */
   get practice(): boolean {
@@ -460,6 +547,8 @@ class Game implements DevGame {
   /** Pays the buy-in or entry fee and deals the first hand. False if the bank can't cover it. */
   start(): boolean {
     const p = this.profile;
+    // The door is checked again here, not just in the lobby.
+    if (this.penthouse && !penthouseAccess(p).open) return false;
     const paid = this.practice || (this.table.isTournament ? enterTournament(p) : buyIn(p, this.table.config.startingStack));
     if (!paid) return false;
     savePlayer();
@@ -478,7 +567,7 @@ class Game implements DevGame {
     if (this.table.isTournament) abandonTournament(this.profile);
     else {
       const net = cashOut(this.profile, this.myStack());
-      if (!this.tainted) credit(this.profile, cashTally(net, BIG_BLIND));
+      if (!this.tainted) credit(this.profile, cashTally(net, this.table.config.bigBlind, this.penthouse));
     }
     announce(takeUnlocks(this.profile, serverAwards()));
     savePlayer();
@@ -498,7 +587,7 @@ class Game implements DevGame {
     const p = this.profile;
     const hi = this.humanIndex;
     if (hi >= 0) {
-      const where = this.practice ? 'Practice' : FORMAT_NAMES[this.table.config.format];
+      const where = this.practice ? 'Practice' : this.penthouse ? PENTHOUSE.name : FORMAT_NAMES[this.table.config.format];
       const saved = recordHistory(sourceOfHand(hand, hi), hi, { where, number: this.table.handNumber });
       saveHand(p.id, saved);
       this.lastSaved = saved?.id ?? null;
@@ -512,7 +601,7 @@ class Game implements DevGame {
       if (!this.tainted) {
         const run = runAfter(p.achievements.run, hand, hi);
         p.achievements.run = run;
-        credit(p, mergeTally(handTally(hand, hi), { sum: {}, max: { bestRun: run } }));
+        credit(p, mergeTally(handTally(hand, hi), { sum: this.penthouse ? { 'ph.hands': 1 } : {}, max: { bestRun: run } }));
       }
     }
     if (!this.table.isTournament) setTableStack(p, this.humanSeat.stack);
@@ -871,10 +960,10 @@ class Game implements DevGame {
 
     const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
     app.innerHTML = `
-    <div class="game ${prefs.fourColor ? 'four-color' : ''} ${this.logOpen ? 'log-open' : ''}">
+    <div class="game ${this.penthouse ? 'penthouse' : ''} ${prefs.fourColor ? 'four-color' : ''} ${this.logOpen ? 'log-open' : ''}">
       <header class="topbar">
         <div class="tb-game">
-          <span class="title">${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>
+          <span class="title">${this.penthouse ? `<em class="ph-mark">${PENTHOUSE.name}</em><span class="ph-rest"> · ${STRUCTURE_NAMES[hand.structure]} ${v.name}</span>` : `${STRUCTURE_NAMES[hand.structure]} ${v.name}`}</span>
           <span class="chip-info">${stakes} · Hand <b>${t.handNumber}</b>${level}${this.practice ? ' · <b class="practice-flag">Practice</b>' : ''}${devReveal ? ' · <button type="button" class="dev-flag reveal-flag" id="reveal-off" title="Turned on with the console\'s reveal. Tap to turn it off.">Cards up ✕</button>' : ''}${this.paused ? ' · <b class="dev-flag">Paused</b>' : ''}${this.autopilot ? ' · <b class="dev-flag">Autopilot</b>' : ''}</span>
         </div>
         <div class="tb-actions">
@@ -1248,7 +1337,7 @@ class Game implements DevGame {
     on('confirm-leave', () => renderSetup());
     on('again', () => {
       this.stop();
-      const next = new Game(this.setup);
+      const next = new Game(this.penthouse ? { ...this.setup, room: 'penthouse' } : this.setup);
       if (!next.start()) return renderSetup();
       game = next;
     });

@@ -2951,3 +2951,37 @@ label.btn.busy { opacity: .55; pointer-events: none; }
 .rival.g2 .rv-mood, .rival.g3 .rv-mood { color: #f0a0b0; }
 .rival.g3 { border-color: #e95a78; background: rgba(233, 90, 120, .08); }
 .rival.gm .rv-mood { color: var(--good); }
+
+/* ---- The Penthouse: the high-stakes game upstairs. Ink-black felt, champagne-gold trim,
+   black lacquer for the rail, whatever felt the player picked downstairs. ---- */
+.penthouse-card, .game.penthouse {
+  --felt-hi: #2a2740; --felt: #18162a; --felt-deep: #07060d; --felt-line: rgba(240, 210, 140, .42);
+  --leather: #08080b; --leather-hi: #24232b; --wood: #8c6a2c; --wood-hi: #e9c979;
+}
+.penthouse-card { border-color: rgba(233, 201, 121, .45); }
+.penthouse-card .ticket {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 22px, rgba(233, 201, 121, .07) 22px 23px),
+    radial-gradient(ellipse 90% 120% at 30% 0%, rgba(255, 236, 190, .12), transparent 60%),
+    linear-gradient(160deg, var(--felt-hi), var(--felt) 55%, var(--felt-deep));
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, transparent, #e9c979 20%, #e9c979 80%, transparent) 1;
+}
+.penthouse-card .ticket b { color: #f3dc9f; letter-spacing: .02em; }
+.ph-guests, .ph-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.ph-guests li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(233, 201, 121, .16);
+}
+.ph-guests li span { font-family: var(--label); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #f0a0b0; }
+.ph-rules li { position: relative; padding-left: 16px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.ph-rules li::before { content: '◆'; position: absolute; left: 0; top: 1px; font-size: 9px; color: #e9c979; }
+.room-field .seg svg.lock { width: 13px; height: 13px; margin-right: 5px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ph-deal { letter-spacing: .04em; }
+.game.penthouse .felt::after { border-width: 2px; box-shadow: 0 0 0 5px rgba(0, 0, 0, .18), 0 0 0 6px rgba(240, 210, 140, .16); }
+.game.penthouse .rail::before { border-style: solid; border-color: rgba(233, 201, 121, .28); }
+.topbar .ph-mark { font-style: normal; color: #f3dc9f; }
+@media (max-width: 720px) {
+  /* On a phone the room's name is the title; the game is always No-Limit Hold'em. */
+  .topbar .title .ph-rest { display: none; }
+}

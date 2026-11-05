@@ -35,7 +35,8 @@ src/
   accounts/    profiles behind AccountStore (local or Supabase), bank rules, stats,
                achievements, bonus, weekly challenges, leaderboard, friends, gifts, avatars,
                crash reports, notifications (push.ts),
-               seasons.ts (seasonal events: dates, free looks, the event achievement)
+               seasons.ts (seasonal events: dates, free looks, the event achievement),
+               penthouse.ts (the high-stakes room: stakes and who gets in)
   online/      table server (server.ts, blackjack.ts, bundled into the Edge Function by
                edge.ts), client.ts, protocol, table chat, push.ts + webpush.ts (notifications)
   ui/          the poker table and app shell: main.ts (startup + poker table), index.html,
@@ -79,7 +80,7 @@ Run each once in the Supabase SQL editor. Order matters where noted.
 | `leaderboard.sql` | daily bonus and leaderboard (re-run after friends/gifts changes) | yes |
 | `admin.sql` | admin accounts (put my email in the last lines) | yes |
 | `friends.sql` | friends, online status, invites | yes |
-| `banks.sql` | limits on how fast a bank can grow | yes |
+| `banks.sql` | limits on how fast a bank can grow (re-run for Penthouse-sized pots) | re-run |
 | `security.sql` | two-step sign-in, for projects made before it | yes |
 | `gifts.sql` | chip gifts | yes |
 | `avatars.sql` | uploaded pictures | yes |

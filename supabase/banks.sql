@@ -12,7 +12,9 @@
 --     sending its own number, so an honest big win still arrives as the allowance refills
 --   * a refill (bank under 1,000 topped up to 10,000) is free once an hour
 --   * a daily bonus collected through claim_daily_bonus() adds its chips to the allowance
---   * the biggest pot can't jump past 50,000 (a full table of 200-big-blind stacks is 36,000)
+--   * the biggest pot can't jump past 50,000 (a full table of 200-big-blind stacks is 36,000).
+--     A player who had the Penthouse buy-in (50,000) before the save can show up to 600,000:
+--     six 100-big-blind stacks at 250/500 is 300,000, and stacks grow over a session
 -- Admins (console edits) and the server's own key aren't limited. Editing a saved player in
 -- the browser can therefore only ever add as much as real winning could.
 
@@ -52,6 +54,9 @@ declare
   after_bank numeric := greatest(0, floor(public.lb_num(new.data -> 'bank')));
   delta numeric;
   before_pot numeric := case when tg_op = 'UPDATE' then public.lb_num(old.data #> '{stats,biggestPot}') else 0 end;
+  -- Chips the player held before this save, in the bank and at a table.
+  before_total numeric := case when tg_op = 'UPDATE' then public.lb_num(old.data -> 'bank') + public.lb_num(old.data #> '{table,stack}') else 0 end;
+  pot_cap numeric;
   capped boolean := false;
 begin
   if coalesce(auth.role(), '') <> 'authenticated' or public.is_admin() then
@@ -80,8 +85,9 @@ begin
   end if;
   new.data := jsonb_set(new.data, '{bank}', to_jsonb(after_bank));
 
-  if public.lb_num(new.data #> '{stats,biggestPot}') > greatest(before_pot, 50000) then
-    new.data := jsonb_set(new.data, '{stats,biggestPot}', to_jsonb(greatest(before_pot, 50000)));
+  pot_cap := greatest(before_pot, case when before_total >= 50000 then 600000 else 50000 end);
+  if public.lb_num(new.data #> '{stats,biggestPot}') > pot_cap then
+    new.data := jsonb_set(new.data, '{stats,biggestPot}', to_jsonb(pot_cap));
     capped := true;
   end if;
 
