@@ -484,6 +484,7 @@ export function bjAdmin(state: TableState, cmd: AdminCommand, now: number, credi
       const i = bj.inRound.indexOf(spot.id);
       if (round && !round.isComplete && i >= 0) {
         round.seats[i].stack = n;
+        round.rigged = true;
         save(state, shoe, round, now, credits);
       }
       return `${spot.name} now has ${n} chips.`;

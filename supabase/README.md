@@ -90,6 +90,25 @@ to list every table and `table CODE` to work on one you aren't sitting at. `kick
 `close` remove a person or end a table. The table server looks the account up in the
 `admins` table itself before doing any of it, and every change goes in `admin_log`.
 
+## Moderation
+
+Run [`moderation.sql`](moderation.sql) once in the SQL Editor, after `admin.sql` and `banks.sql`
+(run it again if you add `leaderboard.sql`, `friends.sql`, `gifts.sql` or `challenges.sql` later).
+It does three things:
+
+- **Changes stick.** When the console or dashboard changes a player's bank, name or stats, or
+  deletes a player, the database keeps that change in force until the player's own game picks
+  it up. A game that's open can't save its old copy over it, and a deleted player can't come back.
+  A name set this way stays until it's unlocked.
+- **Suspensions.** The dashboard's **Ban** button suspends an account for some days or until
+  lifted. The player sees why in the lobby. The database refuses their saves, daily bonus, weekly
+  challenges, friend requests, invites and gifts, the table server won't seat them, and their
+  players come off the leaderboard while it lasts. Admins can't be suspended.
+- **Signs of an edited bank.** The **Capped** column in Players counts saves the server cut back
+  for winning faster than real play allows (from `banks.sql`). A high number is worth a look.
+
+Until it's run, the console still works as before and says when a change might not stick.
+
 ## Crash reports
 
 When a player's game hits an error, it sends a short report: the error and where in the code
